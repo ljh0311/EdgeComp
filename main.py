@@ -1,15 +1,17 @@
 # #!/usr/bin/env python3
 
 import cv2
-from matplotlib import pyplot as plt
 import numpy as np
 import pyaudio
 import threading
 import logging
 import platform
 from datetime import datetime
+import io
+import tkinter as tk
+from tkinter import ttk
+import PIL.Image, PIL.ImageTk
 from pathlib import Path
-from scipy import io
 from ultralytics import YOLO
 import torch
 
@@ -27,7 +29,7 @@ logging.basicConfig(
 )
 
 class BabyMonitor:
-    def __init__(self):
+    def __init__(self, camera_width=1280, camera_height=720):
         self.logger = logging.getLogger(__name__)
         self.is_running = False
         
@@ -57,6 +59,69 @@ class BabyMonitor:
         
         self.logger.info(f"Baby Monitor system initialized on {'Raspberry Pi' if IS_RASPBERRY_PI else 'Windows'}")
 
+        self.camera_width = camera_width
+        self.camera_height = camera_height
+
+        # Initialize UI
+        self.setup_ui()
+        
+        # Add UI elements
+        self.status_text = "Monitoring..."
+        self.alert_text = ""
+        self.person_count = 0
+
+    def setup_ui(self):
+        """Setup the UI window and elements"""
+        self.root = tk.Tk()
+        self.root.title("Baby Monitor System")
+        self.root.configure(bg='#2C3E50')
+        
+        # Set minimum window size and make it full screen by default
+        self.root.minsize(1280, 720)
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        self.root.geometry(f"{screen_width}x{screen_height}")
+        
+        # Create main container
+        self.main_container = ttk.Frame(self.root)
+        self.main_container.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        # Video frame
+        self.video_label = ttk.Label(self.main_container)
+        self.video_label.pack(pady=5, fill=tk.BOTH, expand=True)
+        
+        # Status frame
+        self.status_frame = ttk.Frame(self.main_container)
+        self.status_frame.pack(fill=tk.X, pady=5)
+        
+        # Status indicators with larger font
+        self.status_label = ttk.Label(self.status_frame, 
+                                    text="Status: Monitoring", 
+                                    font=('Arial', 14))
+        self.status_label.pack(side=tk.LEFT, padx=5)
+        
+        self.person_label = ttk.Label(self.status_frame, 
+                                    text="People in room: 0", 
+                                    font=('Arial', 14))
+        self.person_label.pack(side=tk.RIGHT, padx=5)
+        
+        # Alert frame at the bottom
+        self.alert_frame = ttk.Frame(self.main_container, style='Alert.TFrame')
+        self.alert_frame.pack(fill=tk.X, pady=5)
+        
+        self.alert_label = ttk.Label(self.alert_frame, 
+                                   text="", 
+                                   font=('Arial', 12, 'bold'), 
+                                   foreground='red')
+        self.alert_label.pack(pady=5)
+        
+        # Style configuration
+        style = ttk.Style()
+        style.configure('Alert.TFrame', background='#FFE5E5')
+        
+        # Configure window close handler
+        self.root.protocol("WM_DELETE_WINDOW", self.stop)
+
     def initialize_camera(self):
         """Initialize the camera with appropriate settings."""
         try:
@@ -74,16 +139,20 @@ class BabyMonitor:
             else:
                 # Windows/laptop camera setup
                 self.camera = cv2.VideoCapture(0)
-                # Get display resolution
-                screen = cv2.getWindowRect(0)[2:4]  # Gets width and height of primary display
-                # Set default size to 2/3 of display width while maintaining 16:9 aspect ratio
-                default_width = int(screen[0] * 2/3)
-                default_height = int(default_width * 9/16)
+                
+                # Set default resolution (16:9 aspect ratio)
+                default_width = 1280
+                default_height = 720
                 
                 # Set initial size but allow resizing
                 self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, default_width)
                 self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, default_height)
-                self.camera.set(cv2.CAP_PROP_SETTINGS, 1)  # Enable camera properties dialog
+                
+                # Try to enable camera properties dialog (may not work on all cameras)
+                try:
+                    self.camera.set(cv2.CAP_PROP_SETTINGS, 1)
+                except:
+                    self.logger.warning("Camera settings dialog not available")
             
             self.logger.info("Camera initialized successfully")
         except Exception as e:
@@ -114,20 +183,21 @@ class BabyMonitor:
 
     def detect_person(self, frame):
         """
-        Detect people and their pose in the frame using YOLO.
-        Returns frame with bounding boxes, pose keypoints, and detected objects.
+        Detect people in the frame using YOLO.
+        Returns frame with bounding boxes, position information and presence information.
         """
         try:
             # Run YOLO detection
             results = self.person_detector(frame, conf=0.5)  # person detection
-            pose_results = self.pose_detector(frame, conf=0.5)  # pose detection
             
             # Process results
+            person_count = 0
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
                     # Filter for person class (class 0 in COCO dataset)
                     if box.cls == 0:  # person class
+                        person_count += 1
                         x1, y1, x2, y2 = box.xyxy[0]  # get box coordinates
                         conf = box.conf[0]  # confidence score
                         
@@ -139,75 +209,35 @@ class BabyMonitor:
                         height = y2 - y1
                         
                         # Determine if person is standing, sitting, or lying down
-                        if height > width:
-                            position = "standing up"
-                        elif abs(height - width) <= min(height, width) * 0.2:
-                            position = "sitting down"
-                        else:
+                        if height > width * 1.5:  # Person is significantly taller than wide
+                            position = "standing"
+                        elif width > height * 1.5:  # Person is significantly wider than tall
                             position = "lying down"
-
+                        else:  # Dimensions are relatively similar
+                            position = "sitting"
+                        
                         # Draw bounding box
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         
                         # Add confidence label with position
-                        label = f'Person ({position}): {conf:.2f}'
+                        label = f'Person {person_count} ({position}): {conf:.2f}'
                         cv2.putText(frame, label, (x1, y1-10), 
                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            # Process pose detection results from YOLOv8 pose estimation
-            for pose in pose_results:
-                # Check if any keypoints were detected in the pose
-                if pose.keypoints is not None:
-                    # Extract the keypoints data for the first detected person
-                    # keypoints format: [x, y, confidence] for each point
-                    keypoints = pose.keypoints.data[0]
-                    
-                    # Define indices for body parts in YOLO pose keypoints array
-                    # Hands consist of wrists (points 9,10) and elbows (points 7,8)
-                    hand_indices = [9, 10]  # wrists - left and right
-                    elbow_indices = [7, 8]  # elbows - left and right
-                    
-                    # Legs consist of ankles (points 15,16) and knees (points 13,14)
-                    ankle_indices = [15, 16]  # ankles - left and right
-                    knee_indices = [13, 14]  # knees - left and right
-                    
-                    # Define colors for visualizing different body parts
-                    HAND_COLOR = (255, 0, 0)  # Blue color for hands
-                    LEG_COLOR = (0, 0, 255)   # Red color for legs
-                    
-                    # Draw hand connections and labels
-                    for wrist, elbow in zip(hand_indices, elbow_indices):
-                        # Only draw if both points have high confidence (>0.5)
-                        if keypoints[wrist][2] > 0.5 and keypoints[elbow][2] > 0.5:
-                            # Convert keypoint coordinates to integers for drawing
-                            wrist_point = tuple(map(int, keypoints[wrist][:2]))
-                            elbow_point = tuple(map(int, keypoints[elbow][:2]))
-                            # Draw line connecting elbow to wrist
-                            cv2.line(frame, wrist_point, elbow_point, HAND_COLOR, 2)
-                            # Draw circle at wrist point
-                            cv2.circle(frame, wrist_point, 4, HAND_COLOR, -1)
-                            # Add "Hand" label near wrist
-                            cv2.putText(frame, "Hand", wrist_point, 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, HAND_COLOR, 2)
-                    
-                    # Draw leg connections and labels
-                    for ankle, knee in zip(ankle_indices, knee_indices):
-                        # Only draw if both points have high confidence (>0.5)
-                        if keypoints[ankle][2] > 0.5 and keypoints[knee][2] > 0.5:
-                            # Convert keypoint coordinates to integers for drawing
-                            ankle_point = tuple(map(int, keypoints[ankle][:2]))
-                            knee_point = tuple(map(int, keypoints[knee][:2]))
-                            # Draw line connecting knee to ankle
-                            cv2.line(frame, ankle_point, knee_point, LEG_COLOR, 2)
-                            # Draw circle at ankle point
-                            cv2.circle(frame, ankle_point, 4, LEG_COLOR, -1)
-                            # Add "Leg" label near ankle
-                            cv2.putText(frame, "Leg", ankle_point, 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, LEG_COLOR, 2)
+                        # Log person detection with position
+                        self.logger.info(f"Person {person_count} detected in {position} position with confidence {conf:.2f}")
+
+            # Display total person count in top-left corner
+            cv2.putText(frame, f'People in room: {person_count}', (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            # Update the person count in the UI
+            self.person_count = person_count
+            
             return frame
             
         except Exception as e:
-            self.logger.error(f"Error in person/pose detection: {str(e)}")
+            self.logger.error(f"Error in person detection: {str(e)}")
             return frame  # Return original frame if detection fails
 
     def detect_baby_position(self, frame):
@@ -223,33 +253,6 @@ class BabyMonitor:
         Analyze audio data to detect and classify baby cries.
         Returns cry type if detected (e.g., hunger, discomfort, tiredness).
         """
-        try:
-            # Create and configure waveform plot
-            plt.figure(figsize=(10, 4))
-            plt.plot(audio_data)
-            plt.title('Audio Waveform')
-            plt.xlabel('Sample')
-            plt.ylabel('Amplitude')
-            plt.grid(True)
-
-            # Convert plot to OpenCV image
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            plt.close()
-            buf.seek(0)
-            
-            # Process image for display
-            img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
-            waveform_img = cv2.imdecode(img_arr, 1)
-            waveform_img = cv2.resize(waveform_img, (640, 240))
-
-            # Update display image thread-safely
-            with self.frame_lock:
-                self.waveform = waveform_img
-
-        except Exception as e:
-            self.logger.error(f"Error plotting audio waveform: {str(e)}")
-            
         # TODO: Implement cry detection and classification
         return None
 
@@ -276,13 +279,39 @@ class BabyMonitor:
             if cry_type:
                 self.logger.info(f"Detected cry type: {cry_type}")
 
+    def update_display(self, frame):
+        """Update the video display"""
+        if frame is not None:
+            # Resize frame to fit the window
+            frame = cv2.resize(frame, (800, 600))
+            
+            # Convert frame to PhotoImage
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = PIL.Image.fromarray(frame)
+            frame = PIL.ImageTk.PhotoImage(image=frame)
+            
+            # Update video label
+            self.video_label.configure(image=frame)
+            self.video_label.image = frame
+            
+            # Update status with current person count
+            self.status_label.configure(text=f"Status: {self.status_text}")
+            self.person_label.configure(text=f"People in room: {self.person_count}")
+            
+            # Update alert if any
+            if self.alert_text:
+                self.alert_label.configure(text=self.alert_text)
+                self.alert_frame.pack(fill=tk.X, pady=5)
+            else:
+                self.alert_frame.pack_forget()
+
     def start(self):
-        """Start the baby monitor system."""
+        """Start the baby monitor system"""
         try:
             self.initialize_camera()
             self.initialize_audio()
             self.is_running = True
-
+            
             # Start processing threads
             video_thread = threading.Thread(target=self.process_video_stream)
             audio_thread = threading.Thread(target=self.process_audio_stream)
@@ -292,25 +321,29 @@ class BabyMonitor:
             
             self.logger.info("Baby Monitor system started")
             
-            # Main loop for displaying results
-            while self.is_running:
-                with self.frame_lock:
-                    if self.frame is not None:
-                        cv2.imshow('Baby Monitor', self.frame)
-                
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    self.stop()
-
-        except KeyboardInterrupt:
-            self.logger.info("Received keyboard interrupt")
-            self.stop()
+            # Start UI update loop
+            self.update_ui()
+            self.root.mainloop()
+            
         except Exception as e:
             self.logger.error(f"Error in main loop: {str(e)}")
             self.stop()
 
+    def update_ui(self):
+        """Update UI elements"""
+        if self.is_running:
+            with self.frame_lock:
+                if self.frame is not None:
+                    self.update_display(self.frame)
+            
+            # Schedule next update
+            self.root.after(30, self.update_ui)
+
     def stop(self):
-        """Stop the baby monitor system and clean up resources."""
+        """Stop the system and close UI"""
         self.is_running = False
+        self.root.quit()
+        self.root.destroy()
         
         if self.camera is not None:
             if IS_RASPBERRY_PI:
@@ -323,7 +356,6 @@ class BabyMonitor:
             self.audio_stream.close()
         
         self.audio.terminate()
-        cv2.destroyAllWindows()
         self.logger.info("Baby Monitor system stopped")
 
 def main():
