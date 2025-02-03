@@ -67,6 +67,20 @@ def install_windows_dependencies():
             return False
     return True
 
+def install_common_dependencies():
+    """Install dependencies common to both platforms"""
+    commands = [
+        ("pip install pillow", "Installing PIL for UI"),
+        ("pip install matplotlib", "Installing matplotlib"),
+        ("pip install numpy", "Installing numpy"),
+        ("pip install matplotlib-backend-agg", "Installing matplotlib backend")
+    ]
+    
+    for command, description in commands:
+        if not run_command(command, description):
+            return False
+    return True
+
 def main():
     print("🔍 Detecting system configuration...")
     is_pi = is_raspberry_pi()
