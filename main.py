@@ -1,6 +1,7 @@
 # #!/usr/bin/env python3
 
 import cv2
+from matplotlib import pyplot as plt
 import numpy as np
 import pyaudio
 import threading
@@ -8,6 +9,7 @@ import logging
 import platform
 from datetime import datetime
 from pathlib import Path
+from scipy import io
 from ultralytics import YOLO
 import torch
 
@@ -72,8 +74,16 @@ class BabyMonitor:
             else:
                 # Windows/laptop camera setup
                 self.camera = cv2.VideoCapture(0)
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                # Get display resolution
+                screen = cv2.getWindowRect(0)[2:4]  # Gets width and height of primary display
+                # Set default size to 2/3 of display width while maintaining 16:9 aspect ratio
+                default_width = int(screen[0] * 2/3)
+                default_height = int(default_width * 9/16)
+                
+                # Set initial size but allow resizing
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, default_width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, default_height)
+                self.camera.set(cv2.CAP_PROP_SETTINGS, 1)  # Enable camera properties dialog
             
             self.logger.info("Camera initialized successfully")
         except Exception as e:
@@ -144,43 +154,56 @@ class BabyMonitor:
                         cv2.putText(frame, label, (x1, y1-10), 
                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            # Process pose detection results
+            # Process pose detection results from YOLOv8 pose estimation
             for pose in pose_results:
+                # Check if any keypoints were detected in the pose
                 if pose.keypoints is not None:
+                    # Extract the keypoints data for the first detected person
+                    # keypoints format: [x, y, confidence] for each point
                     keypoints = pose.keypoints.data[0]
                     
-                    # Draw hands (wrists and elbows)
-                    hand_indices = [9, 10]  # wrists
-                    elbow_indices = [7, 8]  # elbows
+                    # Define indices for body parts in YOLO pose keypoints array
+                    # Hands consist of wrists (points 9,10) and elbows (points 7,8)
+                    hand_indices = [9, 10]  # wrists - left and right
+                    elbow_indices = [7, 8]  # elbows - left and right
                     
-                    # Draw legs (ankles and knees)
-                    ankle_indices = [15, 16]  # ankles
-                    knee_indices = [13, 14]  # knees
+                    # Legs consist of ankles (points 15,16) and knees (points 13,14)
+                    ankle_indices = [15, 16]  # ankles - left and right
+                    knee_indices = [13, 14]  # knees - left and right
                     
-                    # Colors for different body parts
-                    HAND_COLOR = (255, 0, 0)  # Blue
-                    LEG_COLOR = (0, 0, 255)   # Red
+                    # Define colors for visualizing different body parts
+                    HAND_COLOR = (255, 0, 0)  # Blue color for hands
+                    LEG_COLOR = (0, 0, 255)   # Red color for legs
                     
-                    # Draw hands
+                    # Draw hand connections and labels
                     for wrist, elbow in zip(hand_indices, elbow_indices):
+                        # Only draw if both points have high confidence (>0.5)
                         if keypoints[wrist][2] > 0.5 and keypoints[elbow][2] > 0.5:
+                            # Convert keypoint coordinates to integers for drawing
                             wrist_point = tuple(map(int, keypoints[wrist][:2]))
                             elbow_point = tuple(map(int, keypoints[elbow][:2]))
+                            # Draw line connecting elbow to wrist
                             cv2.line(frame, wrist_point, elbow_point, HAND_COLOR, 2)
+                            # Draw circle at wrist point
                             cv2.circle(frame, wrist_point, 4, HAND_COLOR, -1)
+                            # Add "Hand" label near wrist
                             cv2.putText(frame, "Hand", wrist_point, 
                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, HAND_COLOR, 2)
                     
-                    # Draw legs
+                    # Draw leg connections and labels
                     for ankle, knee in zip(ankle_indices, knee_indices):
+                        # Only draw if both points have high confidence (>0.5)
                         if keypoints[ankle][2] > 0.5 and keypoints[knee][2] > 0.5:
+                            # Convert keypoint coordinates to integers for drawing
                             ankle_point = tuple(map(int, keypoints[ankle][:2]))
                             knee_point = tuple(map(int, keypoints[knee][:2]))
+                            # Draw line connecting knee to ankle
                             cv2.line(frame, ankle_point, knee_point, LEG_COLOR, 2)
+                            # Draw circle at ankle point
                             cv2.circle(frame, ankle_point, 4, LEG_COLOR, -1)
+                            # Add "Leg" label near ankle
                             cv2.putText(frame, "Leg", ankle_point, 
                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, LEG_COLOR, 2)
-            
             return frame
             
         except Exception as e:
@@ -200,6 +223,33 @@ class BabyMonitor:
         Analyze audio data to detect and classify baby cries.
         Returns cry type if detected (e.g., hunger, discomfort, tiredness).
         """
+        try:
+            # Create and configure waveform plot
+            plt.figure(figsize=(10, 4))
+            plt.plot(audio_data)
+            plt.title('Audio Waveform')
+            plt.xlabel('Sample')
+            plt.ylabel('Amplitude')
+            plt.grid(True)
+
+            # Convert plot to OpenCV image
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            plt.close()
+            buf.seek(0)
+            
+            # Process image for display
+            img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+            waveform_img = cv2.imdecode(img_arr, 1)
+            waveform_img = cv2.resize(waveform_img, (640, 240))
+
+            # Update display image thread-safely
+            with self.frame_lock:
+                self.waveform = waveform_img
+
+        except Exception as e:
+            self.logger.error(f"Error plotting audio waveform: {str(e)}")
+            
         # TODO: Implement cry detection and classification
         return None
 
