@@ -42,6 +42,10 @@ class MotionDetector:
         try:
             # Motion detection using frame difference
             if self.previous_frame is not None:
+                # Ensure frames are the same size
+                if self.previous_frame.shape != frame.shape:
+                    self.previous_frame = cv2.resize(self.previous_frame, (frame.shape[1], frame.shape[0]))
+                
                 # Convert frames to grayscale for more efficient processing
                 current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 prev_gray = cv2.cvtColor(self.previous_frame, cv2.COLOR_BGR2GRAY)
@@ -109,6 +113,8 @@ class MotionDetector:
             
         except Exception as e:
             self.logger.error(f"Error in motion and fall detection: {str(e)}")
+            # Reset previous frame on error to prevent cascading issues
+            self.previous_frame = frame.copy()
             return frame, False, False
     
     def reset(self):
