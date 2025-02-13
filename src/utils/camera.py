@@ -48,7 +48,6 @@ class Camera:
     def _enumerate_cameras(self):
         """Enumerate all available cameras."""
         self.available_cameras = []
-        used_indices = set()  # Keep track of used indices to prevent duplicates
         
         if self.is_raspberry_pi:
             try:
@@ -63,49 +62,28 @@ class Camera:
             except ImportError:
                 self.logger.warning("PiCamera2 module not found")
         else:
-            # Try each backend
-            for backend in self.available_backends:
-                max_cameras = 5  # Maximum number of cameras to check
-                for i in range(max_cameras):
-                    if i in used_indices:  # Skip if this index was already found
-                        continue
-                        
-                    try:
-                        cap = cv2.VideoCapture(i + backend)
-                        if cap.isOpened():
-                            # Try to get camera name
-                            name = f"Camera {i}"
-                            try:
-                                if backend == cv2.CAP_DSHOW:
-                                    # Try to get the actual camera name on Windows
-                                    cap.set(cv2.CAP_PROP_SETTINGS, 1)
-                                    name = cap.get(cv2.CAP_PROP_BACKEND_NAME)
-                                    if not name:
-                                        name = f"Camera {i}"
-                            except:
-                                pass
-                            
-                            # Get camera resolution
+            # Simple camera enumeration
+            for i in range(5):  # Check first 5 indices
+                try:
+                    cap = cv2.VideoCapture(i)
+                    if cap.isOpened():
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            # Get camera info
                             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                             
-                            # Test if camera actually works by reading a frame
-                            ret, frame = cap.read()
-                            if ret and frame is not None:
-                                self.available_cameras.append({
-                                    'index': i,
-                                    'name': name,
-                                    'backend': backend,
-                                    'resolution': f"{width}x{height}"
-                                })
-                                used_indices.add(i)  # Mark this index as used
-                            
-                            cap.release()
-                    except Exception as e:
-                        self.logger.debug(f"Failed to open camera {i} with backend {backend}: {str(e)}")
-                        continue
+                            self.available_cameras.append({
+                                'index': i,
+                                'name': f"Camera {i}",
+                                'resolution': f"{width}x{height}"
+                            })
+                        cap.release()
+                except Exception as e:
+                    self.logger.debug(f"Failed to check camera {i}: {str(e)}")
+                    continue
         
-        self.logger.info(f"Found {len(self.available_cameras)} unique cameras")
+        self.logger.info(f"Found {len(self.available_cameras)} cameras: {[c['index'] for c in self.available_cameras]}")
         return self.available_cameras
     
     def get_available_cameras(self):
@@ -164,39 +142,50 @@ class Camera:
             self.logger.error("No cameras available")
             return False
         
-        camera_info = self.available_cameras[self.selected_camera_index]
         try:
-            self.logger.info(f"Initializing camera {camera_info['name']}")
-            self.camera = cv2.VideoCapture(camera_info['index'] + camera_info['backend'])
-            
-            # Wait for camera to initialize
-            time.sleep(2)
-            
-            # Test if camera is working
-            for _ in range(5):  # Try reading a few frames
+            # Try direct index first (simpler approach)
+            self.camera = cv2.VideoCapture(self.selected_camera_index)
+            if self.camera.isOpened():
+                # Configure camera settings
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                
+                # Test if camera actually works
                 ret, frame = self.camera.read()
                 if ret and frame is not None:
-                    # Configure camera settings
-                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                    self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
-                    
-                    # Try to enable camera properties dialog
-                    try:
-                        self.camera.set(cv2.CAP_PROP_SETTINGS, 1)
-                    except:
-                        self.logger.warning("Camera settings dialog not available")
-                    
-                    self.logger.info(f"Camera {camera_info['name']} initialized successfully")
+                    self.logger.info(f"Camera initialized successfully with index {self.selected_camera_index}")
                     return True
             
-            # If we couldn't get valid frames
+            # If direct index failed, try with backend
             self.camera.release()
-            self.logger.warning(f"Camera {camera_info['name']} failed to provide valid frames")
-            return False
+            camera_info = self.available_cameras[self.selected_camera_index]
+            backend = camera_info.get('backend', cv2.CAP_ANY)
+            
+            self.logger.info(f"Trying camera {self.selected_camera_index} with backend {backend}")
+            self.camera = cv2.VideoCapture(self.selected_camera_index + backend)
+            
+            if not self.camera.isOpened():
+                self.logger.error("Failed to open camera with backend")
+                return False
+            
+            # Configure camera
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # Test camera
+            ret, frame = self.camera.read()
+            if not ret or frame is None:
+                self.logger.error("Camera opened but failed to provide frames")
+                self.camera.release()
+                return False
+            
+            self.logger.info(f"Camera initialized successfully with backend")
+            return True
             
         except Exception as e:
-            self.logger.error(f"Error initializing camera {camera_info['name']}: {str(e)}")
+            self.logger.error(f"Error initializing camera: {str(e)}")
             if self.camera is not None:
                 self.camera.release()
             return False
