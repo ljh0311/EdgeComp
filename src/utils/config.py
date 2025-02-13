@@ -4,44 +4,63 @@ Configuration Module
 Handles system-wide configuration settings and parameters.
 """
 
+import os
+import platform
+import logging
+
 class Config:
+    # Platform detection
+    IS_RASPBERRY_PI = platform.machine() in ('armv7l', 'aarch64')
+    
+    # Path configurations
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    MODELS_DIR = os.path.join(BASE_DIR, 'models')
+    
     # Camera settings
-    CAMERA_WIDTH = 1280
-    CAMERA_HEIGHT = 720
+    CAMERA_WIDTH = 640
+    CAMERA_HEIGHT = 480
+    CAMERA_FPS = 30 if not IS_RASPBERRY_PI else 15  # Lower FPS for Pi
     
     # Detection settings
     PERSON_DETECTION = {
-        'path': 'yolov8n.pt',      # Default small model
-        'conf': 0.25,              # Confidence threshold
-        'iou': 0.45,               # IOU threshold
-        'device': 'cpu'            # Device to run on ('cpu', 'cuda', etc)
+        'path': 'yolov8n.pt',  # Use YOLOv8 nano model
+        'conf': 0.5,  # Confidence threshold
+        'iou': 0.45,  # NMS IOU threshold
+        'device': 'cpu'  # Use CPU for inference
     }
     
     POSE_DETECTION = {
-        'path': 'yolov8n-pose.pt', # Default pose model
-        'conf': 0.25,              # Confidence threshold
-        'iou': 0.45,               # IOU threshold
-        'device': 'cpu'            # Device to run on
+        'path': os.path.join(MODELS_DIR, 'yolov8n-pose.pt'),
+        'conf': 0.25,
+        'iou': 0.45,
+        'device': 'cpu'
     }
     
     # Motion detection settings
     MOTION_DETECTION = {
-        'motion_threshold': 100,    # Pixel distance for rapid movement (lower = more sensitive)
-        'fall_threshold': 1.5,      # Aspect ratio change for fall detection (lower = more sensitive)
+        'motion_threshold': 100,  # Threshold for motion detection
+        'fall_threshold': 1.5,  # Aspect ratio change threshold for fall detection
+        'frame_history': 5  # Number of frames to keep for motion analysis
     }
     
     # Alert settings
     ALERT = {
-        'duration': 10000,          # Alert duration in milliseconds
-        'max_history': 5,           # Maximum number of alerts to show in history
-        'critical_color': '#ff3333',# Color for critical alerts
-        'warning_color': '#ff9900', # Color for warning alerts
-        'flash_interval': 500,      # Flash interval for critical alerts in milliseconds
-        'dark_theme': {            # Theme settings for alerts
-            'background': '#1a1a1a',
-            'foreground': 'white',
-            'accent': '#333333',
-            'font_family': 'Arial',
+        'max_history': 10,          # Maximum number of alerts to show in history
+        'duration': 8000,           # Time in ms before alert fades (increased from 5000)
+        'critical_color': '#FF3D00', # Material Design Red A400
+        'warning_color': '#FF9100',  # Material Design Orange A400
+        'info_color': '#00B0FF',    # Material Design Light Blue A400
+        'flash_interval': 500,      # Flash interval for critical alerts
+        'critical_frequency': 1000,  # Hz for critical alert sound
+        'warning_frequency': 500,    # Hz for warning alert sound
+        'critical_duration': 500,    # ms for critical alert sound
+        'warning_duration': 200,     # ms for warning alert sound
+        'dark_theme': {
+            'background': '#1E1E1E',    # Dark background
+            'text': '#E0E0E0',          # Light text
+            'accent': '#2D2D2D',        # Slightly lighter than background
+            'accent_text': '#4CAF50',   # Material Design Green 500
+            'foreground': '#FFFFFF'      # White text
         }
     }
     
@@ -49,14 +68,38 @@ class Config:
     UI = {
         'min_width': 800,
         'min_height': 600,
-        'window_scale': 0.8,        # Initial window size as fraction of screen size
+        'window_scale': 0.75,  # Initial window size as fraction of screen
         'dark_theme': {
-            'background': '#1a1a1a',
-            'foreground': 'white',
-            'accent': '#333333',
-            'font_family': 'Arial',
+            'background': '#1E1E1E',  # Darker background for better contrast
+            'text': '#E0E0E0',        # Light gray text for better readability
+            'accent': '#2D2D2D',      # Slightly lighter than background for depth
+            'accent_text': '#4CAF50', # Material green for highlights
+            'alert': '#FF5252'        # Material red for alerts
         }
     }
+    
+    # Performance settings
+    PERFORMANCE = {
+        'frame_skip': 0 if not IS_RASPBERRY_PI else 1,  # Skip frames on Pi for better performance
+        'detection_interval': 1 if not IS_RASPBERRY_PI else 2,  # Seconds between detections
+        'max_fps': 30 if not IS_RASPBERRY_PI else 15
+    }
+    
+    # Logging configuration
+    LOGGING = {
+        'level': logging.INFO,
+        'format': '%(asctime)s [%(levelname)s] %(message)s',
+        'datefmt': '%H:%M:%S',
+        'handlers': [
+            logging.StreamHandler()
+        ]
+    }
+    
+    # Custom filter for YOLO output
+    class YOLOFilter(logging.Filter):
+        def filter(self, record):
+            return ('Speed:' not in record.getMessage() and
+                   not record.getMessage().startswith('0:'))
     
     # Audio settings
     AUDIO = {
@@ -68,11 +111,4 @@ class Config:
         'warning_frequency': 500,   # Hz for warning alerts
         'critical_duration': 500,   # ms for critical alerts
         'warning_duration': 200,    # ms for warning alerts
-    }
-    
-    # Logging settings
-    LOGGING = {
-        'level': 'INFO',
-        'format': '%(asctime)s - %(levelname)s - %(message)s',
-        'filename': 'baby_monitor.log'  # Changed from 'file' to 'filename'
     } 
