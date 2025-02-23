@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        .video-container {
+            position: relative;
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            overflow: hidden;
+            min-height: 480px; /* Minimum height to prevent layout shift */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #videoFeed {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        #videoLoading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+        
+        #videoError {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .status-bar {
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-container {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .alert-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            animation: fadeIn 0.5s;
+        }
+        
+        .alert-warning {
+            background-color: #856404;
+            color: #fff3cd;
+        }
+        
+        .alert-critical {
+            background-color: #721c24;
+            color: #f8d7da;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-online {
+            background-color: #28a745;
+        }
+        
+        .status-offline {
+            background-color: #dc3545;
+        }
+        
+        .status-warning {
+            background-color: #ffc107;
+        }
+        
+        .mobile-warning {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-warning {
+                display: block;
+                margin-bottom: 20px;
+            }
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h1 class="mb-0">
+                    <span class="me-2">👶</span>
+                    Baby Monitor
+                </h1>
+            </div>
+            <div class="col-auto">
+                <button id="shutdownBtn" class="btn btn-danger">
+                    <span class="me-2">⏻</span>
+                    Shutdown System
+                </button>
+            </div>
+        </div>
+        
+        <div class="mobile-warning alert alert-warning">
+            <strong>Note:</strong> For the best monitoring experience, please use a desktop or tablet device.
+        </div>
+        
+        <div class="row">
+            <!-- Video Feed Column -->
+            <div class="col-lg-8 mb-4">
+                <div class="video-container">
+                    <img id="videoFeed" src="" alt="Video Feed" style="display: none;">
+                    <div id="videoLoading">
+                        <div class="spinner"></div>
+                        <p>Connecting to camera...</p>
+                    </div>
+                    <div id="videoError">
+                        <h4>⚠️ Camera Error</h4>
+                        <p id="errorMessage">Unable to connect to camera.</p>
+                        <button class="btn btn-primary" onclick="retryConnection()">
+                            🔄 Retry Connection
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Status & Alerts Column -->
+            <div class="col-lg-4">
+                <!-- Status Bar -->
+                <div class="status-bar mb-4">
+                    <h5 class="mb-3">System Status</h5>
+                    <div class="d-flex flex-column gap-2">
+                        <div>
+                            <span class="status-indicator" id="connectionStatus"></span>
+                            Connection: <span id="connectionText">Connecting...</span>
+                        </div>
+                        <div>
+                            <span class="status-indicator" id="cameraStatus"></span>
+                            Camera: <span id="cameraText">Checking...</span>
+                        </div>
+                        <div>
+                            <span class="status-indicator" id="audioStatus"></span>
+                            Audio: <span id="audioText">Checking...</span>
+                        </div>
+                        <div>
+                            <span>👥</span>
+                            People Detected: <span id="personCount">0</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Alerts -->
+                <div class="alert-section">
+                    <h5 class="mb-3">Alerts</h5>
+                    <div id="alertContainer" class="alert-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        // DOM elements
+        const videoFeed = document.getElementById('videoFeed');
+        const videoLoading = document.getElementById('videoLoading');
+        const videoError = document.getElementById('videoError');
+        const errorMessage = document.getElementById('errorMessage');
+        const alertContainer = document.getElementById('alertContainer');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const connectionText = document.getElementById('connectionText');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const cameraText = document.getElementById('cameraText');
+        const audioStatus = document.getElementById('audioStatus');
+        const audioText = document.getElementById('audioText');
+        const personCount = document.getElementById('personCount');
+
+        // Show loading state
+        videoLoading.style.display = 'block';
+        videoFeed.style.display = 'none';
+        videoError.style.display = 'none';
+
+        // Connect to WebSocket server with retry logic
+        let socket;
+        let retryCount = 0;
+        const maxRetries = 5;
+        const retryDelay = 2000;
+
+        function connectSocket() {
+            try {
+                socket = io({
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    reconnectionAttempts: 5
+                });
+
+                // Handle connection events
+                socket.on('connect', () => {
+                    console.log('Connected to server');
+                    connectionStatus.className = 'status-indicator status-online';
+                    connectionText.textContent = 'Connected';
+                    retryCount = 0;
+                });
+                
+                socket.on('disconnect', () => {
+                    console.log('Disconnected from server');
+                    connectionStatus.className = 'status-indicator status-offline';
+                    connectionText.textContent = 'Disconnected';
+                    showError('Connection lost. Attempting to reconnect...');
+                });
+
+                socket.on('connect_error', (error) => {
+                    console.error('Connection error:', error);
+                    handleConnectionError();
+                });
+
+                // Handle status updates
+                socket.on('status', (data) => {
+                    console.log('Status update:', data);
+                    if (data.camera_error) {
+                        cameraStatus.className = 'status-indicator status-offline';
+                        cameraText.textContent = 'Error';
+                        showError('Camera error detected');
+                    } else {
+                        cameraStatus.className = 'status-indicator status-online';
+                        cameraText.textContent = 'Connected';
+                        hideError();
+                    }
+                    
+                    if (data.has_emotion_detector) {
+                        audioStatus.className = 'status-indicator status-online';
+                        audioText.textContent = 'Active';
+                    } else {
+                        audioStatus.className = 'status-indicator status-warning';
+                        audioText.textContent = 'Disabled';
+                    }
+                });
+                
+                // Handle video frames
+                let frameCount = 0;
+                let lastFrameTime = Date.now();
+                
+                socket.on('frame', (data) => {
+                    frameCount++;
+                    const now = Date.now();
+                    
+                    // Show video feed on first frame
+                    if (frameCount === 1) {
+                        videoLoading.style.display = 'none';
+                        videoFeed.style.display = 'block';
+                    }
+                    
+                    // Update video feed
+                    videoFeed.src = `data:image/jpeg;base64,${data.frame}`;
+                    
+                    // Check frame rate every 30 frames
+                    if (frameCount % 30 === 0) {
+                        const fps = 30000 / (now - lastFrameTime);
+                        console.log(`Current FPS: ${fps.toFixed(1)}`);
+                        lastFrameTime = now;
+                    }
+                });
+                
+                // Handle person count updates
+                socket.on('person_count', (data) => {
+                    personCount.textContent = data.count;
+                });
+                
+                // Handle alerts
+                socket.on('alert', (data) => {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = `alert-item alert-${data.level}`;
+                    alertDiv.innerHTML = `
+                        <strong>${data.level === 'critical' ? '⚠️' : '⚡'}</strong>
+                        ${data.message}
+                    `;
+                    
+                    alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
+                    
+                    // Remove old alerts if there are too many
+                    while (alertContainer.children.length > 10) {
+                        alertContainer.removeChild(alertContainer.lastChild);
+                    }
+                    
+                    // Play alert sound based on level
+                    playAlertSound(data.level);
+                });
+                
+                // Handle camera errors
+                socket.on('camera_error', (data) => {
+                    showError(data.message);
+                });
+
+            } catch (error) {
+                console.error('Error creating socket connection:', error);
+                handleConnectionError();
+            }
+        }
+
+        function handleConnectionError() {
+            retryCount++;
+            if (retryCount < maxRetries) {
+                console.log(`Retrying connection in ${retryDelay}ms (attempt ${retryCount}/${maxRetries})`);
+                setTimeout(connectSocket, retryDelay);
+            } else {
+                showError('Failed to connect to server. Please refresh the page to try again.');
+            }
+        }
+
+        function showError(message) {
+            videoLoading.style.display = 'none';
+            videoFeed.style.display = 'none';
+            videoError.style.display = 'block';
+            errorMessage.textContent = message;
+        }
+
+        function hideError() {
+            videoError.style.display = 'none';
+            if (frameCount === 0) {
+                videoLoading.style.display = 'block';
+            } else {
+                videoFeed.style.display = 'block';
+            }
+        }
+
+        function retryConnection() {
+            videoError.style.display = 'none';
+            videoLoading.style.display = 'block';
+            socket.connect();
+        }
+
+        function playAlertSound(level) {
+            try {
+                const audio = new Audio();
+                audio.src = level === 'critical' ? '/static/critical.mp3' : '/static/warning.mp3';
+                audio.play().catch(error => console.warn('Could not play alert sound:', error));
+            } catch (error) {
+                console.warn('Error playing alert sound:', error);
+            }
+        }
+
+        // Handle shutdown
+        document.getElementById('shutdownBtn').addEventListener('click', async () => {
+            if (confirm('Are you sure you want to shutdown the system?')) {
+                try {
+                    // Show loading state
+                    const btn = document.getElementById('shutdownBtn');
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Shutting down...';
+                    
+                    // Call shutdown endpoint
+                    const response = await fetch('/shutdown', {
+                        method: 'POST'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        // Show success message
+                        const alertDiv = document.createElement('div');
+                        alertDiv.className = 'alert-item alert-warning';
+                        alertDiv.innerHTML = '<strong>⚡</strong> System shutting down...';
+                        alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
+                        
+                        // Disable all interactions
+                        document.body.style.opacity = '0.7';
+                        document.body.style.pointerEvents = 'none';
+                    } else {
+                        throw new Error(data.message);
+                    }
+                } catch (error) {
+                    alert('Failed to shutdown system: ' + error.message);
+                    // Reset button
+                    const btn = document.getElementById('shutdownBtn');
+                    btn.disabled = false;
+                    btn.innerHTML = '<span class="me-2">⏻</span>Shutdown System';
+                }
+            }
+        });
+
+        // Initialize connection
+        let frameCount = 0;
+        connectSocket();
+    </script>
+</body>
+</html> 

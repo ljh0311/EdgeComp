@@ -29,6 +29,7 @@ logs/
 models/*.pt
 models/*.pth
 models/*.onnx
+!models/README.md
 
 # Camera calibration
 *.yaml
@@ -46,4 +47,14 @@ Thumbs.db
 # Project specific
 *.log
 data/
-models/ 
+archive.zip
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.wav
+*.mp3
+
+# Keep only necessary model files
+Model/*
+!Model/README.md 

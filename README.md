@@ -1,6 +1,6 @@
 # Edge Computing Baby Monitor
 
-An intelligent baby monitoring system that combines real-time cry analysis and person detection using edge computing technology.
+An intelligent baby monitoring system that combines real-time cry analysis and person detection using edge computing technology, with a web-based interface for easy monitoring.
 
 ## Current Status
 
@@ -9,126 +9,132 @@ An intelligent baby monitoring system that combines real-time cry analysis and p
 - Person detection using YOLOv8
 - Pose estimation with hand and leg tracking
 - Position detection (standing, sitting, lying down)
-- Basic logging system
+- Web interface with real-time video streaming
 - Cross-platform compatibility (Windows/Raspberry Pi)
+- Basic logging system
 
 ### 🚧 Under Development
 - Baby-specific detection and tracking
 - Cry detection and analysis
 - Audio processing pipeline
 - Night vision implementation
-- User interface
 - Temperature and humidity monitoring
 - Data storage and analysis features
 
-## Overview
+## Project Structure
 
-This project implements a smart baby monitor that helps parents and caregivers by:
-- Detecting and tracking the baby's position in real-time
-- Analyzing baby cries to identify potential causes (hunger, discomfort, tiredness)
-- Monitoring room occupancy through person detection
-- Operating effectively in various lighting conditions, including night time
-- Processing all data locally on the edge device for enhanced privacy
-
-## Features
-
-### Implemented Features
-- **Person Detection**
-  - Real-time person detection using YOLOv8
-  - Position classification (standing/sitting/lying)
-  - Body part tracking (hands and legs)
-  - Confidence score display
-
-### Planned Features
-- **Baby Monitoring**
-  - Baby-specific detection and tracking
-  - Movement pattern analysis
-  - Safety zone monitoring
-
-- **Audio Analysis**
-  - Cry detection and pattern recognition
-  - Classification of different types of cries
-  - Noise filtering
-
-## Hardware Requirements
-
-- Raspberry Pi 4 (Edge Computing Device)
-- High-resolution camera with night vision
-- Sensitive microphone with noise cancellation
-- Power supply units
-- SD card for storage
-- Protective casing
-- Optional: Temperature and humidity sensors
-
-## Software Dependencies
-
-- Python 3.x
-- OpenCV
-- PyAudio
-- Ultralytics (YOLOv8)
-- Torch
-- YOLOv8 Pose Estimation Model
+```
+project/
+├── src/                      # Source code
+│   ├── audio/               # Audio processing modules
+│   ├── detectors/           # Detection algorithms
+│   ├── static/              # Web static files
+│   ├── templates/           # Web templates
+│   ├── ui/                  # UI components
+│   ├── utils/              # Utility functions
+│   ├── main.py             # Core monitoring logic
+│   └── web_app.py          # Flask web application
+├── models/                  # AI model files
+├── run.py                  # Main entry point
+├── requirements.txt        # Python dependencies
+├── requirements.py         # Platform-specific setup
+├── install_pi.sh          # Raspberry Pi installation script
+└── .env                   # Environment configuration
+```
 
 ## Installation
 
-### Automatic Installation
-```bash
-# For Windows
-python requirements.py
+### Prerequisites
+- Python 3.8 or higher
+- Camera device (USB webcam or Raspberry Pi camera)
+- Microphone (for future audio features)
 
-# For Raspberry Pi
-python3 requirements.py
-```
-
-### Manual Installation
-### Windows
+### Windows Installation
 ```bash
 # Create virtual environment
 python -m venv venv
 .\venv\Scripts\activate
 
 # Install dependencies
-pip install ultralytics opencv-python numpy
-pip install pipwin
-pipwin install pyaudio
+python requirements.py
 ```
 
-### Raspberry Pi
+### Raspberry Pi Installation
 ```bash
-# Install system dependencies
+# Run the installation script
+chmod +x install_pi.sh
+./install_pi.sh
+
+# Or manually:
 sudo apt update
 sudo apt install -y python3-picamera2 python3-pyaudio portaudio19-dev
-
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install Python packages
-pip install ultralytics opencv-python numpy pyaudio
+python3 requirements.py
 ```
 
-## Usage
+## Running the Application
 
-1. Clone the repository
-2. Install dependencies as per your platform
-3. Run the main script:
-```bash
-python main.py
-```
+1. Activate the virtual environment:
+   ```bash
+   # Windows
+   .\venv\Scripts\activate
+   
+   # Raspberry Pi
+   source venv/bin/activate
+   ```
 
-## Project Structure
+2. Start the application:
+   ```bash
+   python run.py
+   ```
 
-```
-project/
-├── src/
-│   ├── video_processing/  # Video and detection modules
-│   ├── audio_processing/  # Audio and cry analysis (planned)
-│   ├── models/           # AI model files
-│   └── utils/            # Utility functions
-├── tests/                # Test files
-├── docs/                 # Documentation
-└── README.md
-```
+3. Access the web interface at `http://localhost:5000`
+
+## Configuration
+
+The system can be configured through the following methods:
+
+1. Environment Variables (`.env` file):
+   - `CAMERA_INDEX`: Camera device index (default: 0)
+   - `MODEL_PATH`: Path to YOLOv8 model (default: "yolov8n.pt")
+   - `LOG_LEVEL`: Logging level (default: "INFO")
+
+2. Web Interface Settings:
+   - Detection confidence threshold
+   - Position detection sensitivity
+   - Video quality and frame rate
+   - Alert settings
+
+## Features and Usage
+
+### Video Monitoring
+- Real-time video feed with person detection
+- Position tracking (standing/sitting/lying)
+- Pose estimation with body part tracking
+- Detection confidence display
+
+### Web Interface
+- Live video stream viewing
+- Detection settings adjustment
+- System status monitoring
+- Alert configuration
+
+### Logging
+- System events and detections are logged to `baby_monitor.log`
+- Configurable log levels for debugging
+
+## Troubleshooting
+
+1. Camera Issues:
+   - Check camera connection
+   - Verify camera index in `.env` file
+   - Ensure camera permissions are set
+
+2. Performance Issues:
+   - Lower video resolution in web interface settings
+   - Adjust detection frequency
+   - Check system resource usage
 
 ## Contributing
 
@@ -137,9 +143,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT License - See LICENSE file for details
-
-## Acknowledgments
-
-This project uses research and datasets from:
-- [Infant Cry Audio Corpus](https://www.kaggle.com/datasets/warcoder/infant-cry-audio-corpus)
-- [Cry Classification Research](https://www.kaggle.com/code/warcoder/classifying-infant-cry-type/notebook)

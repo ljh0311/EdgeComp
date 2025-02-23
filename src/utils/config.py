@@ -16,6 +16,17 @@ class Config:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     MODELS_DIR = os.path.join(BASE_DIR, 'models')
     
+    # Emotion detection settings
+    EMOTION_DETECTION = {
+        'model_path': os.path.join(MODELS_DIR, 'hubert-base-ls960_emotion.pt'),
+        'confidence_threshold': 0.5,  # Minimum confidence to consider
+        'critical_threshold': 0.7,    # Threshold for critical emotions
+        'warning_threshold': 0.6,     # Threshold for warning emotions
+        'sampling_rate': 16000,       # Required sampling rate for HuBERT
+        'chunk_size': 16000,          # Audio chunk size (1 second at 16kHz)
+        'device': 'cpu'               # Use CPU by default
+    }
+    
     # Camera settings
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
