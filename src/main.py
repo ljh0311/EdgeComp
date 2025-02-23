@@ -13,11 +13,13 @@ import threading
 import time
 from datetime import datetime
 import PIL.Image, PIL.ImageTk
+import numpy as np
 
 from utils.config import Config
 from utils.camera import Camera
 from detectors.person_detector import PersonDetector
 from detectors.motion_detector import MotionDetector
+from detectors.emotion_detector import EmotionDetector
 from ui.alert_manager import AlertManager
 
 class BabyMonitorApp:
@@ -44,6 +46,19 @@ class BabyMonitorApp:
         self.person_detector = PersonDetector(Config.PERSON_DETECTION)
         self.motion_detector = MotionDetector(Config.MOTION_DETECTION)
         
+        # Try to initialize emotion detector (optional)
+        try:
+            self.emotion_detector = EmotionDetector(Config.EMOTION_DETECTION)
+            self.has_emotion_detector = True
+        except Exception as e:
+            self.logger.warning(f"Emotion detection disabled: {str(e)}")
+            self.has_emotion_detector = False
+        
+        # Initialize audio capture if emotion detection is available
+        if self.has_emotion_detector:
+            self.audio_buffer = []
+            self.setup_audio()
+        
         # Initialize UI
         self.root = tk.Tk()
         self.setup_ui()
@@ -53,6 +68,66 @@ class BabyMonitorApp:
         self.update_clock()
         
         self.logger.info("Baby Monitor application initialized")
+    
+    def setup_audio(self):
+        """Setup audio capture for emotion detection."""
+        try:
+            import pyaudio
+            
+            self.audio = pyaudio.PyAudio()
+            self.stream = self.audio.open(
+                format=pyaudio.paFloat32,
+                channels=1,
+                rate=Config.EMOTION_DETECTION['sampling_rate'],
+                input=True,
+                frames_per_buffer=Config.EMOTION_DETECTION['chunk_size'],
+                stream_callback=self._audio_callback
+            )
+            self.stream.start_stream()
+            self.logger.info("Audio capture initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize audio capture: {str(e)}")
+    
+    def _audio_callback(self, in_data, frame_count, time_info, status):
+        """Handle incoming audio data."""
+        try:
+            # Skip processing if emotion detection is not available
+            if not self.has_emotion_detector:
+                return (in_data, pyaudio.paContinue)
+                
+            # Convert audio data to numpy array
+            audio_data = np.frombuffer(in_data, dtype=np.float32)
+            
+            # Add to buffer
+            self.audio_buffer.append(audio_data)
+            
+            # Keep only last second of audio
+            max_chunks = Config.EMOTION_DETECTION['sampling_rate'] // Config.EMOTION_DETECTION['chunk_size']
+            if len(self.audio_buffer) > max_chunks:
+                self.audio_buffer.pop(0)
+            
+            # Process emotions if we have enough data
+            if len(self.audio_buffer) == max_chunks:
+                # Combine chunks
+                audio_data = np.concatenate(self.audio_buffer)
+                
+                # Detect emotions
+                emotion, confidence = self.emotion_detector.detect(audio_data)
+                
+                if emotion:
+                    # Get alert level
+                    level = self.emotion_detector.get_emotion_level(emotion, confidence)
+                    
+                    if level:
+                        # Show alert in UI thread
+                        message = f"Detected {emotion.lower()} emotion (confidence: {confidence:.2f})"
+                        self.root.after(0, lambda: self.show_alert(message, level))
+            
+        except Exception as e:
+            self.logger.error(f"Error processing audio: {str(e)}")
+        
+        return (in_data, pyaudio.paContinue)
     
     def setup_ui(self):
         """Setup the main UI window."""
@@ -469,6 +544,13 @@ class BabyMonitorApp:
         
         if hasattr(self, 'process_thread'):
             self.process_thread.join()
+        
+        # Stop audio
+        if hasattr(self, 'stream'):
+            self.stream.stop_stream()
+            self.stream.close()
+        if hasattr(self, 'audio'):
+            self.audio.terminate()
         
         self.camera.release()
         self.root.destroy()
