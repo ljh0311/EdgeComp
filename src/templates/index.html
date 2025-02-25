@@ -285,26 +285,61 @@
                 // Handle video frames
                 let frameCount = 0;
                 let lastFrameTime = Date.now();
+                let frameTimeout = null;
                 
                 socket.on('frame', (data) => {
-                    frameCount++;
-                    const now = Date.now();
-                    
-                    // Show video feed on first frame
-                    if (frameCount === 1) {
-                        videoLoading.style.display = 'none';
-                        videoFeed.style.display = 'block';
+                    try {
+                        // Clear any existing frame timeout
+                        if (frameTimeout) {
+                            clearTimeout(frameTimeout);
+                        }
+
+                        frameCount++;
+                        const now = Date.now();
+                        
+                        // Show video feed and hide loading/error states
+                        if (frameCount === 1) {
+                            videoLoading.style.display = 'none';
+                            videoError.style.display = 'none';
+                            videoFeed.style.display = 'block';
+                        }
+                        
+                        // Create a new image to preload the frame
+                        const img = new Image();
+                        img.onload = function() {
+                            videoFeed.src = this.src;
+                        };
+                        img.onerror = function() {
+                            console.error('Error loading frame');
+                        };
+                        img.src = `data:image/jpeg;base64,${data.frame}`;
+                        
+                        // Check frame rate every 30 frames
+                        if (frameCount % 30 === 0) {
+                            const fps = 30000 / (now - lastFrameTime);
+                            console.log(`Current FPS: ${fps.toFixed(1)}`);
+                            lastFrameTime = now;
+                        }
+
+                        // Set timeout to detect frame delivery issues
+                        frameTimeout = setTimeout(() => {
+                            console.warn('No frames received for 5 seconds');
+                            showError('Video feed interrupted. Attempting to reconnect...');
+                            socket.emit('request_reconnect');
+                        }, 5000);
+
+                    } catch (error) {
+                        console.error('Error processing frame:', error);
+                        showError('Error displaying video feed');
                     }
-                    
-                    // Update video feed
-                    videoFeed.src = `data:image/jpeg;base64,${data.frame}`;
-                    
-                    // Check frame rate every 30 frames
-                    if (frameCount % 30 === 0) {
-                        const fps = 30000 / (now - lastFrameTime);
-                        console.log(`Current FPS: ${fps.toFixed(1)}`);
-                        lastFrameTime = now;
-                    }
+                });
+                
+                // Add reconnection handler
+                socket.on('reconnect', () => {
+                    console.log('Reconnected, requesting new video feed');
+                    hideError();
+                    frameCount = 0;
+                    socket.emit('request_video');
                 });
                 
                 // Handle person count updates
