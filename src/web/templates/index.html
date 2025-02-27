@@ -3,400 +3,519 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baby Monitor System</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>Baby Monitor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --bg-primary: #1a1a1a;
-            --bg-secondary: #2d2d2d;
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0a0;
-            --accent-primary: #3498db;
-            --accent-success: #2ecc71;
-            --accent-warning: #f1c40f;
-            --accent-danger: #e74c3c;
-            --card-bg: #2d2d2d;
-            --card-border: #3d3d3d;
-        }
-
         body {
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            font-family: 'Inter', sans-serif;
-            line-height: 1.6;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
         }
-
-        .container-fluid {
-            max-width: 1800px;
-            padding: 2rem;
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
         }
-
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
         }
-
+        
+        .video-section {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .info-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .status-panel, .detection-panel, .alerts-panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
         .video-container {
             position: relative;
             width: 100%;
-            background-color: #000;
-            aspect-ratio: 16/9;
-            border-radius: 12px;
+            background: #000;
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            margin-bottom: 20px;
         }
-
+        
         #videoFeed {
             width: 100%;
-            height: 100%;
-            object-fit: contain;
+            height: auto;
+            display: block;
         }
-
-        .waveform-container {
-            height: 150px;
-            background-color: var(--bg-secondary);
-            border-radius: 12px;
-            padding: 1rem;
-            margin-top: 1.5rem;
-        }
-
-        #waveformCanvas {
-            width: 100%;
-            height: 100%;
-        }
-
-        .controls-section {
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        }
-
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }
-
-        .btn-primary {
-            background-color: var(--accent-primary);
-            border: none;
-        }
-
-        .btn-primary:hover {
-            background-color: #2980b9;
-        }
-
-        .status-indicator {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
-            transition: background-color 0.3s ease;
-        }
-
-        .status-active {
-            background-color: var(--accent-success);
-            box-shadow: 0 0 8px var(--accent-success);
-        }
-
-        .status-inactive {
-            background-color: var(--accent-danger);
-        }
-
-        .status-item {
+        
+        .controls {
             display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 10px;
             align-items: center;
-            padding: 0.5rem 0;
         }
-
-        .alert-container {
-            max-height: 400px;
+        
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #333;
+            color: white;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .status-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .status-icon {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .status-icon.active {
+            color: #28a745;
+        }
+        
+        .status-icon.inactive {
+            color: #dc3545;
+        }
+        
+        .detection-info {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .detection-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .alerts-list {
+            max-height: 300px;
             overflow-y: auto;
-            padding-right: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
-
+        
         .alert-item {
-            padding: 1rem;
-            margin-bottom: 0.75rem;
+            background: #333;
+            padding: 15px;
             border-radius: 8px;
-            background-color: var(--bg-secondary);
-            border-left: 4px solid transparent;
-            animation: fadeIn 0.3s ease;
+            border-left: 4px solid;
         }
-
-        .alert-critical {
-            border-left-color: var(--accent-danger);
+        
+        .alert-item.critical {
+            border-color: #dc3545;
         }
-
-        .alert-warning {
-            border-left-color: var(--accent-warning);
+        
+        .alert-item.warning {
+            border-color: #ffc107;
         }
-
-        .alert-info {
-            border-left-color: var(--accent-primary);
+        
+        .alert-item.info {
+            border-color: #17a2b8;
         }
-
-        .alert-timestamp {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.25rem;
+        
+        .alert-time {
+            font-size: 0.8em;
+            color: #888;
         }
-
-        .emotion-container {
-            margin-top: 1.5rem;
-            padding: 1rem;
-            background-color: var(--bg-secondary);
+        
+        #waveform {
+            width: 100%;
+            height: 60px;
+            background: #333;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            display: none;
+        }
+        
+        #errorMessage {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #dc3545;
+            color: white;
+            padding: 15px;
             border-radius: 8px;
-        }
-
-        .confidence-bar {
-            height: 6px;
-            background-color: var(--bg-primary);
-            border-radius: 3px;
-            margin-top: 0.5rem;
-        }
-
-        .confidence-fill {
-            height: 100%;
-            background-color: var(--accent-primary);
-            border-radius: 3px;
-            transition: width 0.3s ease;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @media (max-width: 768px) {
-            .container-fluid {
-                padding: 1rem;
-            }
-
-            .card {
-                padding: 1rem;
-            }
-
-            .controls-section {
-                grid-template-columns: 1fr;
-            }
+            display: none;
+            z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div class="container-fluid">
-        <div class="row">
-            {% if dev_mode %}
-            <div class="col-lg-8">
-                <div class="card">
-                    <div class="video-container">
-                        <img id="videoFeed" src="" alt="Video Feed">
+    <div class="container">
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <img id="videoFeed" src="" alt="Video Feed">
+                    <div class="placeholder" id="cameraPlaceholder">
+                        <i class="fas fa-video-slash"></i>
+                        <p>Camera is disabled</p>
                     </div>
-                    <div class="waveform-container">
-                        <canvas id="waveformCanvas"></canvas>
+                </div>
+                
+                <div class="controls">
+                    <div class="control-group">
+                        <select id="cameraSelect">
+                            <option value="">Select Camera</option>
+                        </select>
+                        <select id="resolutionSelect">
+                            <option value="">Select Resolution</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <button id="toggleCamera">
+                            <i class="fas fa-video"></i> Toggle Camera
+                        </button>
+                        <button id="toggleAudio">
+                            <i class="fas fa-microphone"></i> Toggle Audio
+                        </button>
                     </div>
                 </div>
             </div>
-            <div class="col-lg-4">
-            {% else %}
-            <div class="col-lg-6 offset-lg-3">
-            {% endif %}
-                <div class="card">
-                    <h5 class="mb-4">Controls</h5>
-                    <div class="controls-section">
-                        <button id="toggleCamera" class="btn btn-primary">
-                            <i class="fas fa-video"></i> Camera Feed
-                        </button>
-                        <button id="toggleAudio" class="btn btn-primary">
-                            <i class="fas fa-microphone"></i> Audio Monitor
-                        </button>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h5 class="mb-3">System Status</h5>
-                    <div class="status-item">
-                        <span class="status-indicator" id="cameraStatus"></span>
-                        Camera
-                    </div>
-                    <div class="status-item">
-                        <span class="status-indicator" id="audioStatus"></span>
-                        Audio
-                    </div>
-                    <div class="status-item">
-                        <span class="status-indicator" id="emotionStatus"></span>
-                        Emotion Detection
-                    </div>
-                    <div class="status-item">
-                        <span class="status-indicator" id="personStatus"></span>
-                        Person Detection
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h5 class="mb-3">Current Emotion</h5>
-                    <div class="emotion-container">
-                        <div id="emotionLabel">No emotion detected</div>
-                        <div class="confidence-bar">
-                            <div id="confidenceFill" class="confidence-fill" style="width: 0%"></div>
+            
+            <div class="info-section">
+                <div class="status-panel">
+                    <h3><i class="fas fa-info-circle"></i> System Status</h3>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <i class="fas fa-video status-icon" id="cameraIcon"></i>
+                            <div>Camera</div>
+                            <div id="cameraStatus">Disabled</div>
                         </div>
-                        <div id="confidenceText" class="mt-2 text-secondary">Confidence: 0%</div>
+                        <div class="status-item">
+                            <i class="fas fa-microphone status-icon" id="audioIcon"></i>
+                            <div>Audio</div>
+                            <div id="audioStatus">Disabled</div>
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-running status-icon" id="motionIcon"></i>
+                            <div>Motion</div>
+                            <div id="motionStatus">No Motion</div>
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-smile status-icon" id="emotionIcon"></i>
+                            <div>Emotion</div>
+                            <div id="emotionStatus">None</div>
+                        </div>
                     </div>
                 </div>
-
-                <div class="card">
-                    <h5 class="mb-3">Alerts</h5>
-                    <div id="alertContainer" class="alert-container">
+                
+                <div class="detection-panel">
+                    <h3><i class="fas fa-user-check"></i> Detection Results</h3>
+                    <div class="detection-info">
+                        <div class="detection-item">
+                            <span>People Detected:</span>
+                            <span id="peopleCount">0</span>
+                        </div>
+                        <div class="detection-item">
+                            <span>Current Sound:</span>
+                            <span id="soundType">None</span>
+                        </div>
+                        <div class="detection-item">
+                            <span>Emotion Detected:</span>
+                            <span id="emotionType">None</span>
+                        </div>
+                    </div>
+                    <canvas id="waveform"></canvas>
+                </div>
+                
+                <div class="alerts-panel">
+                    <h3><i class="fas fa-bell"></i> Recent Alerts</h3>
+                    <div id="alertsList" class="alerts-list">
                         <!-- Alerts will be added here -->
                     </div>
                 </div>
             </div>
         </div>
     </div>
+    
+    <div id="errorMessage"></div>
 
     <script>
         const socket = io();
-        let alertCount = 0;
-        const maxAlerts = 50;
-        const devMode = {{ 'true' if dev_mode else 'false' }};
-
-        {% if dev_mode %}
-        // Initialize waveform visualization
-        const waveformCanvas = document.getElementById('waveformCanvas');
+        const videoFeed = document.getElementById('videoFeed');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const toggleCamera = document.getElementById('toggleCamera');
+        const toggleAudio = document.getElementById('toggleAudio');
+        const errorMessage = document.getElementById('errorMessage');
+        const waveformCanvas = document.getElementById('waveform');
         const waveformCtx = waveformCanvas.getContext('2d');
-        
-        function resizeCanvas() {
-            const container = waveformCanvas.parentElement;
-            waveformCanvas.width = container.clientWidth;
-            waveformCanvas.height = container.clientHeight;
-        }
-        
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+        const alertsList = document.getElementById('alertsList');
 
-        // Update video feed
-        socket.on('frame', function(data) {
-            document.getElementById('videoFeed').src = 'data:image/jpeg;base64,' + data.data;
+        let isConnected = false;
+        let isCameraEnabled = false;
+        let isAudioEnabled = false;
+
+        // Socket connection handling
+        socket.on('connect', () => {
+            isConnected = true;
+            updateStatus();
+            fetchCameras();
         });
 
-        // Handle waveform updates
-        socket.on('waveform', function(data) {
-            drawWaveform(data.data);
+        socket.on('disconnect', () => {
+            isConnected = false;
+            updateStatus();
+            showError('Connection lost. Reconnecting...');
         });
 
-        function drawWaveform(data) {
-            const ctx = waveformCtx;
-            const width = waveformCanvas.width;
-            const height = waveformCanvas.height;
-            const centerY = height / 2;
-            
-            ctx.clearRect(0, 0, width, height);
-            ctx.beginPath();
-            ctx.strokeStyle = '#3498db';
-            ctx.lineWidth = 2;
-            
-            const step = width / data.length;
-            
-            ctx.moveTo(0, centerY + (data[0] * centerY));
-            for (let i = 1; i < data.length; i++) {
-                ctx.lineTo(i * step, centerY + (data[i] * centerY));
-            }
-            ctx.stroke();
-        }
-        {% endif %}
-
-        // Handle alerts
-        socket.on('alert', function(data) {
-            const alertContainer = document.getElementById('alertContainer');
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert-item alert-${data.level}`;
-            alertDiv.innerHTML = `
-                <div class="alert-timestamp">${data.timestamp}</div>
-                <div>${data.message}</div>
-            `;
-            alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
-            
-            alertCount++;
-            if (alertCount > maxAlerts) {
-                alertContainer.removeChild(alertContainer.lastChild);
-                alertCount--;
-            }
-
-            // Auto-remove alert after 8 seconds
-            setTimeout(() => {
-                alertDiv.style.opacity = '0';
-                setTimeout(() => alertDiv.remove(), 300);
-            }, 8000);
-        });
-
-        // Handle emotion updates
-        socket.on('emotion', function(data) {
-            const emotionLabel = document.getElementById('emotionLabel');
-            const confidenceFill = document.getElementById('confidenceFill');
-            const confidenceText = document.getElementById('confidenceText');
-            
-            emotionLabel.textContent = `Current Emotion: ${data.emotion}`;
-            confidenceFill.style.width = `${data.confidence * 100}%`;
-            confidenceText.textContent = `Confidence: ${(data.confidence * 100).toFixed(1)}%`;
-        });
-
-        // Handle status updates
-        socket.on('status', function(data) {
-            updateStatus(data);
-        });
-
-        function updateStatus(status) {
-            const indicators = {
-                camera: document.getElementById('cameraStatus'),
-                audio: document.getElementById('audioStatus'),
-                emotion: document.getElementById('emotionStatus'),
-                person: document.getElementById('personStatus')
-            };
-
-            for (const [key, element] of Object.entries(indicators)) {
-                if (status[`${key}_enabled`] !== undefined) {
-                    element.className = `status-indicator ${status[`${key}_enabled`] ? 'status-active' : 'status-inactive'}`;
-                }
-            }
-        }
-
-        // Control buttons
-        document.getElementById('toggleCamera').addEventListener('click', function() {
-            fetch('/control/toggle_camera', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        updateStatus({ camera_enabled: data.camera_enabled });
-                    }
-                });
-        });
-
-        document.getElementById('toggleAudio').addEventListener('click', function() {
-            fetch('/control/toggle_audio', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        updateStatus({ audio_enabled: data.audio_enabled });
-                    }
-                });
-        });
-
-        // Initial status check
-        fetch('/status')
-            .then(response => response.json())
-            .then(data => {
-                if (!data.error) {
-                    updateStatus(data);
+        // Camera handling
+        function fetchCameras() {
+            socket.emit('get_cameras', {}, (response) => {
+                if (response.success) {
+                    populateCameraSelect(response.cameras);
+                } else {
+                    showError('Failed to fetch cameras: ' + response.error);
                 }
             });
+        }
+
+        function populateCameraSelect(cameras) {
+            cameraSelect.innerHTML = '<option value="">Select Camera</option>';
+            cameras.forEach(camera => {
+                const option = document.createElement('option');
+                option.value = camera.id;
+                option.textContent = camera.name;
+                option.dataset.resolutions = JSON.stringify(camera.resolutions);
+                cameraSelect.appendChild(option);
+            });
+        }
+
+        function updateResolutionSelect(resolutions) {
+            resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
+            resolutions.forEach(resolution => {
+                const option = document.createElement('option');
+                option.value = `${resolution.width}x${resolution.height}`;
+                option.textContent = `${resolution.width}x${resolution.height}`;
+                resolutionSelect.appendChild(option);
+            });
+        }
+
+        // Event listeners
+        cameraSelect.addEventListener('change', () => {
+            const selectedOption = cameraSelect.selectedOptions[0];
+            if (selectedOption && selectedOption.dataset.resolutions) {
+                const resolutions = JSON.parse(selectedOption.dataset.resolutions);
+                updateResolutionSelect(resolutions);
+                socket.emit('select_camera', { camera_id: selectedOption.value });
+            }
+        });
+
+        resolutionSelect.addEventListener('change', () => {
+            const [width, height] = resolutionSelect.value.split('x').map(Number);
+            socket.emit('set_resolution', { width, height });
+        });
+
+        toggleCamera.addEventListener('click', () => {
+            socket.emit('toggle_camera');
+        });
+
+        toggleAudio.addEventListener('click', () => {
+            socket.emit('toggle_audio');
+        });
+
+        // Status updates
+        socket.on('status', (data) => {
+            isCameraEnabled = data.camera_enabled;
+            isAudioEnabled = data.audio_enabled;
+            updateStatus();
+            
+            // Update status icons and text
+            updateStatusItem('camera', isCameraEnabled);
+            updateStatusItem('audio', isAudioEnabled);
+            updateStatusItem('motion', data.motion_detected);
+            updateStatusItem('emotion', data.emotion_detected);
+            
+            if (!isCameraEnabled) {
+                videoFeed.style.display = 'none';
+                cameraPlaceholder.style.display = 'block';
+            } else {
+                videoFeed.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+            }
+        });
+
+        // Detection updates
+        socket.on('detection', (data) => {
+            document.getElementById('peopleCount').textContent = data.people_count || 0;
+            if (data.sound_type) {
+                document.getElementById('soundType').textContent = data.sound_type;
+            }
+            if (data.emotion) {
+                document.getElementById('emotionType').textContent = `${data.emotion} (${(data.confidence * 100).toFixed(1)}%)`;
+            }
+        });
+
+        // Frame updates
+        socket.on('frame', (data) => {
+            if (data && data.data) {
+                videoFeed.src = `data:image/jpeg;base64,${data.data}`;
+            }
+        });
+
+        // Alert handling
+        socket.on('alert', (data) => {
+            addAlert(data);
+        });
+
+        function addAlert(alert) {
+            const alertElement = document.createElement('div');
+            alertElement.className = `alert-item ${alert.level}`;
+            alertElement.innerHTML = `
+                <div class="alert-time">${alert.timestamp}</div>
+                <div>${alert.message}</div>
+            `;
+            alertsList.insertBefore(alertElement, alertsList.firstChild);
+            
+            // Limit number of alerts
+            while (alertsList.children.length > 10) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+        }
+
+        // Audio visualization
+        socket.on('audio_data', (data) => {
+            drawWaveform(data.samples);
+        });
+
+        function drawWaveform(samples) {
+            const canvas = waveformCanvas;
+            const ctx = waveformCtx;
+            const width = canvas.width;
+            const height = canvas.height;
+
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 2;
+
+            const step = Math.floor(samples.length / width);
+            const amp = height / 2;
+
+            for (let i = 0; i < width; i++) {
+                const x = i;
+                const y = (samples[i * step] * amp) + (height / 2);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+
+            ctx.stroke();
+        }
+
+        function updateStatusItem(type, isActive) {
+            const icon = document.getElementById(`${type}Icon`);
+            const status = document.getElementById(`${type}Status`);
+            
+            icon.classList.toggle('active', isActive);
+            icon.classList.toggle('inactive', !isActive);
+            
+            switch (type) {
+                case 'camera':
+                    status.textContent = isActive ? 'Active' : 'Disabled';
+                    break;
+                case 'audio':
+                    status.textContent = isActive ? 'Active' : 'Disabled';
+                    break;
+                case 'motion':
+                    status.textContent = isActive ? 'Detected' : 'No Motion';
+                    break;
+                case 'emotion':
+                    status.textContent = isActive ? 'Detected' : 'None';
+                    break;
+            }
+        }
+
+        function updateStatus() {
+            toggleCamera.disabled = !isConnected;
+            toggleAudio.disabled = !isConnected;
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+            }, 5000);
+        }
+
+        // Handle window resize for canvas
+        function resizeCanvas() {
+            waveformCanvas.width = waveformCanvas.offsetWidth;
+            waveformCanvas.height = waveformCanvas.offsetHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
     </script>
 </body>
 </html> 
