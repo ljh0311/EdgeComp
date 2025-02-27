@@ -9,134 +9,143 @@ import numpy as np
 from ultralytics import YOLO
 import logging
 import sys
+import os
+from pathlib import Path
+
 
 class PersonDetector:
-    def __init__(self, model_config):
+    def __init__(self, model_path=None):
         """
         Initialize the person detector.
-        
+
         Args:
-            model_config (dict): Configuration for the YOLO model
+            model_path (str, optional): Path to the YOLO model file. If None, uses default.
         """
         self.logger = logging.getLogger(__name__)
         self.model = None
-        self.model_config = model_config
-        
+
         # Create a null device to suppress YOLO's output
         class NullDevice:
-            def write(self, s): pass
-            def flush(self): pass
-        
+            def write(self, s):
+                pass
+
+            def flush(self):
+                pass
+
         # Store original stdout
         self.original_stdout = sys.stdout
         # Create null device for suppressing output
         self.null_device = NullDevice()
-        
-        self._initialize_model()
-    
-    def _initialize_model(self):
-        """Initialize the YOLO model with configuration."""
+
+        # Use default model path if none provided
+        if model_path is None:
+            model_path = str(Path(__file__).parent.parent / "yolov8n.pt")
+
+        self._initialize_model(model_path)
+
+    def _initialize_model(self, model_path):
+        """Initialize the YOLO model."""
         try:
             # Temporarily redirect stdout to suppress YOLO's output
             sys.stdout = self.null_device
-            
-            # Initialize model with only the path and device
-            self.model = YOLO(self.model_config['path'])
-            # Set the device if specified
-            if 'device' in self.model_config:
-                self.model.to(self.model_config['device'])
-            
+
+            # Initialize model
+            self.model = YOLO(model_path)
+            self.model.to('cpu')  # Use CPU by default
+
             # Restore stdout
             sys.stdout = self.original_stdout
-            
             self.logger.info("Person detection model initialized successfully")
+
         except Exception as e:
-            # Restore stdout in case of error
+            # Restore stdout
             sys.stdout = self.original_stdout
-            self.logger.error(f"Failed to initialize person detection model: {str(e)}")
+            self.logger.error(f"Error initializing person detection model: {str(e)}")
             raise
 
     def detect(self, frame):
         """
-        Detect people in the frame.
-        
+        Detect persons in a frame.
+
         Args:
-            frame: Input frame to process
-            
+            frame (numpy.ndarray): Input frame
+
         Returns:
-            tuple: (annotated_frame, person_count, detections)
+            list: List of detections [x1, y1, x2, y2, conf, cls]
         """
+        if self.model is None:
+            return []
+
         try:
-            # Temporarily redirect stdout
-            sys.stdout = self.null_device
+            # Run detection
+            results = self.model(frame, verbose=False)
             
-            # Run YOLO detection with confidence and IOU thresholds
-            results = self.model(
-                frame,
-                conf=self.model_config['conf'],
-                iou=self.model_config['iou'],
-                verbose=False  # Disable verbose output
-            )
-            
-            # Restore stdout
-            sys.stdout = self.original_stdout
-            
-            person_count = 0
-            detected_objects = []
-            
-            # Process results
-            for result in results:
-                boxes = result.boxes
+            # Filter for person class (class 0 in COCO dataset)
+            detections = []
+            for r in results:
+                boxes = r.boxes
                 for box in boxes:
-                    class_id = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    label = result.names[class_id]
-                    detected_objects.append(f"{label} ({conf:.2f})")
-                    
-                    # Filter for person class (class 0 in COCO dataset)
-                    if class_id == 0:  # person class
-                        person_count += 1
-                        x1, y1, x2, y2 = box.xyxy[0]  # get box coordinates
-                        
-                        # Convert coordinates to integers
-                        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-                        
-                        # Calculate box dimensions
-                        width = x2 - x1
-                        height = y2 - y1
-                        
-                        # Determine if person is standing, sitting, or lying down
-                        if height > width * 1.5:  # Person is significantly taller than wide
-                            position = "standing"
-                        elif width > height * 1.5:  # Person is significantly wider than tall
-                            position = "lying down"
-                        else:  # Dimensions are relatively similar
-                            position = "sitting"
-                        
-                        # Draw bounding box
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        
-                        # Add confidence label with position
-                        label = f'Person {person_count} ({position}): {conf:.2f}'
-                        cv2.putText(frame, label, (x1, y1-10), 
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        
-                        self.logger.debug(f"Person {person_count} detected in {position} position with confidence {conf:.2f}")
+                    if box.cls == 0:  # Person class
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        cls = box.cls[0].cpu().numpy()
+                        detections.append([x1, y1, x2, y2, conf, cls])
+
+            return detections
+
+        except Exception as e:
+            self.logger.error(f"Error during person detection: {str(e)}")
+            return []
+
+    def process_frame(self, frame):
+        """
+        Process a frame and draw detections on it.
+
+        Args:
+            frame (numpy.ndarray): Input frame
+
+        Returns:
+            numpy.ndarray: Frame with detections drawn
+        """
+        if self.model is None:
+            return frame
+
+        try:
+            # Run detection
+            detections = self.detect(frame)
             
-            if detected_objects:
-                self.logger.info(f"Detected objects: {', '.join(detected_objects)}")
-            
-            # Display total person count
-            cv2.putText(frame, f'People in room: {person_count}', (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            
-            return frame, person_count, results[0].boxes if results else None
+            # Draw detections
+            frame_copy = frame.copy()
+            for x1, y1, x2, y2, conf, cls in detections:
+                # Draw bounding box
+                cv2.rectangle(
+                    frame_copy,
+                    (int(x1), int(y1)),
+                    (int(x2), int(y2)),
+                    (0, 255, 0),  # Green color
+                    2
+                )
+                
+                # Draw label
+                label = f"Person {conf:.2f}"
+                cv2.putText(
+                    frame_copy,
+                    label,
+                    (int(x1), int(y1) - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2
+                )
+                
+            return frame_copy
             
         except Exception as e:
-            # Restore stdout in case of error
+            self.logger.error(f"Error processing frame: {str(e)}")
+            return frame
+
+    def __del__(self):
+        """Cleanup when object is deleted."""
+        # Restore stdout
+        if hasattr(self, 'original_stdout'):
             sys.stdout = self.original_stdout
-            self.logger.error(f"Error in person detection: {str(e)}")
-            return frame, 0, None
-        finally:
-            # Always ensure stdout is restored
-            sys.stdout = self.original_stdout 
