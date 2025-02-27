@@ -22,83 +22,142 @@ The Edge Computing Baby Monitor is designed to provide intelligent monitoring ca
 
 - Audio processing and emotion detection
 - Enhanced motion analysis
-- Night vision capabilities
 - Environmental monitoring
 - Multi-camera support
 - Mobile application interface
 
-## System Architecture
+## System Requirements
 
-```
-[Camera/Audio Input] → [Edge Device (RPi/PC)]
-         ↓
-[Processing Layer]
-- Person Detection (YOLOv8)
-- Motion Analysis
-- Audio Processing
-         ↓
-[Communication Layer]
-- Socket.IO
-- Event System
-         ↓
-[Interface Layer]
-- Web Interface (Flask)
-- Alert Management
-```
+### Windows
 
-## Technical Stack
+- Windows 10 or later
+- Python 3.8 or higher
+- Webcam
+- Microphone
+- 4GB RAM minimum (8GB recommended)
+- Intel Core i3/AMD Ryzen 3 or better
 
-- **Edge Processing**: Python, OpenCV, PyTorch
-- **AI Models**: YOLOv8 nano (person detection)
-- **Web Interface**: Flask, Socket.IO, Bootstrap
-- **Video Processing**: OpenCV, V4L2/DirectShow
-- **Development**: Python 3.8+, pip
+### Raspberry Pi 400
+
+- Raspberry Pi OS (32-bit or 64-bit)
+- Python 3.8 or higher
+- Raspberry Pi Camera or USB webcam
+- USB microphone
+- 4GB RAM
+- Active cooling recommended
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.8 or higher
-- Camera device (USB webcam/Raspberry Pi camera)
-- Microphone (for audio features)
-- Edge device (PC/Raspberry Pi)
-
 ### Windows Setup
 
+1. Clone the repository:
+
 ```bash
-# Create virtual environment
+git clone https://github.com/yourusername/edge-computing-baby-monitor.git
+cd edge-computing-baby-monitor
+```
+
+2. Create and activate virtual environment:
+
+```bash
 python -m venv venv
 .\venv\Scripts\activate
-
-# Install dependencies
-python requirements.py
 ```
 
-### Raspberry Pi Setup
+3. Install dependencies:
 
 ```bash
-# Install system dependencies
-sudo apt update
-sudo apt install -y python3-picamera2 python3-pyaudio portaudio19-dev
-
-# Setup Python environment
-python3 -m venv venv
-source venv/bin/activate
-python3 requirements.py
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
+
+4. Download YOLOv8 model:
+
+```bash
+mkdir models
+# Download YOLOv8 nano model to models directory
+curl -L https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -o models/yolov8n.pt
+```
+
+### Raspberry Pi 400 Setup
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/yourusername/edge-computing-baby-monitor.git
+cd edge-computing-baby-monitor
+```
+
+2. Run the installation script:
+
+```bash
+chmod +x install_pi.sh
+./install_pi.sh
+```
+
+The installation script will:
+
+- Install system dependencies
+- Set up the camera module
+- Create Python virtual environment
+- Install optimized Python packages
+- Download required models
+- Configure environment variables
 
 ## Usage
 
-1. Start the application:
+### Running on Windows
+
+1. Activate the virtual environment:
+
+```bash
+.\venv\Scripts\activate
+```
+
+2. Run in production mode (status and alerts only):
 
 ```bash
 python src/main.py
 ```
 
-2. Access the web interface:
+3. Run in developer mode (with video feed and waveform):
+
+```bash
+python src/main.py --dev
+```
+
+### Running on Raspberry Pi 400
+
+1. Activate the virtual environment:
+
+```bash
+source venv/bin/activate
+```
+
+2. Run in production mode:
+
+```bash
+python src/main.py
+```
+
+3. Run in developer mode:
+
+```bash
+python src/main.py --dev
+```
+
+### Accessing the Web Interface
+
+The web interface will be available at:
 
 ```
 http://localhost:5000
+```
+
+For remote access within your local network, use your device's IP address:
+
+```
+http://<device-ip>:5000
 ```
 
 ## Configuration
@@ -106,40 +165,66 @@ http://localhost:5000
 ### Environment Variables
 
 - `CAMERA_INDEX`: Camera device index (default: 0)
-- `USE_CUDA`: Enable CUDA acceleration (default: 0)
+- `USE_CUDA`: Enable CUDA acceleration on Windows (default: 0)
 - `LOG_LEVEL`: Logging level (default: INFO)
 
-### Web Interface Settings
+### Performance Settings
 
-- Detection confidence threshold
-- Frame rate control
-- Alert sensitivity
-- Video quality settings
+#### Windows
 
-## Development
+- Frame rate: 30 FPS
+- Detection interval: 1 second
+- Full visualization enabled
 
-### Project Structure
+#### Raspberry Pi 400
 
-```
-project/
-├── src/
-│   ├── audio/          # Audio processing
-│   ├── detectors/      # Detection models
-│   ├── web/           # Web interface
-│   ├── utils/         # Utilities
-│   └── main.py        # Core system
-├── models/            # AI models
-├── requirements.txt   # Dependencies
-└── README.md         # Documentation
-```
+- Frame rate: 15 FPS
+- Detection interval: 2 seconds
+- Visualization disabled
+- Frame skipping enabled
+- Reduced audio chunk size
+- Limited thread pool
 
-### Contributing
+## Troubleshooting
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+### Windows
+
+1. Camera not detected:
+   - Check camera connection
+   - Try different `CAMERA_INDEX` values
+   - Verify camera works in other applications
+
+2. Performance issues:
+   - Close resource-intensive applications
+   - Reduce resolution in config.py
+   - Disable developer mode
+
+### Raspberry Pi 400
+
+1. Camera issues:
+   - Run `sudo modprobe bcm2835-v4l2`
+   - Check camera connection
+   - Verify camera module is enabled in raspi-config
+
+2. Performance optimization:
+   - Monitor temperature: `vcgencmd measure_temp`
+   - Check CPU usage: `top`
+   - Ensure active cooling
+   - Reduce resolution if needed
+
+3. Audio issues:
+   - Check audio device: `arecord -l`
+   - Test microphone: `arecord -D plughw:1,0 test.wav`
+   - Verify audio permissions
+
+## Support
+
+For issues and support:
+
+1. Check the troubleshooting guide
+2. Review logs in `logs` directory
+3. Open an issue on GitHub
+4. Contact the development team
 
 ## License
 
