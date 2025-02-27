@@ -1,55 +1,70 @@
 # Edge Computing Baby Monitor
 
-An intelligent baby monitoring system that combines real-time cry analysis and person detection using edge computing technology, with a web-based interface for easy monitoring.
+An intelligent baby monitoring system that leverages edge computing technology to provide real-time monitoring capabilities with advanced detection features and privacy-focused design.
 
-## Current Status
+## Overview
+
+The Edge Computing Baby Monitor is designed to provide intelligent monitoring capabilities while processing all data locally on edge devices. It combines computer vision, audio processing, and machine learning to offer comprehensive monitoring features without relying on cloud services.
+
+## Features
 
 ### ✅ Currently Working
-- Real-time video capture from camera (both Windows and Raspberry Pi)
-- Person detection using YOLOv8
-- Pose estimation with hand and leg tracking
-- Position detection (standing, sitting, lying down)
-- Web interface with real-time video streaming
-- Cross-platform compatibility (Windows/Raspberry Pi)
-- Basic logging system
+
+- Real-time video capture and processing (Windows/Raspberry Pi)
+- Person detection using YOLOv8 nano model
+- Motion analysis and fall detection
+- Web-based monitoring interface
+- Real-time alerts and notifications
+- Cross-platform support
+- Resource-optimized processing
 
 ### 🚧 Under Development
-- Baby-specific detection and tracking
-- Cry detection and analysis
-- Audio processing pipeline
-- Night vision implementation
-- Temperature and humidity monitoring
-- Data storage and analysis features
 
-## Project Structure
+- Audio processing and emotion detection
+- Enhanced motion analysis
+- Night vision capabilities
+- Environmental monitoring
+- Multi-camera support
+- Mobile application interface
+
+## System Architecture
 
 ```
-project/
-├── src/                      # Source code
-│   ├── audio/               # Audio processing modules
-│   ├── detectors/           # Detection algorithms
-│   ├── static/              # Web static files
-│   ├── templates/           # Web templates
-│   ├── ui/                  # UI components
-│   ├── utils/              # Utility functions
-│   ├── main.py             # Core monitoring logic
-│   └── web_app.py          # Flask web application
-├── models/                  # AI model files
-├── run.py                  # Main entry point
-├── requirements.txt        # Python dependencies
-├── requirements.py         # Platform-specific setup
-├── install_pi.sh          # Raspberry Pi installation script
-└── .env                   # Environment configuration
+[Camera/Audio Input] → [Edge Device (RPi/PC)]
+         ↓
+[Processing Layer]
+- Person Detection (YOLOv8)
+- Motion Analysis
+- Audio Processing
+         ↓
+[Communication Layer]
+- Socket.IO
+- Event System
+         ↓
+[Interface Layer]
+- Web Interface (Flask)
+- Alert Management
 ```
+
+## Technical Stack
+
+- **Edge Processing**: Python, OpenCV, PyTorch
+- **AI Models**: YOLOv8 nano (person detection)
+- **Web Interface**: Flask, Socket.IO, Bootstrap
+- **Video Processing**: OpenCV, V4L2/DirectShow
+- **Development**: Python 3.8+, pip
 
 ## Installation
 
 ### Prerequisites
-- Python 3.8 or higher
-- Camera device (USB webcam or Raspberry Pi camera)
-- Microphone (for future audio features)
 
-### Windows Installation
+- Python 3.8 or higher
+- Camera device (USB webcam/Raspberry Pi camera)
+- Microphone (for audio features)
+- Edge device (PC/Raspberry Pi)
+
+### Windows Setup
+
 ```bash
 # Create virtual environment
 python -m venv venv
@@ -59,87 +74,79 @@ python -m venv venv
 python requirements.py
 ```
 
-### Raspberry Pi Installation
-```bash
-# Run the installation script
-chmod +x install_pi.sh
-./install_pi.sh
+### Raspberry Pi Setup
 
-# Or manually:
+```bash
+# Install system dependencies
 sudo apt update
 sudo apt install -y python3-picamera2 python3-pyaudio portaudio19-dev
+
+# Setup Python environment
 python3 -m venv venv
 source venv/bin/activate
 python3 requirements.py
 ```
 
-## Running the Application
+## Usage
 
-1. Activate the virtual environment:
-   ```bash
-   # Windows
-   .\venv\Scripts\activate
-   
-   # Raspberry Pi
-   source venv/bin/activate
-   ```
+1. Start the application:
 
-2. Start the application:
-   ```bash
-   python run.py
-   ```
+```bash
+python src/main.py
+```
 
-3. Access the web interface at `http://localhost:5000`
+2. Access the web interface:
+
+```
+http://localhost:5000
+```
 
 ## Configuration
 
-The system can be configured through the following methods:
+### Environment Variables
 
-1. Environment Variables (`.env` file):
-   - `CAMERA_INDEX`: Camera device index (default: 0)
-   - `MODEL_PATH`: Path to YOLOv8 model (default: "yolov8n.pt")
-   - `LOG_LEVEL`: Logging level (default: "INFO")
+- `CAMERA_INDEX`: Camera device index (default: 0)
+- `USE_CUDA`: Enable CUDA acceleration (default: 0)
+- `LOG_LEVEL`: Logging level (default: INFO)
 
-2. Web Interface Settings:
-   - Detection confidence threshold
-   - Position detection sensitivity
-   - Video quality and frame rate
-   - Alert settings
+### Web Interface Settings
 
-## Features and Usage
+- Detection confidence threshold
+- Frame rate control
+- Alert sensitivity
+- Video quality settings
 
-### Video Monitoring
-- Real-time video feed with person detection
-- Position tracking (standing/sitting/lying)
-- Pose estimation with body part tracking
-- Detection confidence display
+## Development
 
-### Web Interface
-- Live video stream viewing
-- Detection settings adjustment
-- System status monitoring
-- Alert configuration
+### Project Structure
 
-### Logging
-- System events and detections are logged to `baby_monitor.log`
-- Configurable log levels for debugging
+```
+project/
+├── src/
+│   ├── audio/          # Audio processing
+│   ├── detectors/      # Detection models
+│   ├── web/           # Web interface
+│   ├── utils/         # Utilities
+│   └── main.py        # Core system
+├── models/            # AI models
+├── requirements.txt   # Dependencies
+└── README.md         # Documentation
+```
 
-## Troubleshooting
+### Contributing
 
-1. Camera Issues:
-   - Check camera connection
-   - Verify camera index in `.env` file
-   - Ensure camera permissions are set
-
-2. Performance Issues:
-   - Lower video resolution in web interface settings
-   - Adjust detection frequency
-   - Check system resource usage
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-MIT License - See LICENSE file for details
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- YOLOv8 by Ultralytics
+- OpenCV community
+- Flask and Socket.IO teams
