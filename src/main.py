@@ -34,6 +34,7 @@ from audio.audio_processor import AudioProcessor
 from emotion.emotion_recognizer import EmotionRecognizer
 from web.web_app import BabyMonitorWeb
 from config import Config
+from detectors.motion_detector import MotionDetector
 
 # Configure logging
 logging.basicConfig(**Config.LOGGING)
@@ -64,11 +65,17 @@ class BabyMonitorSystem:
                 self.camera_status.configure(text="📷  Camera: Error")
             else:
                 self.camera_status.configure(text="📷  Camera: Ready")
+                # Update camera selection UI
+                self.update_camera_list()
+                self.update_resolution_list()
 
             # Initialize person detector
             self.person_detector = PersonDetector(
                 model_path=os.path.join(src_dir, "models", "yolov8n.pt")
             )
+
+            # Initialize motion detector
+            self.motion_detector = MotionDetector(Config.MOTION_DETECTION)
 
             # Initialize web interface with dev_mode
             self.web_app = BabyMonitorWeb(dev_mode=self.dev_mode)
@@ -130,6 +137,26 @@ class BabyMonitorSystem:
         controls_frame = ttk.LabelFrame(right_panel, text="Controls")
         controls_frame.pack(fill=tk.X, pady=(0, 10))
 
+        # Camera selection frame
+        camera_selection_frame = ttk.Frame(controls_frame)
+        camera_selection_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Camera selection combobox
+        ttk.Label(camera_selection_frame, text="Camera:").pack(side=tk.LEFT, padx=(0, 5))
+        self.camera_select = ttk.Combobox(camera_selection_frame, state="readonly", width=15)
+        self.camera_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.camera_select.bind("<<ComboboxSelected>>", self.on_camera_selected)
+
+        # Resolution selection frame
+        resolution_frame = ttk.Frame(controls_frame)
+        resolution_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Resolution selection combobox
+        ttk.Label(resolution_frame, text="Resolution:").pack(side=tk.LEFT, padx=(0, 5))
+        self.resolution_select = ttk.Combobox(resolution_frame, state="readonly", width=15)
+        self.resolution_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.resolution_select.bind("<<ComboboxSelected>>", self.on_resolution_selected)
+
         # Camera toggle button
         self.camera_btn = ttk.Button(
             controls_frame, text="Camera Feed", command=self.toggle_camera
@@ -165,6 +192,9 @@ class BabyMonitorSystem:
 
         # Initialize matplotlib for waveform
         self.setup_waveform()
+
+        # Initialize camera selection
+        self.update_camera_list()
 
     def setup_waveform(self):
         """Setup waveform visualization."""
@@ -312,7 +342,21 @@ class BabyMonitorSystem:
 
                 # Process frame with person detector
                 if hasattr(self, "person_detector"):
-                    processed_frame = self.person_detector.process_frame(frame)
+                    detections = self.person_detector.detect(frame)
+                    
+                    # Process frame with motion detector
+                    if hasattr(self, "motion_detector"):
+                        processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
+                        
+                        # Update web interface with detection results
+                        if hasattr(self, "web_app"):
+                            self.web_app.emit_detection({
+                                'people_count': len(detections),
+                                'rapid_motion': rapid_motion,
+                                'fall_detected': fall_detected
+                            })
+                    else:
+                        processed_frame = frame
                 else:
                     processed_frame = frame
 
@@ -420,6 +464,58 @@ class BabyMonitorSystem:
                 self.waveform_canvas.draw_idle()
             except Exception as e:
                 self.logger.error(f"Error updating waveform: {str(e)}")
+
+    def update_camera_list(self):
+        """Update the camera list in the combobox."""
+        try:
+            camera_list = self.camera.get_camera_list()
+            if camera_list:
+                self.camera_select['values'] = camera_list
+                current_camera = camera_list[self.camera.selected_camera_index]
+                self.camera_select.set(current_camera)
+                self.update_resolution_list(current_camera)
+        except Exception as e:
+            self.logger.error(f"Error updating camera list: {str(e)}")
+
+    def update_resolution_list(self, camera_name=None):
+        """Update the resolution list in the combobox."""
+        try:
+            if camera_name is None:
+                camera_name = self.camera_select.get()
+            resolutions = self.camera.get_camera_resolutions(camera_name)
+            if resolutions:
+                self.resolution_select['values'] = resolutions
+                current_resolution = self.camera.get_current_resolution()
+                self.resolution_select.set(current_resolution)
+        except Exception as e:
+            self.logger.error(f"Error updating resolution list: {str(e)}")
+
+    def on_camera_selected(self, event):
+        """Handle camera selection."""
+        try:
+            selected_camera = self.camera_select.get()
+            if selected_camera:
+                if self.camera.select_camera(selected_camera):
+                    self.camera_status.configure(text="📷  Camera: Ready")
+                    self.update_resolution_list(selected_camera)
+                else:
+                    self.camera_status.configure(text="📷  Camera: Error")
+        except Exception as e:
+            self.logger.error(f"Error selecting camera: {str(e)}")
+            self.camera_status.configure(text="📷  Camera: Error")
+
+    def on_resolution_selected(self, event):
+        """Handle resolution selection."""
+        try:
+            selected_resolution = self.resolution_select.get()
+            if selected_resolution:
+                if self.camera.set_resolution(selected_resolution):
+                    self.camera_status.configure(text="📷  Camera: Ready")
+                else:
+                    self.camera_status.configure(text="📷  Camera: Resolution Error")
+        except Exception as e:
+            self.logger.error(f"Error setting resolution: {str(e)}")
+            self.camera_status.configure(text="📷  Camera: Resolution Error")
 
 
 def main():

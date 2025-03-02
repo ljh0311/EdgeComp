@@ -46,22 +46,44 @@ class WebApp:
             self.emit_status()
 
         @self.socketio.on('get_cameras')
-        def handle_get_cameras():
+        def handle_get_cameras(data=None):
             try:
-                cameras = self.monitor_system.camera.get_available_cameras()
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                
+                cameras = []
+                camera_list = self.monitor_system.camera.get_camera_list()
+                
+                for camera_name in camera_list:
+                    resolutions = self.monitor_system.camera.get_camera_resolutions(camera_name)
+                    cameras.append({
+                        'id': camera_name,
+                        'name': camera_name,
+                        'resolutions': [{'width': int(res.split('x')[0]), 'height': int(res.split('x')[1])} 
+                                      for res in resolutions]
+                    })
+                
                 return {'success': True, 'cameras': cameras}
             except Exception as e:
+                self.logger.error(f"Error getting cameras: {str(e)}")
                 return {'success': False, 'error': str(e)}
 
         @self.socketio.on('select_camera')
         def handle_select_camera(data):
             try:
-                camera_id = int(data.get('camera_id'))
-                success = self.monitor_system.camera.select_camera(camera_id)
-                if success:
-                    self.monitor_system.camera.initialize()
-                return {'success': success}
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                
+                camera_name = data.get('camera_name')
+                if not camera_name:
+                    return {'success': False, 'error': 'No camera name provided'}
+
+                if self.monitor_system.camera.select_camera(camera_name):
+                    return {'success': True, 'message': f'Selected camera: {camera_name}'}
+                else:
+                    return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
             except Exception as e:
+                self.logger.error(f"Error selecting camera: {str(e)}")
                 return {'success': False, 'error': str(e)}
 
         @self.socketio.on('set_resolution')
@@ -132,6 +154,78 @@ class WebApp:
         port = 5000
         self.logger.info(f"Starting web server on {host}:{port}")
         self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False)
+
+    def emit_detection(self, detection_data):
+        """Emit detection results to connected clients."""
+        try:
+            data = {
+                'people_count': detection_data.get('people_count', 0),
+                'timestamp': datetime.now().strftime('%H:%M:%S')
+            }
+            
+            # Update motion status
+            if detection_data.get('rapid_motion'):
+                data['motion_status'] = 'Rapid Motion'
+            elif detection_data.get('people_count', 0) > 0:
+                data['motion_status'] = 'Motion Detected'
+            else:
+                data['motion_status'] = 'No Motion'
+            
+            # Add fall detection status
+            if detection_data.get('fall_detected'):
+                data['fall_detected'] = True
+                # Emit a critical alert for fall detection
+                self.emit_alert('critical', 'Fall detected!')
+            
+            self.socketio.emit('detection', data)
+        except Exception as e:
+            self.logger.error(f"Error emitting detection: {str(e)}")
+
+    def emit_audio_detection(self, sound_type):
+        """Emit audio detection results to connected clients."""
+        try:
+            self.socketio.emit('audio_detection', {
+                'sound_type': sound_type,
+                'timestamp': datetime.now().strftime('%H:%M:%S')
+            })
+        except Exception as e:
+            self.logger.error(f"Error emitting audio detection: {str(e)}")
+
+    def emit_emotion(self, emotion, confidence):
+        """Emit emotion detection results to connected clients."""
+        try:
+            self.socketio.emit('emotion', {
+                'emotion': emotion,
+                'confidence': confidence,
+                'timestamp': datetime.now().strftime('%H:%M:%S')
+            })
+        except Exception as e:
+            self.logger.error(f"Error emitting emotion: {str(e)}")
+
+    def emit_audio_data(self, audio_data):
+        """Emit audio waveform data to connected clients."""
+        try:
+            if audio_data is not None:
+                # Convert to list and normalize
+                data = audio_data.astype(float)
+                data = data / np.abs(data).max() if np.abs(data).max() > 0 else data
+                # Only send a subset of points to reduce bandwidth
+                step = max(1, len(data) // 100)  # Limit to ~100 points
+                data = data[::step]
+                self.socketio.emit('waveform', {'data': data.tolist()})
+        except Exception as e:
+            self.logger.error(f"Error emitting audio data: {str(e)}")
+
+    def emit_alert(self, level, message):
+        """Emit alert to connected clients."""
+        try:
+            self.socketio.emit('alert', {
+                'level': level,
+                'message': message,
+                'timestamp': datetime.now().strftime('%H:%M:%S')
+            })
+        except Exception as e:
+            self.logger.error(f"Error emitting alert: {str(e)}")
 
 
 class BabyMonitorWeb:
@@ -258,37 +352,68 @@ class BabyMonitorWeb:
             self.logger.info("Client disconnected")
 
         @self.socketio.on('get_cameras')
-        def handle_get_cameras():
+        def handle_get_cameras(data=None):
             try:
-                cameras = self.monitor_system.camera.get_available_cameras()
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                
+                cameras = []
+                camera_list = self.monitor_system.camera.get_camera_list()
+                
+                for camera_name in camera_list:
+                    resolutions = self.monitor_system.camera.get_camera_resolutions(camera_name)
+                    cameras.append({
+                        'id': camera_name,
+                        'name': camera_name,
+                        'resolutions': [{'width': int(res.split('x')[0]), 'height': int(res.split('x')[1])} 
+                                      for res in resolutions]
+                    })
+                
                 return {'success': True, 'cameras': cameras}
             except Exception as e:
+                self.logger.error(f"Error getting cameras: {str(e)}")
                 return {'success': False, 'error': str(e)}
 
         @self.socketio.on('select_camera')
         def handle_select_camera(data):
             try:
-                camera_id = int(data.get('camera_id'))
-                success = self.monitor_system.camera.select_camera(camera_id)
-                if success:
-                    self.monitor_system.camera.initialize()
-                return {'success': success}
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                
+                camera_name = data.get('camera_name')
+                if not camera_name:
+                    return {'success': False, 'error': 'No camera name provided'}
+
+                if self.monitor_system.camera.select_camera(camera_name):
+                    return {'success': True, 'message': f'Selected camera: {camera_name}'}
+                else:
+                    return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
             except Exception as e:
+                self.logger.error(f"Error selecting camera: {str(e)}")
                 return {'success': False, 'error': str(e)}
 
         @self.socketio.on('set_resolution')
         def handle_set_resolution(data):
             try:
-                width = int(data.get('width'))
-                height = int(data.get('height'))
-                success = self.monitor_system.camera.set_resolution(width, height)
-                return {'success': success}
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                width = int(data.get('width', 640))
+                height = int(data.get('height', 480))
+                resolution = f"{width}x{height}"
+                success = self.monitor_system.camera.set_resolution(resolution)
+                return {
+                    'success': success,
+                    'message': f'Resolution set to {resolution}' if success else 'Failed to set resolution'
+                }
             except Exception as e:
+                self.logger.error(f"Error setting resolution: {str(e)}")
                 return {'success': False, 'error': str(e)}
 
         @self.socketio.on('toggle_camera')
         def handle_toggle_camera():
             try:
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
                 self.monitor_system.toggle_camera()
                 self.emit_status()
                 return {'success': True}
@@ -298,6 +423,8 @@ class BabyMonitorWeb:
         @self.socketio.on('toggle_audio')
         def handle_toggle_audio():
             try:
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
                 self.monitor_system.toggle_audio()
                 self.emit_status()
                 return {'success': True}
@@ -367,11 +494,12 @@ class BabyMonitorWeb:
         try:
             if audio_data is not None:
                 # Convert to list and normalize
-                data = audio_data.tolist()
+                data = audio_data.astype(float)
+                data = data / np.abs(data).max() if np.abs(data).max() > 0 else data
                 # Only send a subset of points to reduce bandwidth
                 step = max(1, len(data) // 100)  # Limit to ~100 points
                 data = data[::step]
-                self.socketio.emit('waveform', {'data': data})
+                self.socketio.emit('waveform', {'data': data.tolist()})
         except Exception as e:
             self.logger.error(f"Error emitting audio data: {str(e)}")
 
