@@ -48,7 +48,7 @@ class Config:
 
     # Audio processing settings
     AUDIO_PROCESSING = {
-        "sample_rate": 16000,
+        "sample_rate": 44100,
         "channels": 1,
         "format": "paFloat32",
         "chunk_size": 1024,
@@ -56,17 +56,25 @@ class Config:
         "alert_cooldown": 5.0,  # seconds between alerts
         "model_path": str(MODELS_DIR / "audio_model.pt"),
         "device": "cuda" if os.environ.get("USE_CUDA", "0") == "1" else "cpu",
-        # Emotion detection settings
-        "emotion_detection": {
-            "model_path": str(MODELS_DIR / "hubert-base-ls960_emotion.pt"),
-            "confidence_threshold": 0.7,
-            "critical_threshold": 0.8,  # Threshold for critical alerts
-            "warning_threshold": 0.6,  # Threshold for warning alerts
-            "device": "cuda" if os.environ.get("USE_CUDA", "0") == "1" else "cpu",
-            # Emotion alert mappings
-            "critical_emotions": ["Anger", "Fear", "Sadness"],
-            "warning_emotions": ["Worried"],
+        # Sound detection settings
+        "gain": 5.0,  # Amplification factor for waveform visualization
+        "rms_threshold": 0.05,  # Threshold for sound detection
+        "noise_threshold": 0.1,  # Background noise threshold
+        "cry_threshold": 0.6,  # Threshold for cry detection
+        "scream_threshold": 0.7,  # Threshold for scream detection
+        "happy_threshold": 0.5,  # Threshold for happy sounds
+        # Visualization settings
+        "enable_visualization": True,
+        "waveform_points": 1024,  # Number of points in waveform visualization
+        "waveform_update_rate": 30,  # Updates per second
+        # Alert settings
+        "alert_thresholds": {
+            "cry": 0.6,
+            "scream": 0.7,
+            "happy": 0.5
         },
+        "critical_emotions": ["cry", "scream"],
+        "info_emotions": ["happy"]
     }
 
     # Alert settings
