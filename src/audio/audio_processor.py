@@ -22,18 +22,22 @@ from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 class AudioClassifier(nn.Module):
     def __init__(self, num_classes=4):  # cry, scream, happy, background
         super().__init__()
-        # Load pre-trained wav2vec model
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-        self.base_model = AutoModelForAudioClassification.from_pretrained(
-            "facebook/wav2vec2-base",
-            num_labels=num_classes
-        )
+        self.conv1 = nn.Conv1d(1, 64, kernel_size=80, stride=4)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool1d(4)
+        self.fc = nn.Linear(64 * 256, num_classes)  # Adjust size based on input
         
     def forward(self, x):
-        # Process audio through wav2vec and get predictions
-        features = self.feature_extractor(x, sampling_rate=16000, return_tensors="pt")
-        outputs = self.base_model(**features)
-        return outputs.logits
+        # Reshape input: (batch_size, samples) -> (batch_size, 1, samples)
+        x = x.unsqueeze(1)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
 
 class AudioProcessor:
     def __init__(self, config, alert_callback=None):
@@ -105,11 +109,24 @@ class AudioProcessor:
             
             audio_format = format_map.get(self.config.get('format', 'paFloat32'), pyaudio.paFloat32)
             
+            # Find the SteelSeries Sonar microphone
+            device_index = None
+            for i in range(self.audio.get_device_count()):
+                device_info = self.audio.get_device_info_by_index(i)
+                if "SteelSeries Sonar - Microphone" in device_info["name"] and device_info["maxInputChannels"] > 0:
+                    device_index = i
+                    self.logger.info(f"Found SteelSeries Sonar microphone at index {i}")
+                    break
+            
+            if device_index is None:
+                self.logger.warning("SteelSeries Sonar microphone not found, using default input device")
+            
             self.stream = self.audio.open(
                 format=audio_format,
                 channels=self.config.get('channels', 1),
                 rate=self.config.get('sample_rate', 16000),
                 input=True,
+                input_device_index=device_index,  # Use the found device or None for default
                 frames_per_buffer=self.config.get('chunk_size', 1024),
                 stream_callback=self._audio_callback
             )
@@ -127,9 +144,22 @@ class AudioProcessor:
         """Callback for audio stream to process incoming audio data."""
         try:
             if self.is_running:
+                # Convert to float32 and normalize
                 audio_data = np.frombuffer(in_data, dtype=np.float32)
+                
+                # Calculate RMS volume for better sensitivity
+                rms = np.sqrt(np.mean(np.square(audio_data)))
+                gain = self.config.get('gain', 5.0)  # Adjustable gain factor
+                
+                # Apply dynamic range compression for better visualization of loud sounds
+                audio_data = np.sign(audio_data) * np.log1p(np.abs(audio_data) * gain)
+                
+                # Normalize to [-1, 1]
+                if np.max(np.abs(audio_data)) > 0:
+                    audio_data = audio_data / np.max(np.abs(audio_data))
+                
                 if not self.audio_queue.full():
-                    self.audio_queue.put_nowait(audio_data)
+                    self.audio_queue.put_nowait((audio_data, rms))
                 
                 # Send data for visualization if callback is set
                 if self.visualization_callback:
@@ -144,6 +174,7 @@ class AudioProcessor:
         """Process audio data from the queue and perform sound classification."""
         window_size = int(self.config['analysis_window'] * self.config['sample_rate'])
         audio_buffer = np.array([], dtype=np.float32)
+        rms_buffer = []
         
         while self.is_running:
             try:
@@ -152,54 +183,58 @@ class AudioProcessor:
                     time.sleep(0.01)
                     continue
                     
-                data = self.audio_queue.get()
-                audio_chunk = np.frombuffer(data, dtype=np.float32)
+                audio_data, rms = self.audio_queue.get()
+                audio_chunk = audio_data
+                rms_buffer.append(rms)
                 
                 # Add to buffer
                 audio_buffer = np.concatenate([audio_buffer, audio_chunk])
                 
                 # Process when buffer is full
                 if len(audio_buffer) >= window_size:
-                    # Normalize audio
-                    audio_buffer = audio_buffer[:window_size]
-                    audio_normalized = audio_buffer / np.max(np.abs(audio_buffer))
+                    # Calculate average RMS for the window
+                    avg_rms = np.mean(rms_buffer)
+                    rms_threshold = self.config.get('rms_threshold', 0.1)
                     
-                    # Resample to 16kHz for wav2vec
-                    audio_resampled = librosa.resample(
-                        audio_normalized,
-                        orig_sr=self.config['sample_rate'],
-                        target_sr=16000
-                    )
-                    
-                    # Classify sound
-                    with torch.no_grad():
-                        # Move tensor to same device as model
-                        tensor_data = torch.FloatTensor(audio_resampled).to(self.device)
-                        predictions = self.model(tensor_data)
-                        probabilities = torch.softmax(predictions, dim=1)[0]
+                    # Only process if the sound is loud enough
+                    if avg_rms > rms_threshold:
+                        # Normalize audio
+                        audio_buffer = audio_buffer[:window_size]
+                        audio_normalized = audio_buffer / np.max(np.abs(audio_buffer))
                         
-                        # Get highest probability class
-                        max_prob, pred_class = torch.max(probabilities, dim=0)
-                        class_name = self.class_names[pred_class]
-                        
-                        # Check against thresholds and alert if necessary
-                        current_time = time.time()
-                        if (current_time - self.last_alert_time) > self.config['alert_cooldown']:
-                            if class_name in self.thresholds and max_prob > self.thresholds[class_name]:
-                                if class_name in ['cry', 'scream']:
-                                    self.alert_callback(
-                                        f"Baby {class_name} detected! (Confidence: {max_prob:.1%})",
-                                        level="critical"
-                                    )
-                                elif class_name == 'happy':
-                                    self.alert_callback(
-                                        f"Happy baby sounds detected! (Confidence: {max_prob:.1%})",
-                                        level="info"
-                                    )
-                                self.last_alert_time = current_time
+                        # Convert to tensor and process
+                        with torch.no_grad():
+                            tensor_data = torch.FloatTensor(audio_normalized).to(self.device)
+                            predictions = self.model(tensor_data.unsqueeze(0))
+                            probabilities = torch.softmax(predictions, dim=1)[0]
+                            
+                            # Get highest probability class
+                            max_prob, pred_class = torch.max(probabilities, dim=0)
+                            class_name = self.class_names[pred_class]
+                            
+                            # Send visualization data
+                            if self.visualization_callback:
+                                self.visualization_callback(audio_normalized)
+                            
+                            # Check against thresholds and alert if necessary
+                            current_time = time.time()
+                            if (current_time - self.last_alert_time) > self.config['alert_cooldown']:
+                                if class_name in self.thresholds and max_prob > self.thresholds[class_name]:
+                                    if class_name in ['cry', 'scream']:
+                                        self.alert_callback(
+                                            f"Baby {class_name} detected! (Confidence: {max_prob:.1%})",
+                                            level="critical"
+                                        )
+                                    elif class_name == 'happy':
+                                        self.alert_callback(
+                                            f"Happy baby sounds detected! (Confidence: {max_prob:.1%})",
+                                            level="info"
+                                        )
+                                    self.last_alert_time = current_time
                     
-                    # Reset buffer
+                    # Reset buffers
                     audio_buffer = np.array([], dtype=np.float32)
+                    rms_buffer = []
                 
             except Exception as e:
                 self.logger.error("Error processing audio: %s", str(e))
@@ -213,7 +248,7 @@ class AudioProcessor:
                     self.is_running = True
                     if not self.stream or not self.stream.is_active():
                         self._initialize_stream()
-                    self.processing_thread = threading.Thread(target=self._process_audio)
+                    self.processing_thread = threading.Thread(target=self.process_audio)
                     self.processing_thread.daemon = True
                     self.processing_thread.start()
                     self.logger.info("Audio processing started")

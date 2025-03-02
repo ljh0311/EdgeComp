@@ -49,16 +49,16 @@
         .video-container {
             position: relative;
             width: 100%;
-            background: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            margin-bottom: 20px;
+            padding-bottom: 75%;
         }
         
-        #videoFeed {
+        .video-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: auto;
-            display: block;
+            height: 100%;
+            background: #000;
         }
         
         .controls {
@@ -128,9 +128,10 @@
         }
         
         .detection-info {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #f8f9fa;
         }
         
         .detection-item {
@@ -174,12 +175,17 @@
             color: #888;
         }
         
-        #waveform {
+        .waveform-container {
             width: 100%;
-            height: 60px;
-            background: #333;
-            border-radius: 4px;
-            margin-top: 10px;
+            height: 150px;
+            background: #f8f9fa;
+            margin-top: 20px;
+            position: relative;
+        }
+        
+        #waveformCanvas {
+            width: 100%;
+            height: 100%;
         }
         
         .placeholder {
@@ -203,6 +209,10 @@
             display: none;
             z-index: 1000;
         }
+        
+        .status-active { color: #28a745; }
+        .status-inactive { color: #dc3545; }
+        .status-warning { color: #ffc107; }
     </style>
 </head>
 <body>
@@ -210,7 +220,7 @@
         <div class="main-content">
             <div class="video-section">
                 <div class="video-container">
-                    <img id="videoFeed" src="" alt="Video Feed">
+                    <img id="videoFeed" class="video-feed">
                     <div class="placeholder" id="cameraPlaceholder">
                         <i class="fas fa-video-slash"></i>
                         <p>Camera is disabled</p>
@@ -233,6 +243,14 @@
                         <button id="toggleAudio">
                             <i class="fas fa-microphone"></i> Toggle Audio
                         </button>
+                    </div>
+                </div>
+                
+                <div class="waveform-container">
+                    <canvas id="waveformCanvas"></canvas>
+                    <div class="placeholder" id="audioPlaceholder">
+                        <i class="fas fa-volume-mute"></i>
+                        <p>Audio is disabled</p>
                     </div>
                 </div>
             </div>
@@ -267,20 +285,19 @@
                 <div class="detection-panel">
                     <h3><i class="fas fa-user-check"></i> Detection Results</h3>
                     <div class="detection-info">
-                        <div class="detection-item">
-                            <span>People Detected:</span>
-                            <span id="peopleCount">0</span>
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="status-icon" id="peopleIcon">👥</span>
+                            <span>People Detected: <span id="peopleCount">0</span></span>
                         </div>
-                        <div class="detection-item">
-                            <span>Current Sound:</span>
-                            <span id="soundType">None</span>
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="status-icon" id="motionIcon">🔄</span>
+                            <span>Motion Status: <span id="motionStatus">No Motion</span></span>
                         </div>
-                        <div class="detection-item">
-                            <span>Emotion Detected:</span>
-                            <span id="emotionType">None</span>
+                        <div class="d-flex align-items-center">
+                            <span class="status-icon" id="soundIcon">🔊</span>
+                            <span>Sound Status: <span id="soundStatus">No Sound</span></span>
                         </div>
                     </div>
-                    <canvas id="waveform"></canvas>
                 </div>
                 
                 <div class="alerts-panel">
@@ -342,152 +359,37 @@
         const toggleCamera = document.getElementById('toggleCamera');
         const toggleAudio = document.getElementById('toggleAudio');
         const errorMessage = document.getElementById('errorMessage');
-        const waveformCanvas = document.getElementById('waveform');
->>>>>>> e70735e7e6333c9ae4fd667977a0eab0cebd9541
+        const waveformCanvas = document.getElementById('waveformCanvas');
         const waveformCtx = waveformCanvas.getContext('2d');
         const alertsList = document.getElementById('alertsList');
 
-<<<<<<< HEAD
-        // Handle waveform updates
-        socket.on('waveform', function(data) {
-            drawWaveform(data.data);
-        });
-
-        function drawWaveform(data) {
-            const ctx = waveformCtx;
-            const width = waveformCanvas.width;
-            const height = waveformCanvas.height;
-            const centerY = height / 2;
-            
-            ctx.clearRect(0, 0, width, height);
-            ctx.beginPath();
-            ctx.strokeStyle = '#3498db';
-            ctx.lineWidth = 2;
-            
-            const step = width / data.length;
-            
-            ctx.moveTo(0, centerY + (data[0] * centerY));
-            for (let i = 1; i < data.length; i++) {
-                ctx.lineTo(i * step, centerY + (data[i] * centerY));
-            }
-            ctx.stroke();
+        // Initialize canvas size
+        function initializeCanvas() {
+            const container = waveformCanvas.parentElement;
+            waveformCanvas.width = container.offsetWidth;
+            waveformCanvas.height = container.offsetHeight;
         }
-        {% endif %}
+        
+        // Call on load and resize
+        window.addEventListener('load', initializeCanvas);
+        window.addEventListener('resize', initializeCanvas);
 
-        // Handle alerts
-        socket.on('alert', function(data) {
-            const alertContainer = document.getElementById('alertContainer');
-            if (!alertContainer) return;
-
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert-item alert-${data.level}`;
-            alertDiv.innerHTML = `
-                <div class="alert-timestamp">${new Date().toLocaleTimeString()}</div>
-                <div>${data.message}</div>
-            `;
-            alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
-            
-            // Limit number of alerts
-            while (alertContainer.children.length > 50) {
-                alertContainer.removeChild(alertContainer.lastChild);
-            }
-        });
-
-        // Handle emotion updates
-        socket.on('emotion', function(data) {
-            updateEmotion(data);
-        });
-
-        // Handle status updates
-        socket.on('status', function(data) {
-            updateStatus(data.data);
-        });
-
-        function updateStatus(status) {
-            updateStatusIndicator('cameraStatus', status.camera_enabled);
-            updateStatusIndicator('audioStatus', status.audio_enabled);
-            updateStatusIndicator('emotionStatus', status.emotion_enabled);
-            updateStatusIndicator('personStatus', status.detection_enabled);
-        }
-
-        function updateStatusIndicator(id, isActive) {
-            const indicator = document.getElementById(id);
-            if (indicator) {
-                indicator.className = 'status-indicator ' + (isActive ? 'status-active' : 'status-inactive');
-            }
-        }
-
-        function updateConnectionStatus(isConnected) {
-            updateStatusIndicator('connectionStatus', isConnected);
-        }
-
-        function updateEmotion(data) {
-            const emotionLabel = document.getElementById('emotionLabel');
-            const confidenceFill = document.getElementById('confidenceFill');
-            
-            if (emotionLabel && confidenceFill && data.emotion) {
-                emotionLabel.textContent = `Current Emotion: ${data.emotion}`;
-                confidenceFill.style.width = `${data.confidence * 100}%`;
-            }
-        }
-
-        // Control buttons
-        document.getElementById('toggleCamera').addEventListener('click', function() {
-            fetch('/control/toggle_camera', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        updateStatus({ camera_enabled: data.camera_enabled });
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-        });
-
-        document.getElementById('toggleAudio').addEventListener('click', function() {
-            fetch('/control/toggle_audio', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        updateStatus({ audio_enabled: data.audio_enabled });
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-        });
-
-        // Initial status check
-        fetch('/status')
-            .then(response => response.json())
-            .then(data => {
-                if (!data.error) {
-                    updateStatus(data);
-                }
-            })
-            .catch(error => console.error('Error:', error));
-=======
         let isConnected = false;
         let isCameraEnabled = false;
         let isAudioEnabled = false;
 
-        // Socket connection handling
+        // Fetch available cameras on connection
         socket.on('connect', () => {
-            isConnected = true;
-            updateStatus();
+            console.log('Connected to server');
             fetchCameras();
         });
 
-        socket.on('disconnect', () => {
-            isConnected = false;
-            updateStatus();
-            showError('Connection lost. Reconnecting...');
-        });
-
-        // Camera handling
         function fetchCameras() {
             socket.emit('get_cameras', {}, (response) => {
                 if (response.success) {
                     populateCameraSelect(response.cameras);
                 } else {
-                    showError('Failed to fetch cameras: ' + response.error);
+                    showError(response.error || 'Failed to get cameras');
                 }
             });
         }
@@ -501,14 +403,22 @@
                 option.dataset.resolutions = JSON.stringify(camera.resolutions);
                 cameraSelect.appendChild(option);
             });
+
+            // If there's only one camera, select it automatically
+            if (cameras.length === 1) {
+                cameraSelect.value = cameras[0].id;
+                const event = new Event('change');
+                cameraSelect.dispatchEvent(event);
+            }
         }
 
         function updateResolutionSelect(resolutions) {
             resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
             resolutions.forEach(resolution => {
                 const option = document.createElement('option');
-                option.value = `${resolution.width}x${resolution.height}`;
-                option.textContent = `${resolution.width}x${resolution.height}`;
+                const value = `${resolution.width}x${resolution.height}`;
+                option.value = value;
+                option.textContent = value;
                 resolutionSelect.appendChild(option);
             });
         }
@@ -516,144 +426,167 @@
         // Event listeners
         cameraSelect.addEventListener('change', () => {
             const selectedOption = cameraSelect.selectedOptions[0];
-            if (selectedOption && selectedOption.dataset.resolutions) {
+            if (selectedOption && selectedOption.value) {
+                socket.emit('select_camera', { camera_name: selectedOption.value }, (response) => {
+                    if (response.success) {
                 const resolutions = JSON.parse(selectedOption.dataset.resolutions);
                 updateResolutionSelect(resolutions);
-                socket.emit('select_camera', { camera_id: selectedOption.value });
+                        showSuccess(response.message || 'Camera selected successfully');
+                    } else {
+                        showError(response.error || 'Failed to select camera');
+                    }
+                });
             }
         });
 
         resolutionSelect.addEventListener('change', () => {
-            const [width, height] = resolutionSelect.value.split('x').map(Number);
-            socket.emit('set_resolution', { width, height });
+            const resolution = resolutionSelect.value;
+            if (resolution) {
+                const [width, height] = resolution.split('x').map(Number);
+                socket.emit('set_resolution', { width, height }, (response) => {
+                    if (response.success) {
+                        showSuccess(response.message || 'Resolution set successfully');
+                    } else {
+                        showError(response.error || 'Failed to set resolution');
+                    }
+                });
+            }
         });
 
         toggleCamera.addEventListener('click', () => {
-            socket.emit('toggle_camera');
+            socket.emit('toggle_camera', {}, (response) => {
+                if (!response.success) {
+                    showError(response.error || 'Failed to toggle camera');
+                }
+            });
         });
 
         toggleAudio.addEventListener('click', () => {
-            socket.emit('toggle_audio');
+            socket.emit('toggle_audio', {}, (response) => {
+                if (!response.success) {
+                    showError(response.error || 'Failed to toggle audio');
+                }
+            });
         });
 
         // Status updates
         socket.on('status', (data) => {
             isCameraEnabled = data.camera_enabled;
             isAudioEnabled = data.audio_enabled;
-            updateStatus();
-            
-            // Update status icons and text
-            updateStatusItem('camera', isCameraEnabled);
-            updateStatusItem('audio', isAudioEnabled);
-            updateStatusItem('motion', data.motion_detected);
-            updateStatusItem('emotion', data.emotion_detected);
-            
-            if (!isCameraEnabled) {
-                videoFeed.style.display = 'none';
-                cameraPlaceholder.style.display = 'block';
-            } else {
-                videoFeed.style.display = 'block';
-                cameraPlaceholder.style.display = 'none';
-            }
+            updateUI();
         });
 
         // Detection updates
         socket.on('detection', (data) => {
+            // Update people count
             document.getElementById('peopleCount').textContent = data.people_count || 0;
-            if (data.sound_type) {
-                document.getElementById('soundType').textContent = data.sound_type;
-            }
-            if (data.emotion) {
-                document.getElementById('emotionType').textContent = `${data.emotion} (${(data.confidence * 100).toFixed(1)}%)`;
-            }
-        });
-
-        // Frame updates
-        socket.on('frame', (data) => {
-            if (data && data.data) {
-                videoFeed.src = `data:image/jpeg;base64,${data.data}`;
-            }
-        });
-
-        // Alert handling
-        socket.on('alert', (data) => {
-            addAlert(data);
-        });
-
-        function addAlert(alert) {
-            const alertElement = document.createElement('div');
-            alertElement.className = `alert-item ${alert.level}`;
-            alertElement.innerHTML = `
-                <div class="alert-time">${alert.timestamp}</div>
-                <div>${alert.message}</div>
-            `;
-            alertsList.insertBefore(alertElement, alertsList.firstChild);
             
-            // Limit number of alerts
-            while (alertsList.children.length > 10) {
-                alertsList.removeChild(alertsList.lastChild);
+            // Update motion status
+            const motionIcon = document.getElementById('motionIcon');
+            const motionStatus = document.getElementById('motionStatus');
+            
+            if (data.motion_status === 'Rapid Motion') {
+                motionIcon.classList.add('active');
+                motionIcon.classList.remove('inactive');
+                motionStatus.textContent = 'Rapid Motion';
+                motionStatus.style.color = '#ff9800';  // Orange for rapid motion
+            } else if (data.motion_status === 'Motion Detected') {
+                motionIcon.classList.add('active');
+                motionIcon.classList.remove('inactive');
+                motionStatus.textContent = 'Motion Detected';
+                motionStatus.style.color = '#4CAF50';  // Green for normal motion
+            } else {
+                motionIcon.classList.add('inactive');
+                motionIcon.classList.remove('active');
+                motionStatus.textContent = 'No Motion';
+                motionStatus.style.color = '';  // Default color
             }
-        }
-
-        // Audio visualization
-        socket.on('audio_data', (data) => {
-            drawWaveform(data.samples);
+            
+            // Handle fall detection
+            if (data.fall_detected) {
+                showError('ALERT: Fall detected!');
+                // Add fall detection alert to the alerts list
+                addAlert('Fall detected!', 'critical');
+            }
         });
 
-        function drawWaveform(samples) {
-            const canvas = waveformCanvas;
-            const ctx = waveformCtx;
-            const width = canvas.width;
-            const height = canvas.height;
+        socket.on('audio_detection', (data) => {
+            document.getElementById('soundStatus').textContent = data.sound_type || 'None';
+            if (data.sound_type && data.sound_type !== 'None') {
+                document.getElementById('soundIcon').style.color = '#dc3545';
+            } else {
+                document.getElementById('soundIcon').style.color = '#6c757d';
+            }
+        });
 
-            ctx.fillStyle = '#333';
-            ctx.fillRect(0, 0, width, height);
-            ctx.beginPath();
-            ctx.strokeStyle = '#007bff';
-            ctx.lineWidth = 2;
+        socket.on('emotion', (data) => {
+            const emotion = data.emotion || 'None';
+            const confidence = data.confidence ? `(${Math.round(data.confidence * 100)}%)` : '';
+            document.getElementById('emotionStatus').textContent = emotion;
+            if (emotion !== 'None') {
+                document.getElementById('emotionIcon').classList.add('active');
+                document.getElementById('emotionIcon').classList.remove('inactive');
+            } else {
+                document.getElementById('emotionIcon').classList.add('inactive');
+                document.getElementById('emotionIcon').classList.remove('active');
+            }
+        });
 
-            const step = Math.floor(samples.length / width);
-            const amp = height / 2;
-
-            for (let i = 0; i < width; i++) {
-                const x = i;
-                const y = (samples[i * step] * amp) + (height / 2);
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
+        socket.on('waveform', (data) => {
+            if (data.data && waveformCtx) {
+                waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+                waveformCtx.fillStyle = '#f8f9fa';
+                waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+                
+                const samples = data.data;
+                const width = waveformCanvas.width;
+                const height = waveformCanvas.height;
+                const step = Math.ceil(samples.length / width);
+                const amp = height / 2;
+                
+                waveformCtx.beginPath();
+                waveformCtx.strokeStyle = '#007bff';
+                waveformCtx.lineWidth = 2;
+                
+                for (let i = 0; i < width; i++) {
+                    const x = i;
+                    const y = (samples[i * step] * amp) + (height / 2);
+                    waveformCtx.lineTo(x, y);
                 }
+                
+                waveformCtx.stroke();
+            }
+        });
+
+        socket.on('frame', (data) => {
+            if (data.data) {
+                const img = new Image();
+                img.onload = () => {
+                    videoFeed.src = img.src;
+                    videoFeed.style.display = 'block';
+                    cameraPlaceholder.style.display = 'none';
+                };
+                img.src = 'data:image/jpeg;base64,' + data.data;
+            }
+        });
+
+        function updateUI() {
+            if (isCameraEnabled) {
+                toggleCamera.querySelector('i').className = 'fas fa-video';
+                if (videoFeed.src) {
+                    videoFeed.style.display = 'block';
+                    cameraPlaceholder.style.display = 'none';
+                } else {
+                    videoFeed.style.display = 'none';
+                    cameraPlaceholder.style.display = 'flex';
+                }
+            } else {
+                toggleCamera.querySelector('i').className = 'fas fa-video-slash';
+                videoFeed.style.display = 'none';
+                cameraPlaceholder.style.display = 'flex';
             }
 
-            ctx.stroke();
-        }
-
-        function updateStatusItem(type, isActive) {
-            const icon = document.getElementById(`${type}Icon`);
-            const status = document.getElementById(`${type}Status`);
-            
-            icon.classList.toggle('active', isActive);
-            icon.classList.toggle('inactive', !isActive);
-            
-            switch (type) {
-                case 'camera':
-                    status.textContent = isActive ? 'Active' : 'Disabled';
-                    break;
-                case 'audio':
-                    status.textContent = isActive ? 'Active' : 'Disabled';
-                    break;
-                case 'motion':
-                    status.textContent = isActive ? 'Detected' : 'No Motion';
-                    break;
-                case 'emotion':
-                    status.textContent = isActive ? 'Detected' : 'None';
-                    break;
-            }
-        }
-
-        function updateStatus() {
-            toggleCamera.disabled = !isConnected;
-            toggleAudio.disabled = !isConnected;
+            toggleAudio.querySelector('i').className = isAudioEnabled ? 'fas fa-microphone' : 'fas fa-microphone-slash';
         }
 
         function showError(message) {
@@ -664,15 +597,43 @@
             }, 5000);
         }
 
-        // Handle window resize for canvas
-        function resizeCanvas() {
-            waveformCanvas.width = waveformCanvas.offsetWidth;
-            waveformCanvas.height = waveformCanvas.offsetHeight;
+        function showSuccess(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.backgroundColor = '#4CAF50';
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+                errorMessage.style.backgroundColor = '#f44336';
+            }, 3000);
         }
 
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
->>>>>>> e70735e7e6333c9ae4fd667977a0eab0cebd9541
+        // Alert handling
+        socket.on('alert', (data) => {
+            addAlert(data.level, data.message);
+        });
+
+        function addAlert(level, message) {
+            const alertsList = document.getElementById('alertsList');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${level === 'critical' ? 'danger' : 'info'} mb-2`;
+            
+            const time = new Date().toLocaleTimeString();
+            alertDiv.innerHTML = `
+                <div class="alert-time">${time}</div>
+                <div class="alert-message">${message}</div>
+            `;
+            
+            // Add to the beginning of the list
+            alertsList.insertBefore(alertDiv, alertsList.firstChild);
+            
+            // Limit the number of alerts
+            while (alertsList.children.length > 10) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+        }
+
+        // Initialize UI
+        updateUI();
     </script>
 </body>
 </html> 
