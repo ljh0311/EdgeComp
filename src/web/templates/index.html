@@ -263,10 +263,38 @@
     </div>
 
     <script>
-        const socket = io();
-        let alertCount = 0;
-        const maxAlerts = 50;
-        const devMode = {{ 'true' if dev_mode else 'false' }};
+        // Initialize Socket.IO with error handling
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
+
+        // Socket.IO connection handling
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            updateConnectionStatus(false);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            updateConnectionStatus(false);
+        });
+
+        // Update video feed
+        socket.on('frame', function(data) {
+            if (data && data.data) {
+                const videoFeed = document.getElementById('videoFeed');
+                if (videoFeed) {
+                    videoFeed.src = 'data:image/jpeg;base64,' + data.data;
+                }
+            }
+        });
 
         {% if dev_mode %}
         // Initialize waveform visualization
@@ -281,11 +309,6 @@
         
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
-
-        // Update video feed
-        socket.on('frame', function(data) {
-            document.getElementById('videoFeed').src = 'data:image/jpeg;base64,' + data.data;
-        });
 
         // Handle waveform updates
         socket.on('waveform', function(data) {
@@ -316,55 +339,57 @@
         // Handle alerts
         socket.on('alert', function(data) {
             const alertContainer = document.getElementById('alertContainer');
+            if (!alertContainer) return;
+
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert-item alert-${data.level}`;
             alertDiv.innerHTML = `
-                <div class="alert-timestamp">${data.timestamp}</div>
+                <div class="alert-timestamp">${new Date().toLocaleTimeString()}</div>
                 <div>${data.message}</div>
             `;
             alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
             
-            alertCount++;
-            if (alertCount > maxAlerts) {
+            // Limit number of alerts
+            while (alertContainer.children.length > 50) {
                 alertContainer.removeChild(alertContainer.lastChild);
-                alertCount--;
             }
-
-            // Auto-remove alert after 8 seconds
-            setTimeout(() => {
-                alertDiv.style.opacity = '0';
-                setTimeout(() => alertDiv.remove(), 300);
-            }, 8000);
         });
 
         // Handle emotion updates
         socket.on('emotion', function(data) {
-            const emotionLabel = document.getElementById('emotionLabel');
-            const confidenceFill = document.getElementById('confidenceFill');
-            const confidenceText = document.getElementById('confidenceText');
-            
-            emotionLabel.textContent = `Current Emotion: ${data.emotion}`;
-            confidenceFill.style.width = `${data.confidence * 100}%`;
-            confidenceText.textContent = `Confidence: ${(data.confidence * 100).toFixed(1)}%`;
+            updateEmotion(data);
         });
 
         // Handle status updates
         socket.on('status', function(data) {
-            updateStatus(data);
+            updateStatus(data.data);
         });
 
         function updateStatus(status) {
-            const indicators = {
-                camera: document.getElementById('cameraStatus'),
-                audio: document.getElementById('audioStatus'),
-                emotion: document.getElementById('emotionStatus'),
-                person: document.getElementById('personStatus')
-            };
+            updateStatusIndicator('cameraStatus', status.camera_enabled);
+            updateStatusIndicator('audioStatus', status.audio_enabled);
+            updateStatusIndicator('emotionStatus', status.emotion_enabled);
+            updateStatusIndicator('personStatus', status.detection_enabled);
+        }
 
-            for (const [key, element] of Object.entries(indicators)) {
-                if (status[`${key}_enabled`] !== undefined) {
-                    element.className = `status-indicator ${status[`${key}_enabled`] ? 'status-active' : 'status-inactive'}`;
-                }
+        function updateStatusIndicator(id, isActive) {
+            const indicator = document.getElementById(id);
+            if (indicator) {
+                indicator.className = 'status-indicator ' + (isActive ? 'status-active' : 'status-inactive');
+            }
+        }
+
+        function updateConnectionStatus(isConnected) {
+            updateStatusIndicator('connectionStatus', isConnected);
+        }
+
+        function updateEmotion(data) {
+            const emotionLabel = document.getElementById('emotionLabel');
+            const confidenceFill = document.getElementById('confidenceFill');
+            
+            if (emotionLabel && confidenceFill && data.emotion) {
+                emotionLabel.textContent = `Current Emotion: ${data.emotion}`;
+                confidenceFill.style.width = `${data.confidence * 100}%`;
             }
         }
 
@@ -376,7 +401,8 @@
                     if (data.status === 'success') {
                         updateStatus({ camera_enabled: data.camera_enabled });
                     }
-                });
+                })
+                .catch(error => console.error('Error:', error));
         });
 
         document.getElementById('toggleAudio').addEventListener('click', function() {
@@ -386,7 +412,8 @@
                     if (data.status === 'success') {
                         updateStatus({ audio_enabled: data.audio_enabled });
                     }
-                });
+                })
+                .catch(error => console.error('Error:', error));
         });
 
         // Initial status check
@@ -396,7 +423,8 @@
                 if (!data.error) {
                     updateStatus(data);
                 }
-            });
+            })
+            .catch(error => console.error('Error:', error));
     </script>
 </body>
 </html> 
