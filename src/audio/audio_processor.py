@@ -271,7 +271,7 @@ class AudioProcessor:
 
     def is_active(self):
         """Check if audio processing is active."""
-        return self.is_running and self.stream and self.stream.is_active()
+        return self.is_running and self.stream and self.stream.is_active() 
 
     def __del__(self):
         """Cleanup when object is deleted."""

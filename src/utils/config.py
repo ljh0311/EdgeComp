@@ -17,7 +17,7 @@ class Config:
     IS_RASPBERRY_PI = platform.machine() in ("armv7l", "aarch64")
     CUDA_AVAILABLE = torch.cuda.is_available()
     DEVICE = "cpu"  # Force CPU for Raspberry Pi
-
+    
     # Path configurations
     BASE_DIR = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,12 +26,12 @@ class Config:
 
     # System-wide settings
     ENABLE_VISUALIZATION = False  # Disable visualization for Raspberry Pi
-
+    
     # Camera settings
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
     CAMERA_FPS = 15  # Optimized for Pi
-
+    
     # Detection settings
     PERSON_DETECTION = {
         "model_path": os.path.join(MODELS_DIR, "yolov8n.pt"),  # Use YOLOv8 nano model
@@ -40,7 +40,7 @@ class Config:
         "device": DEVICE,
         "enable_visualization": ENABLE_VISUALIZATION
     }
-
+    
     POSE_DETECTION = {
         "path": os.path.join(MODELS_DIR, "yolov8n-pose.pt"),
         "conf": 0.25,
@@ -96,7 +96,7 @@ class Config:
         "enable_visualization": ENABLE_VISUALIZATION,
         "emotion_detection": EMOTION_DETECTION
     }
-
+    
     # Performance settings
     PERFORMANCE = {
         "frame_skip": 1,  # Enable frame skipping
@@ -106,7 +106,7 @@ class Config:
         "memory_limit": 512,  # Memory limit in MB
         "thread_pool_size": 2  # Limit concurrent threads
     }
-
+    
     # Logging configuration
     LOGGING = {
         "level": logging.INFO,
