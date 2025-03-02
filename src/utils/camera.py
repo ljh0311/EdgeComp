@@ -29,7 +29,7 @@ class Camera:
         self.logger.info(f"Available backends: {[str(b) for b in self.available_backends]}")
         
         self._enumerate_cameras()
-        # Visualization settings
+         # Visualization settings
         self.ENABLE_VISUALIZATION = False  # Set to False for Raspberry Pi headless operation
 
     def _get_available_backends(self):
@@ -59,19 +59,19 @@ class Camera:
                 self.logger.debug(f"Checking camera index {i}...")
                 cap = cv2.VideoCapture(i, cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY)
                 if cap.isOpened():
-                    self.available_cameras.append(i)
-                    self.logger.info(f"Found camera at index {i}")
-                    # Try to get camera name/description if possible
-                    try:
-                        if platform.system() == "Windows":
-                            # On Windows, try to get camera name
-                            name = cap.get(cv2.CAP_PROP_BACKEND)
-                            self.logger.info(f"Camera {i} details - Backend: {name}")
-                    except:
-                        pass
-                    cap.release()
-                else:
-                    self.logger.debug(f"No camera found at index {i}")
+                    # Get camera name if possible
+                    if platform.system() == "Windows":
+                        cap.set(cv2.CAP_PROP_SETTINGS, 1)
+                    
+                    # Get supported resolutions
+                    resolutions = self._get_supported_resolutions(cap)
+                    
+                    self.available_cameras.append({
+                        'id': i,
+                        'name': f'Camera {i}',
+                        'resolutions': resolutions
+                    })
+                cap.release()
             except Exception as e:
                 self.logger.debug(f"Error checking camera {i}: {str(e)}")
 

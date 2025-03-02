@@ -42,12 +42,7 @@ logger = logging.getLogger(__name__)
 
 class BabyMonitorSystem:
     def __init__(self, dev_mode=False):
-        """Initialize the Baby Monitor System.
-
-        Args:
-            dev_mode (bool): If True, runs in developer mode with video feed and waveform.
-                           If False, runs in production mode with only status and alerts.
-        """
+        """Initialize the Baby Monitor System."""
         self.logger = logging.getLogger(__name__)
         self.is_running = False
         self.camera_error = False
@@ -55,7 +50,10 @@ class BabyMonitorSystem:
         self.camera_enabled = True
         self.frame_lock = threading.Lock()
         self.dev_mode = dev_mode
-        self.current_frame = None
+
+        # Initialize UI first
+        self.root = tk.Tk()
+        self.setup_ui()
 
         try:
             # Initialize web interface first
@@ -75,34 +73,177 @@ class BabyMonitorSystem:
                 model_path=os.path.join(src_dir, "models", "yolov8n.pt")
             )
 
+            # Initialize web interface with dev_mode
+            self.web_app = BabyMonitorWeb(dev_mode=self.dev_mode)
+            self.web_app.set_monitor_system(self)
+            self.web_app.start()
+
             # Initialize audio components if enabled
             if self.audio_enabled:
                 self.audio_processor = AudioProcessor(
                     Config.AUDIO_PROCESSING, self.handle_alert
                 )
+                self.audio_processor.set_visualization_callback(
+                    self.update_waveform_data
+                )
                 self.emotion_recognizer = EmotionRecognizer(
                     model_path=os.path.join(src_dir, "models", "emotion_model.pt"),
                     web_app=self.web_app,
                 )
-
-            # Start web interface
-            self.web_app.start()
-
-            # Send initial status
-            self.web_app.emit_status(
-                {
-                    "camera_enabled": self.camera_enabled,
-                    "audio_enabled": self.audio_enabled,
-                    "emotion_enabled": hasattr(self, "emotion_recognizer"),
-                    "detection_enabled": hasattr(self, "person_detector"),
-                }
-            )
+                self.audio_status.configure(text="🎤  Audio: Ready")
+                self.emotion_status.configure(text="😊  Emotion: Ready")
 
             self.logger.info("Baby Monitor System initialized successfully")
 
         except Exception as e:
             self.logger.error(f"Error during initialization: {str(e)}")
             raise
+
+    def setup_ui(self):
+        """Setup the main UI window."""
+        self.root.title("Baby Monitor")
+        self.root.geometry("1200x800")
+
+        # Create main container
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Left panel (video feed and waveform)
+        left_panel = ttk.Frame(main_container)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Video feed frame
+        video_frame = ttk.Frame(left_panel)
+        video_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.video_canvas = tk.Canvas(video_frame, bg="black")
+        self.video_canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Waveform frame
+        self.waveform_frame = ttk.Frame(left_panel, height=200)
+        self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
+        self.waveform_frame.pack_propagate(False)
+
+        # Right panel (controls and status)
+        right_panel = ttk.Frame(main_container, width=300)
+        right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
+        right_panel.pack_propagate(False)
+
+        # Controls section
+        controls_frame = ttk.LabelFrame(right_panel, text="Controls")
+        controls_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Camera toggle button
+        self.camera_btn = ttk.Button(
+            controls_frame, text="Camera Feed", command=self.toggle_camera
+        )
+        self.camera_btn.pack(fill=tk.X, padx=5, pady=5)
+
+        # Audio toggle button
+        self.audio_btn = ttk.Button(
+            controls_frame, text="Audio Monitor", command=self.toggle_audio
+        )
+        self.audio_btn.pack(fill=tk.X, padx=5, pady=5)
+
+        # Status section
+        status_frame = ttk.LabelFrame(right_panel, text="Status")
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Status labels
+        self.camera_status = ttk.Label(status_frame, text="📷  Camera: Initializing...")
+        self.camera_status.pack(anchor=tk.W, padx=5, pady=2)
+
+        self.audio_status = ttk.Label(status_frame, text="🎤  Audio: Initializing...")
+        self.audio_status.pack(anchor=tk.W, padx=5, pady=2)
+
+        self.emotion_status = ttk.Label(
+            status_frame, text="😊  Emotion: Initializing..."
+        )
+        self.emotion_status.pack(anchor=tk.W, padx=5, pady=2)
+
+        self.detection_status = ttk.Label(
+            status_frame, text="👀  Detection: Initializing..."
+        )
+        self.detection_status.pack(anchor=tk.W, padx=5, pady=2)
+
+        # Initialize matplotlib for waveform
+        self.setup_waveform()
+
+    def setup_waveform(self):
+        """Setup waveform visualization."""
+        self.waveform_figure = Figure(figsize=(6, 2), dpi=100)
+        self.waveform_canvas = FigureCanvasTkAgg(
+            self.waveform_figure, master=self.waveform_frame
+        )
+        self.waveform_canvas.draw()
+        self.waveform_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Setup the plot
+        self.waveform_ax = self.waveform_figure.add_subplot(111)
+        self.waveform_ax.set_ylim([-1, 1])
+        self.waveform_ax.set_xlim([0, 1000])
+        (self.waveform_line,) = self.waveform_ax.plot([], [], lw=2)
+        self.waveform_data = np.zeros(1000)
+
+        # Remove margins and grid
+        self.waveform_figure.tight_layout(pad=0.1)
+        self.waveform_ax.grid(False)
+
+        # Bind resize event
+        self.waveform_frame.bind("<Configure>", self._set_waveform_height)
+
+    def toggle_camera(self):
+        """Toggle camera feed on/off."""
+        self.camera_enabled = not self.camera_enabled
+
+        try:
+            if self.camera_enabled:
+                self.camera_btn.configure(text="Camera Feed")
+                self.camera_status.configure(text="📷  Camera: Active")
+                self.web_app.emit_status({"camera_enabled": True})
+            else:
+                self.camera_btn.configure(text="Camera Feed")
+                self.camera_status.configure(text="📷  Camera: Disabled")
+                # Clear the video canvas
+                self.video_canvas.delete("all")
+                self.web_app.emit_status({"camera_enabled": False})
+        except Exception as e:
+            self.logger.error(f"Error toggling camera: {str(e)}")
+            self.camera_status.configure(text="📷  Camera: Error")
+
+    def toggle_audio(self):
+        """Toggle audio monitoring on/off."""
+        self.audio_enabled = not self.audio_enabled
+
+        try:
+            if self.audio_enabled:
+                self.audio_btn.configure(text="Audio Monitor")
+                self.audio_status.configure(text="🎤  Audio: Active")
+                if hasattr(self, "audio_processor"):
+                    self.audio_processor.start()
+                if hasattr(self, "emotion_recognizer"):
+                    self.emotion_recognizer.start()
+                self.web_app.emit_status({"audio_enabled": True})
+            else:
+                self.audio_btn.configure(text="Audio Monitor")
+                self.audio_status.configure(text="🎤  Audio: Disabled")
+                if hasattr(self, "audio_processor"):
+                    self.audio_processor.stop()
+                if hasattr(self, "emotion_recognizer"):
+                    self.emotion_recognizer.stop()
+                self.web_app.emit_status({"audio_enabled": False})
+        except Exception as e:
+            self.logger.error(f"Error toggling audio: {str(e)}")
+            self.audio_status.configure(text="🎤  Audio: Error")
+
+    def handle_alert(self, message, level="info"):
+        """Handle alerts from components."""
+        if hasattr(self, "web_app"):
+            self.web_app.emit_alert(level, message)
+
+    def send_status_update(self, status_data):
+        """Send status update to web interface."""
+        if hasattr(self, "web_app"):
+            self.web_app.emit_status(status_data)
 
     def start(self):
         """Start the monitoring system."""
@@ -111,16 +252,12 @@ class BabyMonitorSystem:
 
         self.is_running = True
 
-        # Start frame processing thread
-        self.frame_thread = threading.Thread(target=self.process_frames)
-        self.frame_thread.daemon = True
-        self.frame_thread.start()
-
         # Start audio processing if enabled
-        if self.audio_enabled and hasattr(self, "audio_processor"):
-            self.audio_processor.start()
-        if self.audio_enabled and hasattr(self, "emotion_recognizer"):
-            self.emotion_recognizer.start()
+        if self.audio_enabled:
+            if hasattr(self, "audio_processor"):
+                self.audio_processor.start()
+            if hasattr(self, "emotion_recognizer"):
+                self.emotion_recognizer.start()
 
         self.logger.info("Baby monitor system started")
 
@@ -142,6 +279,7 @@ class BabyMonitorSystem:
         if hasattr(self, "camera"):
             self.camera.release()
 
+        self.root.quit()
         self.logger.info("Baby monitor system stopped")
 
     def process_frames(self):
@@ -186,73 +324,101 @@ class BabyMonitorSystem:
                             f"Error sending frame to web interface: {str(e)}"
                         )
 
+                # Convert frame for display with double buffering
+                try:
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame_rgb)
+
+                    # Get current canvas dimensions
+                    canvas_width = self.video_canvas.winfo_width()
+                    canvas_height = self.video_canvas.winfo_height()
+
+                    if canvas_width > 1 and canvas_height > 1:
+                        # Calculate aspect ratios
+                        frame_aspect = frame_pil.width / frame_pil.height
+                        canvas_aspect = canvas_width / canvas_height
+
+                        # Calculate new dimensions maintaining aspect ratio
+                        if frame_aspect > canvas_aspect:
+                            new_width = canvas_width
+                            new_height = int(canvas_width / frame_aspect)
+                        else:
+                            new_height = canvas_height
+                            new_width = int(canvas_height * frame_aspect)
+
+                        # Resize frame using LANCZOS resampling
+                        frame_pil = frame_pil.resize(
+                            (new_width, new_height), Image.Resampling.LANCZOS
+                        )
+
+                    # Create new PhotoImage in the main thread
+                    def update_canvas(photo):
+                        if not self.is_running:
+                            return
+                        self.video_canvas.delete("all")
+                        self.video_canvas.create_image(
+                            canvas_width // 2,
+                            canvas_height // 2,
+                            image=photo,
+                            anchor=tk.CENTER,
+                        )
+                        self.video_canvas.image = photo  # Keep a reference
+
+                    photo = ImageTk.PhotoImage(image=frame_pil)
+                    self.root.after(1, update_canvas, photo)
+
+                except Exception as e:
+                    self.logger.error(f"Error updating video display: {str(e)}")
+
             except Exception as e:
                 self.logger.error(f"Error in frame processing loop: {str(e)}")
                 time.sleep(0.1)
 
-    def toggle_camera(self):
-        """Toggle camera feed on/off."""
-        try:
-            if not self.camera_error:
-                self.camera_enabled = not self.camera_enabled
+    def _set_waveform_height(self, event):
+        """Adjust waveform figure size on window resize."""
+        if hasattr(self, "waveform_figure"):
+            try:
+                # Get the new width and height
+                width = event.width / self.waveform_figure.dpi
+                height = event.height / self.waveform_figure.dpi
 
-                if self.camera_enabled:
-                    # Try to initialize camera if needed
-                    if not self.camera.is_initialized:
-                        if not self.camera.initialize():
-                            self.camera_error = True
-                            self.camera_enabled = False
-                            raise Exception("Failed to initialize camera")
-                # Update web interface
-                self.web_app.emit_status(
-                    {
-                        "camera_enabled": self.camera_enabled,
-                        "audio_enabled": self.audio_enabled,
-                    }
+                # Update figure size
+                self.waveform_figure.set_size_inches(width, height, forward=True)
+                self.waveform_figure.tight_layout(pad=0.1)
+                self.waveform_canvas.draw_idle()
+            except Exception as e:
+                self.logger.error(f"Error resizing waveform: {str(e)}")
+
+    def update_waveform_data(self, audio_data):
+        """Update the waveform data with new audio samples."""
+        try:
+            # Resize audio data to match waveform buffer size
+            if len(audio_data) != len(self.waveform_data):
+                audio_data = np.interp(
+                    np.linspace(0, len(audio_data), len(self.waveform_data)),
+                    np.arange(len(audio_data)),
+                    audio_data,
                 )
 
+            # Roll existing data and append new data
+            self.waveform_data = np.roll(self.waveform_data, -len(audio_data))
+            self.waveform_data[-len(audio_data) :] = audio_data
+
+            # Update the plot
+            self.update_waveform()
         except Exception as e:
-            self.logger.error(f"Error toggling camera: {str(e)}")
-            self.camera_error = True
-            self.camera_enabled = False
-            # Update web interface with error state
-            self.web_app.emit_status(
-                {"camera_enabled": False, "audio_enabled": self.audio_enabled}
-            )
-            self.web_app.emit_alert("error", f"Camera error: {str(e)}")
+            self.logger.error(f"Error updating waveform data: {str(e)}")
 
-    def toggle_audio(self):
-        """Toggle audio monitoring on/off."""
-        try:
-            self.audio_enabled = not self.audio_enabled
-
-            if self.audio_enabled:
-                if hasattr(self, "audio_processor"):
-                    self.audio_processor.start()
-                if hasattr(self, "emotion_recognizer"):
-                    self.emotion_recognizer.start()
-            else:
-                if hasattr(self, "audio_processor"):
-                    self.audio_processor.stop()
-                if hasattr(self, "emotion_recognizer"):
-                    self.emotion_recognizer.stop()
-
-            # Update web interface
-            self.web_app.emit_status(
-                {
-                    "camera_enabled": self.camera_enabled,
-                    "audio_enabled": self.audio_enabled,
-                }
-            )
-
-        except Exception as e:
-            self.logger.error(f"Error toggling audio: {str(e)}")
-            self.web_app.emit_alert("error", f"Audio error: {str(e)}")
-
-    def handle_alert(self, message, level="info"):
-        """Handle system alerts."""
-        if hasattr(self, "web_app"):
-            self.web_app.emit_alert(level, message)
+    def update_waveform(self):
+        """Update the waveform visualization."""
+        if hasattr(self, "waveform_line"):
+            try:
+                self.waveform_line.set_data(
+                    range(len(self.waveform_data)), self.waveform_data
+                )
+                self.waveform_canvas.draw_idle()
+            except Exception as e:
+                self.logger.error(f"Error updating waveform: {str(e)}")
 
 
 def main():

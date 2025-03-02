@@ -18,133 +18,120 @@ from datetime import datetime
 
 
 class WebApp:
-    def __init__(self, host='0.0.0.0', port=5000):
+    def __init__(self, monitor_system):
         self.app = Flask(__name__)
-        self.socketio = SocketIO(self.app, cors_allowed_origins='*')
-        self.host = host
-        self.port = port
-        self.monitor_system = None
-        self.logger = logging.getLogger(__name__)
-        
-        # Setup routes
-        self.setup_routes()
-        self.setup_socketio_handlers()
-    
-    def set_monitor_system(self, monitor_system):
-        """Set reference to the monitor system"""
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.monitor_system = monitor_system
-    
+        self.logger = logging.getLogger(__name__)
+        self.setup_routes()
+        self.setup_socketio()
+
     def setup_routes(self):
         @self.app.route('/')
         def index():
             return render_template('index.html')
-        
+
         @self.app.route('/status')
         def status():
-            if not self.monitor_system:
-                return jsonify({'error': 'Monitor system not initialized'})
-            
             return jsonify({
                 'camera_enabled': self.monitor_system.camera_enabled,
-                'audio_enabled': self.monitor_system.audio_enabled
+                'audio_enabled': self.monitor_system.audio_enabled,
+                'motion_detected': self.monitor_system.motion_detected,
+                'emotion_detected': self.monitor_system.emotion_detected
             })
-        
-        @self.app.route('/control/<action>', methods=['POST'])
-        def control(action):
-            if not self.monitor_system:
-                return jsonify({'error': 'Monitor system not initialized'})
-            
-            try:
-                if action == 'toggle_camera':
-                    self.monitor_system.toggle_camera()
-                    return jsonify({
-                        'status': 'success',
-                        'camera_enabled': self.monitor_system.camera_enabled
-                    })
-                elif action == 'toggle_audio':
-                    self.monitor_system.toggle_audio()
-                    return jsonify({
-                        'status': 'success',
-                        'audio_enabled': self.monitor_system.audio_enabled
-                    })
-                else:
-                    return jsonify({'error': f'Unknown action: {action}'})
-            except Exception as e:
-                self.logger.error(f"Error in control action {action}: {str(e)}")
-                return jsonify({'error': str(e)})
-    
-    def setup_socketio_handlers(self):
+
+    def setup_socketio(self):
         @self.socketio.on('connect')
         def handle_connect():
-            self.logger.info("Client connected")
-            if self.monitor_system:
+            self.emit_status()
+
+        @self.socketio.on('get_cameras')
+        def handle_get_cameras():
+            try:
+                cameras = self.monitor_system.camera.get_available_cameras()
+                return {'success': True, 'cameras': cameras}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('select_camera')
+        def handle_select_camera(data):
+            try:
+                camera_id = int(data.get('camera_id'))
+                success = self.monitor_system.camera.select_camera(camera_id)
+                if success:
+                    self.monitor_system.camera.initialize()
+                return {'success': success}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('set_resolution')
+        def handle_set_resolution(data):
+            try:
+                width = int(data.get('width'))
+                height = int(data.get('height'))
+                success = self.monitor_system.camera.set_resolution(width, height)
+                return {'success': success}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('toggle_camera')
+        def handle_toggle_camera():
+            try:
+                self.monitor_system.toggle_camera()
                 self.emit_status()
-        
-        @self.socketio.on('disconnect')
-        def handle_disconnect():
-            self.logger.info("Client disconnected")
-    
-    def start(self):
-        """Start the web server"""
-        try:
-            self.socketio.run(self.app, host=self.host, port=self.port, debug=False)
-        except Exception as e:
-            self.logger.error(f"Failed to start web server: {str(e)}")
-            # Try alternative port if default is in use
-            if 'Address already in use' in str(e):
-                try:
-                    self.port += 1
-                    self.logger.info(f"Retrying with port {self.port}")
-                    self.socketio.run(self.app, host=self.host, port=self.port, debug=False)
-                except Exception as e2:
-                    self.logger.error(f"Failed to start web server on alternative port: {str(e2)}")
-                    raise
-            else:
-                raise
-    
+                return {'success': True}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('toggle_audio')
+        def handle_toggle_audio():
+            try:
+                self.monitor_system.toggle_audio()
+                self.emit_status()
+                return {'success': True}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
     def emit_frame(self, frame):
-        """Emit a video frame to connected clients"""
-        try:
-            if frame is not None:
+        """Emit a video frame to all connected clients."""
+        if frame is not None:
+            try:
                 # Encode frame as JPEG
                 _, buffer = cv2.imencode('.jpg', frame)
-                # Convert to base64
-                frame_data = base64.b64encode(buffer).decode('utf-8')
-                self.socketio.emit('frame', {'data': frame_data})
-        except Exception as e:
-            self.logger.error(f"Error emitting frame: {str(e)}")
-    
-    def emit_audio(self, audio_data):
-        """Emit audio data to connected clients"""
-        try:
-            if audio_data is not None:
-                self.socketio.emit('audio', {'data': audio_data.tolist()})
-        except Exception as e:
-            self.logger.error(f"Error emitting audio: {str(e)}")
-    
+                # Convert to base64 string
+                b64_string = base64.b64encode(buffer).decode('utf-8')
+                # Emit the frame
+                self.socketio.emit('frame', {'data': b64_string})
+            except Exception as e:
+                self.logger.error(f"Error emitting frame: {str(e)}")
+
+    def emit_audio_data(self, samples):
+        """Emit audio data for visualization."""
+        if samples is not None:
+            try:
+                # Normalize samples to [-1, 1] range
+                normalized = samples.astype(float) / np.iinfo(samples.dtype).max
+                # Downsample for visualization
+                downsampled = signal.resample(normalized, 100)
+                self.socketio.emit('audio_data', {'samples': downsampled.tolist()})
+            except Exception as e:
+                self.logger.error(f"Error emitting audio data: {str(e)}")
+
     def emit_status(self):
-        """Emit current system status"""
-        if not self.monitor_system:
-            return
-        
-        try:
-            status = {
-                'type': 'status',
-                'data': {
-                    'camera_enabled': self.monitor_system.camera_enabled,
-                    'audio_enabled': self.monitor_system.audio_enabled
-                }
-            }
-            self.socketio.emit('status', status)
-        except Exception as e:
-            self.logger.error(f"Error emitting status: {str(e)}")
-    
-    def emit_alert(self, level, message):
-        """Emit an alert message to connected clients"""
-        try:
-            self.socketio.emit('alert', {'level': level, 'message': message})
-        except Exception as e:
-            self.logger.error(f"Error emitting alert: {str(e)}")
+        """Emit current system status to all connected clients."""
+        self.socketio.emit('status', {
+            'camera_enabled': self.monitor_system.camera_enabled,
+            'audio_enabled': self.monitor_system.audio_enabled,
+            'motion_detected': self.monitor_system.motion_detected,
+            'emotion_detected': self.monitor_system.emotion_detected
+        })
+
+    def start(self):
+        """Start the web server."""
+        host = '0.0.0.0'  # Listen on all network interfaces
+        port = 5000
+        self.logger.info(f"Starting web server on {host}:{port}")
+        self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False)
 
 
 class BabyMonitorWeb:
@@ -170,6 +157,31 @@ class BabyMonitorWeb:
         @self.app.route('/')
         def index():
             return render_template('index.html', dev_mode=self.dev_mode)
+
+        @self.app.route('/cameras')
+        def get_cameras():
+            if not self.monitor_system:
+                return jsonify({'error': 'Monitor system not initialized'})
+            
+            try:
+                cameras = []
+                available_cameras = self.monitor_system.camera.get_available_cameras()
+                
+                for idx in available_cameras:
+                    cameras.append({
+                        'id': str(idx),
+                        'name': f'Camera {idx}',
+                        'resolutions': [
+                            {'width': 640, 'height': 480},
+                            {'width': 1280, 'height': 720},
+                            {'width': 1920, 'height': 1080}
+                        ]
+                    })
+                
+                return jsonify(cameras)
+            except Exception as e:
+                self.logger.error(f"Error getting cameras: {str(e)}")
+                return jsonify({'error': str(e)})
 
         @self.app.route('/status')
         def status():
@@ -201,6 +213,32 @@ class BabyMonitorWeb:
                         'status': 'success',
                         'audio_enabled': self.monitor_system.audio_enabled
                     })
+                elif action == 'select_camera':
+                    data = request.get_json()
+                    camera_id = int(data.get('camera_id', 0))
+                    success = self.monitor_system.camera.select_camera(camera_id)
+                    if success:
+                        self.monitor_system.camera.initialize()
+                        return jsonify({
+                            'status': 'success',
+                            'message': f'Selected camera {camera_id}'
+                        })
+                    else:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Failed to select camera {camera_id}'
+                        })
+                elif action == 'set_resolution':
+                    data = request.get_json()
+                    width = int(data.get('width', 640))
+                    height = int(data.get('height', 480))
+                    self.monitor_system.camera.width = width
+                    self.monitor_system.camera.height = height
+                    success = self.monitor_system.camera.initialize()
+                    return jsonify({
+                        'status': 'success' if success else 'error',
+                        'message': f'Set resolution to {width}x{height}'
+                    })
                 else:
                     return jsonify({'error': f'Unknown action: {action}'})
             except Exception as e:
@@ -218,6 +256,53 @@ class BabyMonitorWeb:
         @self.socketio.on('disconnect')
         def handle_disconnect():
             self.logger.info("Client disconnected")
+
+        @self.socketio.on('get_cameras')
+        def handle_get_cameras():
+            try:
+                cameras = self.monitor_system.camera.get_available_cameras()
+                return {'success': True, 'cameras': cameras}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('select_camera')
+        def handle_select_camera(data):
+            try:
+                camera_id = int(data.get('camera_id'))
+                success = self.monitor_system.camera.select_camera(camera_id)
+                if success:
+                    self.monitor_system.camera.initialize()
+                return {'success': success}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('set_resolution')
+        def handle_set_resolution(data):
+            try:
+                width = int(data.get('width'))
+                height = int(data.get('height'))
+                success = self.monitor_system.camera.set_resolution(width, height)
+                return {'success': success}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('toggle_camera')
+        def handle_toggle_camera():
+            try:
+                self.monitor_system.toggle_camera()
+                self.emit_status()
+                return {'success': True}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+        @self.socketio.on('toggle_audio')
+        def handle_toggle_audio():
+            try:
+                self.monitor_system.toggle_audio()
+                self.emit_status()
+                return {'success': True}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
 
     def emit_frame(self, frame):
         """Emit video frame to connected clients."""
