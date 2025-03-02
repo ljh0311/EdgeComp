@@ -312,26 +312,18 @@
         let isCameraEnabled = false;
         let isAudioEnabled = false;
 
-        // Socket connection handling
+        // Fetch available cameras on connection
         socket.on('connect', () => {
-            isConnected = true;
-            updateStatus();
+            console.log('Connected to server');
             fetchCameras();
         });
 
-        socket.on('disconnect', () => {
-            isConnected = false;
-            updateStatus();
-            showError('Connection lost. Reconnecting...');
-        });
-
-        // Camera handling
         function fetchCameras() {
             socket.emit('get_cameras', {}, (response) => {
                 if (response.success) {
                     populateCameraSelect(response.cameras);
                 } else {
-                    showError('Failed to fetch cameras: ' + response.error);
+                    showError(response.error || 'Failed to get cameras');
                 }
             });
         }
@@ -345,14 +337,22 @@
                 option.dataset.resolutions = JSON.stringify(camera.resolutions);
                 cameraSelect.appendChild(option);
             });
+
+            // If there's only one camera, select it automatically
+            if (cameras.length === 1) {
+                cameraSelect.value = cameras[0].id;
+                const event = new Event('change');
+                cameraSelect.dispatchEvent(event);
+            }
         }
 
         function updateResolutionSelect(resolutions) {
             resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
             resolutions.forEach(resolution => {
                 const option = document.createElement('option');
-                option.value = `${resolution.width}x${resolution.height}`;
-                option.textContent = `${resolution.width}x${resolution.height}`;
+                const value = `${resolution.width}x${resolution.height}`;
+                option.value = value;
+                option.textContent = value;
                 resolutionSelect.appendChild(option);
             });
         }
@@ -360,144 +360,176 @@
         // Event listeners
         cameraSelect.addEventListener('change', () => {
             const selectedOption = cameraSelect.selectedOptions[0];
-            if (selectedOption && selectedOption.dataset.resolutions) {
-                const resolutions = JSON.parse(selectedOption.dataset.resolutions);
-                updateResolutionSelect(resolutions);
-                socket.emit('select_camera', { camera_id: selectedOption.value });
+            if (selectedOption && selectedOption.value) {
+                socket.emit('select_camera', { camera_name: selectedOption.value }, (response) => {
+                    if (response.success) {
+                        const resolutions = JSON.parse(selectedOption.dataset.resolutions);
+                        updateResolutionSelect(resolutions);
+                        showSuccess(response.message || 'Camera selected successfully');
+                    } else {
+                        showError(response.error || 'Failed to select camera');
+                    }
+                });
             }
         });
 
         resolutionSelect.addEventListener('change', () => {
-            const [width, height] = resolutionSelect.value.split('x').map(Number);
-            socket.emit('set_resolution', { width, height });
+            const resolution = resolutionSelect.value;
+            if (resolution) {
+                const [width, height] = resolution.split('x').map(Number);
+                socket.emit('set_resolution', { width, height }, (response) => {
+                    if (response.success) {
+                        showSuccess(response.message || 'Resolution set successfully');
+                    } else {
+                        showError(response.error || 'Failed to set resolution');
+                    }
+                });
+            }
         });
 
         toggleCamera.addEventListener('click', () => {
-            socket.emit('toggle_camera');
+            socket.emit('toggle_camera', {}, (response) => {
+                if (!response.success) {
+                    showError(response.error || 'Failed to toggle camera');
+                }
+            });
         });
 
         toggleAudio.addEventListener('click', () => {
-            socket.emit('toggle_audio');
+            socket.emit('toggle_audio', {}, (response) => {
+                if (!response.success) {
+                    showError(response.error || 'Failed to toggle audio');
+                }
+            });
         });
 
         // Status updates
         socket.on('status', (data) => {
             isCameraEnabled = data.camera_enabled;
             isAudioEnabled = data.audio_enabled;
-            updateStatus();
-            
-            // Update status icons and text
-            updateStatusItem('camera', isCameraEnabled);
-            updateStatusItem('audio', isAudioEnabled);
-            updateStatusItem('motion', data.motion_detected);
-            updateStatusItem('emotion', data.emotion_detected);
-            
-            if (!isCameraEnabled) {
-                videoFeed.style.display = 'none';
-                cameraPlaceholder.style.display = 'block';
-            } else {
-                videoFeed.style.display = 'block';
-                cameraPlaceholder.style.display = 'none';
-            }
+            updateUI();
         });
 
         // Detection updates
         socket.on('detection', (data) => {
+            // Update people count
             document.getElementById('peopleCount').textContent = data.people_count || 0;
-            if (data.sound_type) {
-                document.getElementById('soundType').textContent = data.sound_type;
-            }
-            if (data.emotion) {
-                document.getElementById('emotionType').textContent = `${data.emotion} (${(data.confidence * 100).toFixed(1)}%)`;
-            }
-        });
-
-        // Frame updates
-        socket.on('frame', (data) => {
-            if (data && data.data) {
-                videoFeed.src = `data:image/jpeg;base64,${data.data}`;
-            }
-        });
-
-        // Alert handling
-        socket.on('alert', (data) => {
-            addAlert(data);
-        });
-
-        function addAlert(alert) {
-            const alertElement = document.createElement('div');
-            alertElement.className = `alert-item ${alert.level}`;
-            alertElement.innerHTML = `
-                <div class="alert-time">${alert.timestamp}</div>
-                <div>${alert.message}</div>
-            `;
-            alertsList.insertBefore(alertElement, alertsList.firstChild);
             
-            // Limit number of alerts
-            while (alertsList.children.length > 10) {
-                alertsList.removeChild(alertsList.lastChild);
+            // Update motion status
+            const motionIcon = document.getElementById('motionIcon');
+            const motionStatus = document.getElementById('motionStatus');
+            
+            if (data.motion_status === 'Rapid Motion') {
+                motionIcon.classList.add('active');
+                motionIcon.classList.remove('inactive');
+                motionStatus.textContent = 'Rapid Motion';
+                motionStatus.style.color = '#ff9800';  // Orange for rapid motion
+            } else if (data.motion_status === 'Motion Detected') {
+                motionIcon.classList.add('active');
+                motionIcon.classList.remove('inactive');
+                motionStatus.textContent = 'Motion Detected';
+                motionStatus.style.color = '#4CAF50';  // Green for normal motion
+            } else {
+                motionIcon.classList.add('inactive');
+                motionIcon.classList.remove('active');
+                motionStatus.textContent = 'No Motion';
+                motionStatus.style.color = '';  // Default color
             }
-        }
-
-        // Audio visualization
-        socket.on('audio_data', (data) => {
-            drawWaveform(data.samples);
+            
+            // Handle fall detection
+            if (data.fall_detected) {
+                showError('ALERT: Fall detected!');
+                // Add fall detection alert to the alerts list
+                addAlert('Fall detected!', 'critical');
+            }
         });
 
-        function drawWaveform(samples) {
-            const canvas = waveformCanvas;
-            const ctx = waveformCtx;
-            const width = canvas.width;
-            const height = canvas.height;
+        socket.on('audio_detection', (data) => {
+            document.getElementById('soundType').textContent = data.sound_type || 'None';
+            if (data.sound_type && data.sound_type !== 'None') {
+                document.getElementById('audioIcon').classList.add('active');
+                document.getElementById('audioIcon').classList.remove('inactive');
+            } else {
+                document.getElementById('audioIcon').classList.add('inactive');
+                document.getElementById('audioIcon').classList.remove('active');
+            }
+        });
 
-            ctx.fillStyle = '#333';
-            ctx.fillRect(0, 0, width, height);
-            ctx.beginPath();
-            ctx.strokeStyle = '#007bff';
-            ctx.lineWidth = 2;
+        socket.on('emotion', (data) => {
+            const emotion = data.emotion || 'None';
+            const confidence = data.confidence ? `(${Math.round(data.confidence * 100)}%)` : '';
+            document.getElementById('emotionType').textContent = `${emotion} ${confidence}`;
+            document.getElementById('emotionStatus').textContent = emotion;
+            if (emotion !== 'None') {
+                document.getElementById('emotionIcon').classList.add('active');
+                document.getElementById('emotionIcon').classList.remove('inactive');
+            } else {
+                document.getElementById('emotionIcon').classList.add('inactive');
+                document.getElementById('emotionIcon').classList.remove('active');
+            }
+        });
 
-            const step = Math.floor(samples.length / width);
-            const amp = height / 2;
-
-            for (let i = 0; i < width; i++) {
-                const x = i;
-                const y = (samples[i * step] * amp) + (height / 2);
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
+        socket.on('waveform', (data) => {
+            if (data.data && waveformCtx) {
+                const canvas = waveformCanvas;
+                const ctx = waveformCtx;
+                const samples = data.data;
+                
+                // Clear canvas
+                ctx.fillStyle = '#333';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw waveform
+                ctx.beginPath();
+                ctx.strokeStyle = '#4CAF50';
+                ctx.lineWidth = 2;
+                
+                const step = Math.ceil(samples.length / canvas.width);
+                const amp = canvas.height / 2;
+                
+                for (let i = 0; i < canvas.width; i++) {
+                    const x = i;
+                    const y = (samples[i * step] * amp) + (canvas.height / 2);
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
                 }
+                
+                ctx.stroke();
+            }
+        });
+
+        socket.on('frame', (data) => {
+            if (data.data) {
+                const img = new Image();
+                img.onload = () => {
+                    videoFeed.src = img.src;
+                    videoFeed.style.display = 'block';
+                    cameraPlaceholder.style.display = 'none';
+                };
+                img.src = 'data:image/jpeg;base64,' + data.data;
+            }
+        });
+
+        function updateUI() {
+            if (isCameraEnabled) {
+                toggleCamera.querySelector('i').className = 'fas fa-video';
+                if (videoFeed.src) {
+                    videoFeed.style.display = 'block';
+                    cameraPlaceholder.style.display = 'none';
+                } else {
+                    videoFeed.style.display = 'none';
+                    cameraPlaceholder.style.display = 'flex';
+                }
+            } else {
+                toggleCamera.querySelector('i').className = 'fas fa-video-slash';
+                videoFeed.style.display = 'none';
+                cameraPlaceholder.style.display = 'flex';
             }
 
-            ctx.stroke();
-        }
-
-        function updateStatusItem(type, isActive) {
-            const icon = document.getElementById(`${type}Icon`);
-            const status = document.getElementById(`${type}Status`);
-            
-            icon.classList.toggle('active', isActive);
-            icon.classList.toggle('inactive', !isActive);
-            
-            switch (type) {
-                case 'camera':
-                    status.textContent = isActive ? 'Active' : 'Disabled';
-                    break;
-                case 'audio':
-                    status.textContent = isActive ? 'Active' : 'Disabled';
-                    break;
-                case 'motion':
-                    status.textContent = isActive ? 'Detected' : 'No Motion';
-                    break;
-                case 'emotion':
-                    status.textContent = isActive ? 'Detected' : 'None';
-                    break;
-            }
-        }
-
-        function updateStatus() {
-            toggleCamera.disabled = !isConnected;
-            toggleAudio.disabled = !isConnected;
+            toggleAudio.querySelector('i').className = isAudioEnabled ? 'fas fa-microphone' : 'fas fa-microphone-slash';
         }
 
         function showError(message) {
@@ -508,14 +540,43 @@
             }, 5000);
         }
 
-        // Handle window resize for canvas
-        function resizeCanvas() {
-            waveformCanvas.width = waveformCanvas.offsetWidth;
-            waveformCanvas.height = waveformCanvas.offsetHeight;
+        function showSuccess(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.backgroundColor = '#4CAF50';
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+                errorMessage.style.backgroundColor = '#f44336';
+            }, 3000);
         }
 
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+        // Alert handling
+        socket.on('alert', (data) => {
+            addAlert(data.message, data.level);
+        });
+
+        function addAlert(message, level) {
+            const alertsList = document.getElementById('alertsList');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert-item ${level}`;
+            
+            const time = new Date().toLocaleTimeString();
+            alertDiv.innerHTML = `
+                <div class="alert-time">${time}</div>
+                <div class="alert-message">${message}</div>
+            `;
+            
+            // Add to the beginning of the list
+            alertsList.insertBefore(alertDiv, alertsList.firstChild);
+            
+            // Limit the number of alerts
+            while (alertsList.children.length > 10) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+        }
+
+        // Initialize UI
+        updateUI();
     </script>
 </body>
 </html> 
