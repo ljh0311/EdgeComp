@@ -19,6 +19,11 @@ class Camera:
         self.available_backends = self._get_available_backends()
         self.selected_camera_index = 0
         self.available_cameras = []
+        self.standard_resolutions = [
+            (640, 480),    # VGA
+            (1280, 720),   # HD
+            (1920, 1080)   # Full HD
+        ]
         self._enumerate_cameras()
 
     def _get_available_backends(self):
@@ -98,23 +103,58 @@ class Camera:
         
         return supported
 
-    def get_available_cameras(self):
-        """Get list of available cameras."""
-        return self.available_cameras
+    def get_camera_list(self):
+        """Get list of available camera names."""
+        return [cam['name'] for cam in self.available_cameras]
 
-    def select_camera(self, index):
-        """Select a specific camera by index."""
+    def get_camera_resolutions(self, camera_name):
+        """Get supported resolutions for a camera."""
+        for cam in self.available_cameras:
+            if cam['name'] == camera_name:
+                return [f"{res['width']}x{res['height']}" for res in cam['resolutions']]
+        return [f"{width}x{height}" for width, height in self.standard_resolutions]
+
+    def select_camera(self, camera_name):
+        """Select a camera by name."""
         try:
-            index = int(index)
-            if any(cam['id'] == index for cam in self.available_cameras):
-                if self.cap is not None:
-                    self.release()
-                self.selected_camera_index = index
-                return True
+            for cam in self.available_cameras:
+                if cam['name'] == camera_name:
+                    if self.cap is not None:
+                        self.release()
+                    self.selected_camera_index = cam['id']
+                    success = self.initialize()
+                    if success:
+                        self.logger.info(f"Selected camera: {camera_name}")
+                        return True
             return False
         except Exception as e:
             self.logger.error(f"Error selecting camera: {str(e)}")
             return False
+
+    def set_resolution(self, resolution_str):
+        """Set camera resolution from string format (e.g., '1280x720')."""
+        try:
+            width, height = map(int, resolution_str.split('x'))
+            self.width = width
+            self.height = height
+            if self.cap and self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                return actual_width == width and actual_height == height
+            return False
+        except Exception as e:
+            self.logger.error(f"Error setting resolution: {str(e)}")
+            return False
+
+    def get_current_resolution(self):
+        """Get current camera resolution."""
+        if self.cap and self.cap.isOpened():
+            width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            return f"{width}x{height}"
+        return f"{self.width}x{self.height}"
 
     def initialize(self):
         """Initialize the camera with the current settings."""
@@ -174,6 +214,10 @@ class Camera:
         if self.cap:
             self.cap.release()
             self.cap = None
+
+    def get_available_cameras(self):
+        """Get list of available cameras."""
+        return self.available_cameras
 
     def set_resolution(self, width, height):
         """Set camera resolution."""
