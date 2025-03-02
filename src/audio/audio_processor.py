@@ -105,11 +105,24 @@ class AudioProcessor:
             
             audio_format = format_map.get(self.config.get('format', 'paFloat32'), pyaudio.paFloat32)
             
+            # Find the SteelSeries Sonar microphone
+            device_index = None
+            for i in range(self.audio.get_device_count()):
+                device_info = self.audio.get_device_info_by_index(i)
+                if "SteelSeries Sonar - Microphone" in device_info["name"] and device_info["maxInputChannels"] > 0:
+                    device_index = i
+                    self.logger.info(f"Found SteelSeries Sonar microphone at index {i}")
+                    break
+            
+            if device_index is None:
+                self.logger.warning("SteelSeries Sonar microphone not found, using default input device")
+            
             self.stream = self.audio.open(
                 format=audio_format,
                 channels=self.config.get('channels', 1),
                 rate=self.config.get('sample_rate', 16000),
                 input=True,
+                input_device_index=device_index,  # Use the found device or None for default
                 frames_per_buffer=self.config.get('chunk_size', 1024),
                 stream_callback=self._audio_callback
             )
@@ -213,7 +226,7 @@ class AudioProcessor:
                     self.is_running = True
                     if not self.stream or not self.stream.is_active():
                         self._initialize_stream()
-                    self.processing_thread = threading.Thread(target=self._process_audio)
+                    self.processing_thread = threading.Thread(target=self.process_audio)
                     self.processing_thread.daemon = True
                     self.processing_thread.start()
                     self.logger.info("Audio processing started")
