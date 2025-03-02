@@ -82,8 +82,8 @@
           <!-- Video Feed -->
           <div class="video-container">
             <img id="videoFeed" src="" alt="Video Feed">
-          </div>
-          
+        </div>
+
           <!-- Controls -->
           <div class="controls">
             <div class="row">
@@ -95,18 +95,18 @@
               <div class="col-md-6">
                 <h5>Status</h5>
                 <div class="mb-2">
-                  <span class="status-indicator" id="cameraStatus"></span>
+                <span class="status-indicator" id="cameraStatus"></span>
                   Camera
-                </div>
+              </div>
                 <div class="mb-2">
-                  <span class="status-indicator" id="audioStatus"></span>
+                <span class="status-indicator" id="audioStatus"></span>
                   Audio
-                </div>
+              </div>
+              </div>
               </div>
             </div>
           </div>
-        </div>
-        
+
         <div class="col-lg-4">
           <!-- Alerts -->
           <div class="controls">
@@ -127,23 +127,23 @@
       // Update video feed
       socket.on('frame', function(data) {
         document.getElementById('videoFeed').src = 'data:image/jpeg;base64,' + data.frame;
-      });
-
-      // Handle alerts
+          });
+      
+          // Handle alerts
       socket.on('alert', function(data) {
         const alertContainer = document.getElementById('alertContainer');
-        const alertDiv = document.createElement('div');
+            const alertDiv = document.createElement('div');
         alertDiv.className = `alert-item alert-${data.type}`;
-        alertDiv.innerHTML = `
+            alertDiv.innerHTML = `
           <small class="text-muted">${data.timestamp}</small>
           <div>${data.message}</div>
-        `;
-        alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
-        
+            `;
+            alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
+      
         // Limit number of alerts
         alertCount++;
         if (alertCount > maxAlerts) {
-          alertContainer.removeChild(alertContainer.lastChild);
+              alertContainer.removeChild(alertContainer.lastChild);
           alertCount--;
         }
       });
