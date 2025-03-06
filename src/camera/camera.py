@@ -6,7 +6,12 @@ import cv2
 import logging
 import platform
 import numpy as np
+import time
+from threading import Lock
 
+class CameraError(Exception):
+    """Custom exception for camera-related errors."""
+    pass
 
 class Camera:
     def __init__(self, width=640, height=480):
@@ -24,6 +29,9 @@ class Camera:
             (1280, 720),   # HD
             (1920, 1080)   # Full HD
         ]
+        self.lock = Lock()
+        self.consecutive_failures = 0
+        self.max_failures = 3  # Maximum consecutive failures before reinit
         self._enumerate_cameras()
 
     def _get_available_backends(self):
@@ -156,64 +164,133 @@ class Camera:
             return f"{width}x{height}"
         return f"{self.width}x{self.height}"
 
+    def _try_reinitialize(self):
+        """Attempt to reinitialize the camera after failures."""
+        self.logger.warning("Attempting to reinitialize camera...")
+        with self.lock:
+            if self.cap:
+                self.release()
+            time.sleep(1)  # Wait before retrying
+            return self.initialize()
+
     def initialize(self):
         """Initialize the camera with the current settings."""
-        if self.cap is not None:
-            self.release()
+        with self.lock:
+            if self.cap is not None:
+                self.release()
 
-        try:
-            # Try each available backend until one works
-            for backend in self.available_backends:
-                try:
-                    self.cap = cv2.VideoCapture(self.selected_camera_index, backend)
-                    if self.cap.isOpened():
-                        break
-                except Exception:
-                    continue
+            try:
+                # Try each available backend until one works
+                for backend in self.available_backends:
+                    try:
+                        self.logger.info(f"Trying to initialize camera {self.selected_camera_index} with backend {backend}")
+                        self.cap = cv2.VideoCapture(self.selected_camera_index, backend)
+                        
+                        if not self.cap.isOpened():
+                            self.logger.debug(f"Failed to open camera with backend {backend}")
+                            continue
+                            
+                        # Set resolution
+                        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                        
+                        # Set buffer size to minimize latency
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        
+                        # Verify camera is working by reading multiple test frames
+                        for _ in range(3):  # Read multiple frames to ensure stability
+                            ret, frame = self.cap.read()
+                            if not ret or frame is None:
+                                self.logger.debug("Failed to read test frame")
+                                break
+                        else:
+                            # Get actual resolution
+                            actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            self.logger.info(f"Camera initialized successfully at {actual_width}x{actual_height}")
+                            
+                            self.consecutive_failures = 0
+                            return True
+                            
+                        # If we get here, frame reading failed
+                        self.cap.release()
+                        self.cap = None
+                        
+                    except Exception as e:
+                        self.logger.debug(f"Failed to initialize with backend {backend}: {str(e)}")
+                        if self.cap:
+                            self.cap.release()
+                            self.cap = None
+                        continue
 
-            if not self.cap or not self.cap.isOpened():
-                self.logger.error("Failed to open camera")
+                self.logger.error("Failed to initialize camera with any available backend")
                 return False
 
-            # Set resolution
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-
-            # Get actual resolution (may be different from requested)
-            actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self.logger.info(f"Camera initialized at {actual_width}x{actual_height}")
-
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error initializing camera: {str(e)}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-            return False
+            except Exception as e:
+                self.logger.error(f"Error initializing camera: {str(e)}")
+                if self.cap:
+                    self.release()
+                return False
 
     def get_frame(self):
-        """Get a frame from the camera."""
-        if not self.cap or not self.cap.isOpened():
-            return False, None
+        """Get a frame from the camera with error handling and recovery."""
+        if not self.cap:
+            if not self.initialize():
+                self.logger.error("Camera not initialized and initialization failed")
+                return False, None
 
         try:
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                self.logger.error("Failed to read frame")
-                return False, None
-            return True, frame
+            with self.lock:
+                if not self.cap.isOpened():
+                    self.logger.error("Camera is not opened")
+                    if not self._try_reinitialize():
+                        return False, None
+                
+                ret, frame = self.cap.read()
+                
+                if not ret or frame is None:
+                    self.consecutive_failures += 1
+                    self.logger.warning(f"Failed to read frame (attempt {self.consecutive_failures})")
+                    
+                    if self.consecutive_failures >= self.max_failures:
+                        self.logger.error("Too many consecutive failures, attempting recovery...")
+                        if self._try_reinitialize():
+                            self.consecutive_failures = 0
+                            return self.get_frame()  # Try again after reinit
+                        else:
+                            self.logger.error("Camera recovery failed")
+                            return False, None
+                    return False, None
+                
+                self.consecutive_failures = 0
+                return True, frame
 
         except Exception as e:
             self.logger.error(f"Error getting frame: {str(e)}")
+            self.consecutive_failures += 1
+            if self.consecutive_failures >= self.max_failures:
+                self._try_reinitialize()
             return False, None
 
     def release(self):
         """Release the camera."""
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+        with self.lock:
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+
+    def is_available(self):
+        """Check if the camera is available and working."""
+        return self.cap is not None and self.cap.isOpened()
+
+    def get_status(self):
+        """Get detailed camera status."""
+        return {
+            'available': self.is_available(),
+            'resolution': self.get_current_resolution(),
+            'failures': self.consecutive_failures,
+            'selected_camera': self.selected_camera_index
+        }
 
     def get_available_cameras(self):
         """Get list of available cameras."""

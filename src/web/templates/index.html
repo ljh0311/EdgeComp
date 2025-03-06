@@ -65,6 +65,7 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+            margin-top: 15px;
         }
         
         .control-group {
@@ -112,6 +113,7 @@
             padding: 15px;
             border-radius: 8px;
             text-align: center;
+            color: #ffffff;
         }
         
         .status-icon {
@@ -131,7 +133,8 @@
             padding: 10px;
             margin: 10px 0;
             border-radius: 5px;
-            background: #f8f9fa;
+            background: #333;
+            color: #ffffff;
         }
         
         .detection-item {
@@ -141,6 +144,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            color: #ffffff;
         }
         
         .alerts-list {
@@ -156,6 +160,7 @@
             padding: 15px;
             border-radius: 8px;
             border-left: 4px solid;
+            color: #ffffff;
         }
         
         .alert-item.critical {
@@ -178,9 +183,10 @@
         .waveform-container {
             width: 100%;
             height: 150px;
-            background: #f8f9fa;
+            background: #333;
             margin-top: 20px;
             position: relative;
+            border-radius: 8px;
         }
         
         #waveformCanvas {
@@ -195,7 +201,6 @@
             transform: translate(-50%, -50%);
             text-align: center;
             color: white;
-            display: none;
         }
         
         #errorMessage {
@@ -213,6 +218,34 @@
         .status-active { color: #28a745; }
         .status-inactive { color: #dc3545; }
         .status-warning { color: #ffc107; }
+
+        /* Additional dark theme styles */
+        h1, h2, h3, h4, h5, h6 {
+            color: #ffffff;
+        }
+
+        .panel-title {
+            color: #ffffff;
+            margin-bottom: 15px;
+        }
+
+        /* Scrollbar styling for dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
     </style>
 </head>
 <body>
@@ -313,7 +346,6 @@
     <div id="errorMessage"></div>
 
     <script>
-<<<<<<< HEAD
         // Initialize Socket.IO with error handling
         const socket = io({
             reconnection: true,
@@ -350,8 +382,8 @@
         {% if dev_mode %}
         // Initialize waveform visualization
         const waveformCanvas = document.getElementById('waveformCanvas');
-=======
-        const socket = io();
+        {% endif %}
+
         const videoFeed = document.getElementById('videoFeed');
         const cameraPlaceholder = document.getElementById('cameraPlaceholder');
         const cameraSelect = document.getElementById('cameraSelect');

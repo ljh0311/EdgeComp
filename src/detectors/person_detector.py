@@ -11,90 +11,81 @@ import logging
 import sys
 import os
 from pathlib import Path
+import torch
 
 
 class PersonDetector:
-    def __init__(self, model_path=None):
-        """
-        Initialize the person detector.
+    """Person detector using YOLOv5."""
 
-        Args:
-            model_path (str, optional): Path to the YOLO model file. If None, uses default.
-        """
+    def __init__(self, model_path=None, device=None):
+        """Initialize the person detector."""
         self.logger = logging.getLogger(__name__)
-        self.model = None
+        
+        # Set device
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        try:
+            self._initialize_model(model_path)
+            self.logger.info(f"Person detector initialized on {self.device}")
+        except Exception as e:
+            self.logger.error(f"Error initializing person detector: {str(e)}")
+            raise
 
-        # Create a null device to suppress YOLO's output
-        class NullDevice:
-            def write(self, s):
-                pass
-
-            def flush(self):
-                pass
-
-        # Store original stdout
-        self.original_stdout = sys.stdout
-        # Create null device for suppressing output
-        self.null_device = NullDevice()
-
-        # Use default model path if none provided
-        if model_path is None:
-            model_path = str(Path(__file__).parent.parent / "yolov8n.pt")
-
-        self._initialize_model(model_path)
-
-    def _initialize_model(self, model_path):
+    def _initialize_model(self, model_path=None):
         """Initialize the YOLO model."""
         try:
-            # Temporarily redirect stdout to suppress YOLO's output
-            sys.stdout = self.null_device
-
-            # Initialize model
-            self.model = YOLO(model_path)
-            self.model.to('cpu')  # Use CPU by default
-
-            # Restore stdout
-            sys.stdout = self.original_stdout
-            self.logger.info("Person detection model initialized successfully")
-
+            if model_path:
+                self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path)
+            else:
+                self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+            
+            # Move model to appropriate device and set inference mode
+            self.model = self.model.to(self.device)
+            self.model.eval()
+            
+            # Suppress model output
+            self.model.conf = 0.5  # Confidence threshold
+            self.model.iou = 0.45  # NMS IoU threshold
+            self.model.classes = [0]  # Only detect persons (class 0 in COCO)
+            
+            if self.device.type == 'cuda':
+                # Enable CUDA optimizations
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cudnn.deterministic = False
+                
         except Exception as e:
-            # Restore stdout
-            sys.stdout = self.original_stdout
-            self.logger.error(f"Error initializing person detection model: {str(e)}")
+            self.logger.error(f"Error loading YOLO model: {str(e)}")
             raise
 
     def detect(self, frame):
-        """
-        Detect persons in a frame.
-
-        Args:
-            frame (numpy.ndarray): Input frame
-
-        Returns:
-            list: List of detections [x1, y1, x2, y2, conf, cls]
-        """
-        if self.model is None:
-            return []
-
+        """Detect persons in a frame."""
         try:
-            # Run detection
-            results = self.model(frame, verbose=False)
+            # Convert frame to RGB (YOLO expects RGB)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Filter for person class (class 0 in COCO dataset)
+            # Move input to device and perform inference
+            with torch.no_grad():  # Disable gradient calculation for inference
+                with torch.amp.autocast(device_type='cuda' if self.device.type == 'cuda' else 'cpu'):
+                    results = self.model(frame_rgb, size=640)  # Inference with fixed size for consistency
+            
+            # Extract detections for persons (class 0)
             detections = []
-            for r in results:
-                boxes = r.boxes
-                for box in boxes:
-                    if box.cls == 0:  # Person class
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        conf = box.conf[0].cpu().numpy()
-                        cls = box.cls[0].cpu().numpy()
-                        detections.append([x1, y1, x2, y2, conf, cls])
-
+            if len(results.pred) > 0 and len(results.pred[0]) > 0:
+                # Get detections from first image
+                pred = results.pred[0]
+                
+                # Filter for person class (0) and convert to CPU if needed
+                for *xyxy, conf, cls in pred:
+                    if int(cls) == 0:  # Person class
+                        # Convert to CPU for further processing
+                        bbox = [int(x.cpu().item()) if x.is_cuda else int(x.item()) for x in xyxy]
+                        confidence = float(conf.cpu().item()) if conf.is_cuda else float(conf.item())
+                        detections.append([*bbox, confidence, 0])  # [x1, y1, x2, y2, conf, cls]
+            
             return detections
-
+            
         except Exception as e:
-            self.logger.error(f"Error during person detection: {str(e)}")
+            self.logger.error(f"Error in person detection: {str(e)}")
             return []
 
     def process_frame(self, frame):
@@ -145,7 +136,10 @@ class PersonDetector:
             return frame
 
     def __del__(self):
-        """Cleanup when object is deleted."""
-        # Restore stdout
-        if hasattr(self, 'original_stdout'):
-            sys.stdout = self.original_stdout
+        """Cleanup resources."""
+        try:
+            # Clear CUDA cache if using GPU
+            if hasattr(self, 'device') and self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+        except Exception as e:
+            self.logger.error(f"Error cleaning up person detector: {str(e)}")
