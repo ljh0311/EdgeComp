@@ -9,11 +9,12 @@ import queue
 import numpy as np
 import sounddevice as sd
 import librosa
-from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2Processor
+from transformers import Wav2Vec2Model, Wav2Vec2Config
+import torch.nn as nn
 import os
 
 class EmotionRecognizer:
-    def __init__(self, model_path=None, web_app=None):
+    def __init__(self, web_app=None):
         self.logger = logging.getLogger(__name__)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.running = False
@@ -28,24 +29,24 @@ class EmotionRecognizer:
         self.block_size = 16000  # 1 second of audio
         
         try:
-            # Use a more stable pre-trained model
-            model_name = "facebook/wav2vec2-base"
-            self.model = Wav2Vec2ForSequenceClassification.from_pretrained(
-                model_name,
-                num_labels=4,  # angry, happy, neutral, sad
-                ignore_mismatched_sizes=True
-            )
-            self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+            # Initialize base wav2vec2 model
+            config = Wav2Vec2Config.from_pretrained("facebook/wav2vec2-base")
+            self.model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base", config=config)
             
-            # Load custom weights if available
-            if model_path and os.path.exists(model_path):
-                self.logger.info(f"Loading custom model weights from {model_path}")
-                self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+            # Add custom classification head
+            self.classifier = nn.Sequential(
+                nn.Linear(768, 256),  # 768 is wav2vec2-base hidden size
+                nn.ReLU(),
+                nn.Dropout(0.1),
+                nn.Linear(256, 8)  # 8 emotions
+            )
             
             self.model.to(self.device)
+            self.classifier.to(self.device)
             self.model.eval()
+            self.classifier.eval()
             
-            self.emotions = ['angry', 'happy', 'neutral', 'sad']
+            self.emotions = ['angry', 'calm', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
             self.logger.info("Emotion recognizer initialized successfully")
             
         except Exception as e:
@@ -101,21 +102,24 @@ class EmotionRecognizer:
                     
                     # Process audio through model
                     with torch.no_grad():
-                        inputs = self.processor(
-                            audio_buffer,
-                            sampling_rate=self.sample_rate,
-                            return_tensors="pt",
-                            padding=True
-                        )
-                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                        # Convert to tensor
+                        inputs = torch.FloatTensor(audio_buffer).unsqueeze(0).to(self.device)
                         
-                        outputs = self.model(**inputs)
-                        probs = torch.nn.functional.softmax(outputs.logits, dim=1)
+                        # Get wav2vec2 features
+                        outputs = self.model(inputs)
+                        hidden_states = outputs.last_hidden_state
+                        
+                        # Pool features (mean pooling)
+                        pooled = torch.mean(hidden_states, dim=1)
+                        
+                        # Classify emotion
+                        logits = self.classifier(pooled)
+                        probs = torch.nn.functional.softmax(logits, dim=1)
                         emotion_idx = torch.argmax(probs, dim=1)[0]
                         confidence = probs[0][emotion_idx].item()
                         emotion = self.emotions[emotion_idx]
                         
-                        if confidence > 0.5:  # Only emit confident predictions
+                        if confidence > 0.3:  # Lower threshold for testing
                             self.logger.info(f"Detected emotion: {emotion} ({confidence:.2f})")
                             if self.web_app:
                                 self.web_app.emit_emotion(emotion, confidence)
