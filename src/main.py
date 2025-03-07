@@ -381,110 +381,93 @@ class BabyMonitorSystem:
     def process_frames(self):
         """Process video frames in a separate thread."""
         last_frame_time = 0
-        frame_interval = 1.0 / 60.0  # Increased target FPS to 60
+        frame_interval = 1.0 / 30.0  # 30 FPS target
         error_count = 0
         max_errors = 3
         frame_count = 0
+        last_detection_time = 0
+        detection_interval = 0.1  # Run detection every 100ms
         last_ui_update = 0
-        ui_update_interval = 0.1  # Update UI every 100ms
+        ui_update_interval = 0.033  # Update UI at ~30fps
+        last_web_update = 0
+        web_update_interval = 0.1  # Update web interface every 100ms
 
         while self.is_running:
             try:
-                if not self.camera_enabled:
-                    time.sleep(0.01)
-                    continue
-
-                if not hasattr(self, 'camera') or not self.camera.is_available():
-                    if error_count == 0:  # Only log once
-                        self.logger.warning("Camera not available")
-                        self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Error - Not Available"))
-                        self.root.after(0, lambda: self.camera_btn.configure(text="Start Camera"))
-                    error_count += 1
+                if not self.camera_enabled or not hasattr(self, 'camera'):
                     time.sleep(0.1)
                     continue
 
-                # Frame rate control
                 current_time = time.time()
+
+                # Frame rate control - sleep if we're ahead of schedule
                 if current_time - last_frame_time < frame_interval:
-                    time.sleep(0.0001)  # Minimal sleep
+                    time.sleep(max(0.001, (frame_interval - (current_time - last_frame_time)) * 0.95))
                     continue
 
                 # Get frame
                 ret, frame = self.camera.get_frame()
                 if not ret or frame is None:
-                    if error_count == 0:  # Only log once
-                        self.logger.warning("Failed to get frame")
                     error_count += 1
                     if error_count >= max_errors:
                         self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Error - No Frame"))
                         error_count = 0
-                    time.sleep(0.01)
+                    time.sleep(0.1)
                     continue
 
                 error_count = 0
                 frame_count += 1
                 last_frame_time = current_time
 
-                # Process frame with minimal copying
-                detection_results = {
-                    'people_count': 0,
-                    'rapid_motion': False,
-                    'fall_detected': False,
-                    'position': 'unknown',
-                    'timestamp': datetime.now().strftime('%H:%M:%S')
-                }
+                # Process detections in a separate thread to avoid blocking
+                if current_time - last_detection_time >= detection_interval and hasattr(self, 'person_detector'):
+                    def process_detection():
+                        try:
+                            detections = self.person_detector.detect(frame)
+                            
+                            if hasattr(self, 'motion_detector'):
+                                processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
+                                
+                                detection_results = {
+                                    'people_count': len(detections),
+                                    'rapid_motion': rapid_motion,
+                                    'fall_detected': fall_detected,
+                                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                                }
 
-                try:
-                    # Process detection every 3rd frame
-                    if frame_count % 3 == 0 and hasattr(self, 'person_detector'):
-                        detections = self.person_detector.detect(frame)
-                        detection_results['people_count'] = int(len(detections))
-
-                        if hasattr(self, 'motion_detector'):
-                            processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
-                            detection_results.update({
-                                'rapid_motion': bool(rapid_motion),
-                                'fall_detected': bool(fall_detected)
-                            })
-
-                            # Update UI status less frequently
-                            if current_time - last_ui_update >= ui_update_interval:
+                                # Update UI status in main thread
                                 status_text = "👀  Detection: "
-                                if detection_results['fall_detected']:
+                                if fall_detected:
                                     status_text += "Fall Detected!"
-                                elif detection_results['rapid_motion']:
+                                elif rapid_motion:
                                     status_text += "Rapid Motion"
-                                elif detection_results['people_count'] > 0:
-                                    status_text += f"{detection_results['people_count']} Person(s)"
+                                elif detections:
+                                    status_text += f"{len(detections)} Person(s)"
                                 else:
                                     status_text += "No Activity"
                                 
-                                self.root.after(0, lambda: self.detection_status.configure(text=status_text))
-                                last_ui_update = current_time
+                                self.root.after(0, lambda t=status_text: self.detection_status.configure(text=t))
 
-                            # Emit detection results every 5th processed frame
-                            if frame_count % 5 == 0 and hasattr(self, 'web_app'):
-                                self.web_app.emit_detection(detection_results)
-                    else:
-                        processed_frame = frame
+                                # Emit detection results
+                                if hasattr(self, 'web_app'):
+                                    self.web_app.emit_detection(detection_results)
 
-                    # Update web interface with reduced frequency
-                    if frame_count % 2 == 0 and hasattr(self, 'web_app'):
-                        self.web_app.emit_frame(frame)
+                        except Exception as e:
+                            if self.dev_mode:
+                                self.logger.error(f"Error in detection processing: {str(e)}")
 
-                except Exception as e:
-                    if self.dev_mode:
-                        self.logger.error(f"Error in frame processing: {str(e)}")
-                    processed_frame = frame
+                    # Start detection in a separate thread
+                    detection_thread = threading.Thread(target=process_detection, daemon=True)
+                    detection_thread.start()
+                    last_detection_time = current_time
 
-                # Update UI elements with optimized image processing
-                try:
-                    # Skip frame update if UI is too busy
-                    if self.root.tk.dooneevent(0):  # Check if UI is responsive
-                        # Convert and resize frame more efficiently
+                # Update UI with camera feed
+                if current_time - last_ui_update >= ui_update_interval:
+                    try:
+                        # Convert frame to RGB and resize efficiently
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         
-                        # Get current canvas dimensions
+                        # Get canvas dimensions once
                         canvas_width = self.video_canvas.winfo_width()
                         canvas_height = self.video_canvas.winfo_height()
 
@@ -501,21 +484,46 @@ class BabyMonitorSystem:
                                 new_height = canvas_height
                                 new_width = int(canvas_height * frame_aspect)
 
-                            # Use more efficient resizing method
-                            frame_rgb = cv2.resize(frame_rgb, (new_width, new_height), 
-                                                interpolation=cv2.INTER_NEAREST)  # Faster interpolation
+                            # Only resize if dimensions have changed significantly
+                            if (abs(new_width - frame_rgb.shape[1]) > 10 or 
+                                abs(new_height - frame_rgb.shape[0]) > 10):
+                                frame_rgb = cv2.resize(
+                                    frame_rgb, 
+                                    (new_width, new_height),
+                                    interpolation=cv2.INTER_NEAREST
+                                )
 
-                        # Convert to PIL more efficiently
-                        frame_pil = Image.fromarray(frame_rgb)
-                        photo = ImageTk.PhotoImage(image=frame_pil)
+                            # Convert to PIL and PhotoImage in a separate thread
+                            def update_ui(frame_data, w, h):
+                                try:
+                                    frame_pil = Image.fromarray(frame_data)
+                                    photo = ImageTk.PhotoImage(image=frame_pil)
+                                    self.root.after(0, lambda p=photo, w=w, h=h: 
+                                                  self.update_video_frame(p, w, h))
+                                except Exception as e:
+                                    if self.dev_mode:
+                                        self.logger.error(f"Error in UI update: {str(e)}")
 
-                        # Update canvas in main thread
-                        self.root.after(1, lambda p=photo, w=canvas_width, h=canvas_height: 
-                                      self.update_video_frame(p, w, h))
+                            ui_thread = threading.Thread(
+                                target=update_ui, 
+                                args=(frame_rgb.copy(), canvas_width, canvas_height),
+                                daemon=True
+                            )
+                            ui_thread.start()
+                            last_ui_update = current_time
 
-                except Exception as e:
-                    if self.dev_mode:
-                        self.logger.error(f"Error updating video display: {str(e)}")
+                    except Exception as e:
+                        if self.dev_mode:
+                            self.logger.error(f"Error updating video display: {str(e)}")
+
+                # Update web interface
+                if current_time - last_web_update >= web_update_interval and hasattr(self, 'web_app'):
+                    try:
+                        self.web_app.emit_frame(frame)
+                        last_web_update = current_time
+                    except Exception as e:
+                        if self.dev_mode:
+                            self.logger.error(f"Error sending frame to web interface: {str(e)}")
 
             except Exception as e:
                 if self.dev_mode:

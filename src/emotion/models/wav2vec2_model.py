@@ -1,19 +1,24 @@
 """
-Emotion recognition module using wav2vec2 model.
+Wav2Vec2-based Emotion Recognition Model
+====================================
+Uses Facebook's Wav2Vec2 model for emotion recognition.
 """
 
 import torch
-import logging
-import threading
-import queue
-import numpy as np
-import sounddevice as sd
-import librosa
-from transformers import Wav2Vec2Model, Wav2Vec2Config
 import torch.nn as nn
-import os
+import torch.nn.functional as F
+from transformers import Wav2Vec2Model, Wav2Vec2Config
+import logging
+import numpy as np
+import queue
+import threading
+import sounddevice as sd
 
-class EmotionRecognizer:
+class Wav2Vec2EmotionRecognizer:
+    """Real-time emotion recognition using Wav2Vec2"""
+    
+    EMOTIONS = ['angry', 'calm', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
+    
     def __init__(self, web_app=None):
         self.logger = logging.getLogger(__name__)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -38,7 +43,7 @@ class EmotionRecognizer:
                 nn.Linear(768, 256),  # 768 is wav2vec2-base hidden size
                 nn.ReLU(),
                 nn.Dropout(0.1),
-                nn.Linear(256, 8)  # 8 emotions
+                nn.Linear(256, len(self.EMOTIONS))
             )
             
             self.model.to(self.device)
@@ -46,11 +51,10 @@ class EmotionRecognizer:
             self.model.eval()
             self.classifier.eval()
             
-            self.emotions = ['angry', 'calm', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
-            self.logger.info("Emotion recognizer initialized successfully")
+            self.logger.info("Wav2Vec2 emotion recognizer initialized successfully")
             
         except Exception as e:
-            self.logger.error(f"Error initializing emotion recognizer: {str(e)}")
+            self.logger.error(f"Error initializing Wav2Vec2 emotion recognizer: {str(e)}")
             raise
 
     def audio_callback(self, indata, frames, time, status):
@@ -64,14 +68,6 @@ class EmotionRecognizer:
                 audio_data = np.mean(indata, axis=1)
             else:
                 audio_data = indata.flatten()
-            
-            # Resample to 16kHz if needed
-            if self.stream.samplerate != self.sample_rate:
-                audio_data = librosa.resample(
-                    audio_data,
-                    orig_sr=self.stream.samplerate,
-                    target_sr=self.sample_rate
-                )
             
             # Normalize audio
             if audio_data.dtype != np.float32:
@@ -114,12 +110,12 @@ class EmotionRecognizer:
                         
                         # Classify emotion
                         logits = self.classifier(pooled)
-                        probs = torch.nn.functional.softmax(logits, dim=1)
+                        probs = F.softmax(logits, dim=1)
                         emotion_idx = torch.argmax(probs, dim=1)[0]
                         confidence = probs[0][emotion_idx].item()
-                        emotion = self.emotions[emotion_idx]
+                        emotion = self.EMOTIONS[emotion_idx]
                         
-                        if confidence > 0.3:  # Lower threshold for testing
+                        if confidence > 0.3:  # Confidence threshold
                             self.logger.info(f"Detected emotion: {emotion} ({confidence:.2f})")
                             if self.web_app:
                                 self.web_app.emit_emotion(emotion, confidence)
@@ -157,7 +153,7 @@ class EmotionRecognizer:
             self.process_thread.daemon = True
             self.process_thread.start()
             
-            self.logger.info("Emotion recognition started")
+            self.logger.info("Wav2Vec2 emotion recognition started")
             
         except Exception as e:
             self.logger.error(f"Error starting emotion recognition: {str(e)}")
@@ -178,4 +174,4 @@ class EmotionRecognizer:
             self.stream.stop()
             self.stream.close()
         
-        self.logger.info("Emotion recognition stopped") 
+        self.logger.info("Wav2Vec2 emotion recognition stopped") 

@@ -1,7 +1,7 @@
 """
-Emotion Recognition Module
-======================
-Handles real-time emotion recognition from audio input.
+Basic Neural Network Emotion Recognition Model
+=========================================
+Uses a simple feedforward neural network with MFCC and spectral features.
 """
 
 import os
@@ -17,8 +17,8 @@ from pathlib import Path
 import librosa
 
 
-class EmotionModel(nn.Module):
-    """Emotion recognition model architecture"""
+class BasicEmotionModel(nn.Module):
+    """Basic emotion recognition model architecture"""
     def __init__(self, input_size=768, hidden_size=256, num_emotions=4):
         super().__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
@@ -35,8 +35,8 @@ class EmotionModel(nn.Module):
         return x
 
 
-class EmotionRecognizer:
-    """Real-time emotion recognition system"""
+class BasicEmotionRecognizer:
+    """Real-time emotion recognition using basic neural network"""
 
     EMOTIONS = ["angry", "happy", "sad", "neutral"]
 
@@ -64,7 +64,7 @@ class EmotionRecognizer:
         """Load the emotion recognition model"""
         try:
             # Create model instance
-            self.model = EmotionModel()
+            self.model = BasicEmotionModel()
             
             # Load state dict
             if os.path.exists(model_path):
@@ -182,7 +182,7 @@ class EmotionRecognizer:
             self.process_thread.daemon = True
             self.process_thread.start()
             
-            self.logger.info("Emotion recognition started")
+            self.logger.info("Basic emotion recognition started")
             
         except Exception as e:
             self.logger.error(f"Error starting emotion recognition: {str(e)}")
@@ -203,4 +203,4 @@ class EmotionRecognizer:
             self.stream.stop()
             self.stream.close()
             
-        self.logger.info("Emotion recognition stopped") 
+        self.logger.info("Basic emotion recognition stopped") 
