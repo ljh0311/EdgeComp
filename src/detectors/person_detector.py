@@ -60,13 +60,25 @@ class PersonDetector:
     def detect(self, frame):
         """Detect persons in a frame."""
         try:
+            # Skip processing if model not loaded
+            if self.model is None:
+                return []
+
             # Convert frame to RGB (YOLO expects RGB)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
+            # Resize frame to a fixed size for faster processing
+            input_size = 640
+            orig_shape = frame_rgb.shape[:2]
+            frame_resized = cv2.resize(frame_rgb, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
+            
             # Move input to device and perform inference
             with torch.no_grad():  # Disable gradient calculation for inference
-                with torch.amp.autocast(device_type='cuda' if self.device.type == 'cuda' else 'cpu'):
-                    results = self.model(frame_rgb, size=640)  # Inference with fixed size for consistency
+                if self.device.type == 'cuda':
+                    with torch.amp.autocast('cuda', dtype=torch.float16):  # Use FP16 for faster inference
+                        results = self.model(frame_resized)
+                else:
+                    results = self.model(frame_resized)
             
             # Extract detections for persons (class 0)
             detections = []
@@ -75,11 +87,23 @@ class PersonDetector:
                 pred = results.pred[0]
                 
                 # Filter for person class (0) and convert to CPU if needed
+                scale_x = orig_shape[1] / input_size
+                scale_y = orig_shape[0] / input_size
+                
                 for *xyxy, conf, cls in pred:
-                    if int(cls) == 0:  # Person class
-                        # Convert to CPU for further processing
-                        bbox = [int(x.cpu().item()) if x.is_cuda else int(x.item()) for x in xyxy]
-                        confidence = float(conf.cpu().item()) if conf.is_cuda else float(conf.item())
+                    if int(cls) == 0 and float(conf) > 0.3:  # Person class with confidence threshold
+                        # Convert to CPU and scale coordinates back to original image size
+                        x1, y1, x2, y2 = [
+                            float(coord.cpu() if coord.is_cuda else coord) for coord in xyxy
+                        ]
+                        # Scale coordinates back to original image size
+                        bbox = [
+                            x1 * scale_x,
+                            y1 * scale_y,
+                            x2 * scale_x,
+                            y2 * scale_y
+                        ]
+                        confidence = float(conf.cpu() if conf.is_cuda else conf)
                         detections.append([*bbox, confidence, 0])  # [x1, y1, x2, y2, conf, cls]
             
             return detections
