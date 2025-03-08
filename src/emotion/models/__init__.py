@@ -4,9 +4,9 @@ Emotion Recognition Models
 Provides a unified interface for different emotion recognition models.
 """
 
-from .hubert_model import HuBERTEmotionDetector
-from .wav2vec2_model import Wav2Vec2EmotionRecognizer
-from .basic_model import BasicEmotionRecognizer
+from .sound_hubert import HuBERTEmotionDetector
+from .sound_wav2vec2 import Wav2Vec2EmotionRecognizer
+from .sound_basic import BasicEmotionRecognizer
 
 __all__ = [
     'HuBERTEmotionDetector',
