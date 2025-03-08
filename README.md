@@ -104,54 +104,73 @@ edge_comp/
 
 3. **Install Dependencies**
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
    ```
 
-4. **Environment Setup**
+4. **Run System Setup**
    ```bash
-   # Copy template and edit as needed
-   cp .env.template .env
+   # Run the setup script to configure the system
+   python src/setup.py
+   
+   # This will:
+   # - Check system requirements
+   # - Install/update required packages
+   # - Configure camera and audio devices
+   # - Create necessary directories
+   # - Generate system configuration file
    ```
 
-5. **Run the Application**
+5. **Start the Application**
+   ```bash
+   # Start the web interface
+   python src/web/web_app.py
+   
+   # Or start the main application
+   python src/main.py
+   
+   # For development mode with additional logging and visualizations
+   python src/main.py --dev
+   ```
+
+### Running Individual Components
+
+1. **System Setup and Configuration**
+   ```bash
+   python src/setup.py
+   ```
+   - Configures system and hardware
+   - Creates required directories
+   - Generates `config/system_config.json`
+   - Shows recommended model based on hardware
+
+2. **Web Interface Only**
+   ```bash
+   python src/web/web_app.py
+   ```
+   - Access at `http://localhost:5000`
+   - Real-time monitoring interface
+   - Camera and audio controls
+
+3. **Main Application**
    ```bash
    # Normal mode
    python src/main.py
    
-   # Developer mode (with additional visualizations)
+   # Development mode
    python src/main.py --dev
    ```
+   - Full application with all features
+   - Emotion detection and monitoring
+   - System resource tracking
 
-### Model Setup
+### Configuration Files
 
-The required models will be downloaded automatically when you first run the application:
+After running `setup.py`, the following files will be created:
 
-- **YOLOv8n**: Person detection model
-- **HuBERT**: Emotion recognition model
-
-You can also manually download them by following instructions in `models/README.md`.
-
-## Configuration
-
-### Environment Variables
-
-Create a `.env` file with the following options:
-
-```env
-CAMERA_INDEX=0           # Camera device index
-USE_CUDA=0              # Enable CUDA (1) or CPU (0)
-LOG_LEVEL=INFO          # Logging level
-```
-
-### System Configuration
-
-Main configuration settings are in `src/utils/config.py`:
-
-- Camera settings (resolution, FPS)
-- Model paths and parameters
-- Audio processing settings
-- Detection thresholds
-- Performance options
+- `config/system_config.json`: System configuration and hardware settings
+- `logs/baby_monitor.log`: Application logs
+- `models/`: Downloaded model files
+- `data/`: Application data directory
 
 ## Usage
 

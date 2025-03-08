@@ -246,9 +246,116 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #555;
         }
+
+        /* Add new styles for system monitoring */
+        .system-panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .resource-meter {
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .resource-meter .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745 0%, #ffc107 50%, #dc3545 100%);
+            transition: width 0.3s ease;
+        }
+
+        .resource-label {
+            display: flex;
+            justify-content: space-between;
+            color: #fff;
+            margin-bottom: 5px;
+        }
+
+        .system-info {
+            color: #fff;
+            margin-top: 15px;
+        }
+
+        .system-info .label {
+            color: #888;
+        }
+
+        .recommended-model {
+            background: #28a745;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: inline-block;
+            margin-top: 10px;
+        }
+
+        .model-loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 1000;
+            color: white;
+            display: none;
+        }
+
+        .model-loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .model-info {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .model-info .label {
+            color: #888;
+            margin-right: 5px;
+        }
+
+        .model-select-wrapper {
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        .model-select-wrapper select:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
+    <!-- Add loading overlay -->
+    <div class="model-loading" id="modelLoading">
+        <div class="spinner"></div>
+        <div id="modelLoadingText">Loading model...</div>
+    </div>
+
     <div class="container">
         <div class="main-content">
             <div class="video-section">
@@ -326,9 +433,19 @@
                             <span class="status-icon" id="motionIcon">🔄</span>
                             <span>Motion Status: <span id="motionStatus">No Motion</span></span>
                         </div>
-                        <div class="d-flex align-items-center">
+                        <div class="d-flex align-items-center mb-2">
                             <span class="status-icon" id="soundIcon">🔊</span>
                             <span>Sound Status: <span id="soundStatus">No Sound</span></span>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <span class="status-icon" id="emotionIcon">😊</span>
+                            <span>Speech Emotion: <span id="speechEmotion">None</span></span>
+                        </div>
+                        <div class="emotion-confidence mt-2" style="display: none;">
+                            <div class="progress" style="height: 20px; background: #2d2d2d; border-radius: 10px;">
+                                <div id="emotionConfidence" class="progress-bar" role="progressbar" style="width: 0%; background: linear-gradient(90deg, #28a745, #17a2b8);"></div>
+                            </div>
+                            <small class="text-muted" id="emotionConfidenceText">Confidence: 0%</small>
                         </div>
                     </div>
                 </div>
@@ -337,6 +454,49 @@
                     <h3><i class="fas fa-bell"></i> Recent Alerts</h3>
                     <div id="alertsList" class="alerts-list">
                         <!-- Alerts will be added here -->
+                    </div>
+                </div>
+
+                <!-- Add System Monitoring Panel -->
+                <div class="system-panel">
+                    <h3><i class="fas fa-microchip"></i> System Monitor</h3>
+                    
+                    <!-- CPU Usage -->
+                    <div class="resource-label">
+                        <span>CPU Usage</span>
+                        <span id="cpuValue">0%</span>
+                    </div>
+                    <div class="resource-meter">
+                        <div id="cpuMeter" class="fill" style="width: 0%"></div>
+                    </div>
+
+                    <!-- Memory Usage -->
+                    <div class="resource-label">
+                        <span>Memory Usage</span>
+                        <span id="memoryValue">0%</span>
+                    </div>
+                    <div class="resource-meter">
+                        <div id="memoryMeter" class="fill" style="width: 0%"></div>
+                    </div>
+
+                    <!-- Disk Usage -->
+                    <div class="resource-label">
+                        <span>Disk Usage</span>
+                        <span id="diskValue">0%</span>
+                    </div>
+                    <div class="resource-meter">
+                        <div id="diskMeter" class="fill" style="width: 0%"></div>
+                    </div>
+
+                    <!-- System Information -->
+                    <div class="system-info">
+                        <div><span class="label">Platform:</span> <span id="platformInfo">-</span></div>
+                        <div><span class="label">CPU:</span> <span id="cpuInfo">-</span></div>
+                        <div><span class="label">Memory:</span> <span id="memoryInfo">-</span></div>
+                        <div><span class="label">GPU:</span> <span id="gpuInfo">-</span></div>
+                        <div class="recommended-model">
+                            Recommended Model: <span id="recommendedModel">-</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -664,8 +824,148 @@
             }
         }
 
+        // Handle system information
+        socket.on('system_info', function(data) {
+            updateSystemInfo(data);
+        });
+
+        socket.on('resource_usage', function(data) {
+            updateResourceMeters(data.metrics);
+            
+            // Handle warnings
+            if (data.warnings && data.warnings.length > 0) {
+                data.warnings.forEach(warning => {
+                    addAlert(warning.includes('CRITICAL') ? 'critical' : 'warning', warning);
+                });
+            }
+        });
+
+        function updateSystemInfo(data) {
+            const platform = data.platform;
+            document.getElementById('platformInfo').textContent = 
+                `${platform.platform} ${platform.platform_release}`;
+            document.getElementById('cpuInfo').textContent = 
+                `${platform.processor} (${platform.cpu_count} cores)`;
+            document.getElementById('memoryInfo').textContent = 
+                `${Math.round(platform.total_memory / 1024)} GB`;
+            document.getElementById('gpuInfo').textContent = 
+                platform.gpu_available ? platform.gpu_name : 'Not Available';
+            document.getElementById('recommendedModel').textContent = 
+                data.recommended_model;
+        }
+
+        function updateResourceMeters(metrics) {
+            // Update CPU
+            const cpuMeter = document.getElementById('cpuMeter');
+            const cpuValue = document.getElementById('cpuValue');
+            cpuMeter.style.width = `${metrics.cpu_percent}%`;
+            cpuValue.textContent = `${Math.round(metrics.cpu_percent)}%`;
+
+            // Update Memory
+            const memoryMeter = document.getElementById('memoryMeter');
+            const memoryValue = document.getElementById('memoryValue');
+            memoryMeter.style.width = `${metrics.memory_percent}%`;
+            memoryValue.textContent = `${Math.round(metrics.memory_percent)}%`;
+
+            // Update Disk
+            const diskMeter = document.getElementById('diskMeter');
+            const diskValue = document.getElementById('diskValue');
+            diskMeter.style.width = `${metrics.disk_percent}%`;
+            diskValue.textContent = `${Math.round(metrics.disk_percent)}%`;
+        }
+
         // Initialize UI
         updateUI();
+
+        // Model handling
+        const modelSelect = document.getElementById('modelSelect');
+        const modelLoading = document.getElementById('modelLoading');
+        const modelLoadingText = document.getElementById('modelLoadingText');
+        const modelInfo = document.getElementById('modelInfo');
+
+        modelSelect.addEventListener('change', async () => {
+            const selectedModel = modelSelect.value;
+            if (!selectedModel) return;
+
+            try {
+                // Disable select during loading
+                modelSelect.disabled = true;
+                modelLoading.style.display = 'flex';
+                modelLoadingText.textContent = `Switching to ${selectedModel} model...`;
+
+                // Request model switch
+                socket.emit('select_model', { model_key: selectedModel }, (response) => {
+                    if (!response.success) {
+                        showError(response.error || 'Failed to switch model');
+                    }
+                });
+            } catch (error) {
+                showError('Error switching model: ' + error.message);
+                modelSelect.disabled = false;
+                modelLoading.style.display = 'none';
+            }
+        });
+
+        // Handle model loading states
+        socket.on('model_loading', (data) => {
+            if (data.status === 'loading') {
+                modelLoading.style.display = 'flex';
+                modelLoadingText.textContent = data.message;
+            } else if (data.status === 'success') {
+                modelLoading.style.display = 'none';
+                modelSelect.disabled = false;
+                showSuccess(data.message);
+            } else if (data.status === 'error') {
+                modelLoading.style.display = 'none';
+                modelSelect.disabled = false;
+                showError(data.message);
+            }
+        });
+
+        // Handle model info updates
+        socket.on('model_info', (info) => {
+            document.getElementById('modelName').textContent = info.name;
+            document.getElementById('modelType').textContent = info.type;
+            document.getElementById('modelGpu').textContent = info.is_gpu ? 'Yes' : 'No';
+            document.getElementById('modelEmotions').textContent = 
+                info.supported_emotions.join(', ') || 'None';
+            modelInfo.style.display = 'block';
+        });
+
+        // Add Speech Emotion Update Handler
+        socket.on('speech_emotion', function(data) {
+            const emotionIcons = {
+                'happy': '😊',
+                'sad': '😢',
+                'angry': '😠',
+                'neutral': '😐',
+                'fear': '😨',
+                'disgust': '🤢',
+                'surprise': '😮'
+            };
+            
+            const speechEmotionElement = document.getElementById('speechEmotion');
+            const emotionIconElement = document.getElementById('emotionIcon');
+            const emotionConfidenceDiv = document.querySelector('.emotion-confidence');
+            const emotionConfidenceBar = document.getElementById('emotionConfidence');
+            const emotionConfidenceText = document.getElementById('emotionConfidenceText');
+            
+            if (data.emotion) {
+                speechEmotionElement.textContent = data.emotion.charAt(0).toUpperCase() + data.emotion.slice(1);
+                emotionIconElement.textContent = emotionIcons[data.emotion.toLowerCase()] || '😊';
+                
+                if (data.confidence) {
+                    emotionConfidenceDiv.style.display = 'block';
+                    const confidencePercent = Math.round(data.confidence * 100);
+                    emotionConfidenceBar.style.width = `${confidencePercent}%`;
+                    emotionConfidenceText.textContent = `Confidence: ${confidencePercent}%`;
+                }
+            } else {
+                speechEmotionElement.textContent = 'None';
+                emotionIconElement.textContent = '😊';
+                emotionConfidenceDiv.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html> 
