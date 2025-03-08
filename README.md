@@ -86,12 +86,14 @@ edge_comp/
 ### Quick Start
 
 1. **Clone the Repository**
+
    ```bash
    git clone <repository-url>
    cd edge_comp
    ```
 
 2. **Create Virtual Environment**
+
    ```bash
    python -m venv venv
    
@@ -103,11 +105,13 @@ edge_comp/
    ```
 
 3. **Install Dependencies**
+
    ```bash
    pip install -e .
    ```
 
 4. **Run System Setup**
+
    ```bash
    # Run the setup script to configure the system
    python src/setup.py
@@ -121,6 +125,7 @@ edge_comp/
    ```
 
 5. **Start the Application**
+
    ```bash
    # Start the web interface
    python src/web/web_app.py
@@ -135,23 +140,28 @@ edge_comp/
 ### Running Individual Components
 
 1. **System Setup and Configuration**
+
    ```bash
    python src/setup.py
    ```
+
    - Configures system and hardware
    - Creates required directories
    - Generates `config/system_config.json`
    - Shows recommended model based on hardware
 
 2. **Web Interface Only**
+
    ```bash
    python src/web/web_app.py
    ```
+
    - Access at `http://localhost:5000`
    - Real-time monitoring interface
    - Camera and audio controls
 
 3. **Main Application**
+
    ```bash
    # Normal mode
    python src/main.py
@@ -159,6 +169,7 @@ edge_comp/
    # Development mode
    python src/main.py --dev
    ```
+
    - Full application with all features
    - Emotion detection and monitoring
    - System resource tracking
@@ -177,6 +188,7 @@ After running `setup.py`, the following files will be created:
 ### Desktop Application
 
 1. **Start the Application**
+
    ```bash
    python src/main.py
    ```
@@ -194,17 +206,20 @@ After running `setup.py`, the following files will be created:
 ### Web Interface
 
 Access the monitoring interface at:
+
 - Local: `http://localhost:5000`
 - Network: `http://<device-ip>:5000`
 
 ## Development
 
 ### Running Tests
+
 ```bash
 python -m pytest tests/
 ```
 
 ### Code Style
+
 ```bash
 # Format code
 black src/

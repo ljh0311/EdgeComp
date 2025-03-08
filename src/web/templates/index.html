@@ -966,6 +966,56 @@
                 emotionConfidenceDiv.style.display = 'none';
             }
         });
+
+        // Add waveform visualization code
+        const waveformCanvas = document.getElementById('waveformCanvas');
+        const waveformCtx = waveformCanvas.getContext('2d');
+        let waveformData = new Array(1000).fill(0);
+
+        socket.on('waveform_data', function(data) {
+            waveformData = data.data;
+            drawWaveform();
+        });
+
+        function drawWaveform() {
+            const canvas = waveformCanvas;
+            const ctx = waveformCtx;
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerY = height / 2;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Set line style
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+
+            // Draw waveform
+            ctx.beginPath();
+            const step = width / waveformData.length;
+            for (let i = 0; i < waveformData.length; i++) {
+                const x = i * step;
+                const y = centerY + (waveformData[i] * centerY);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+        }
+
+        // Resize canvas when window is resized
+        function resizeWaveformCanvas() {
+            const container = waveformCanvas.parentElement;
+            waveformCanvas.width = container.clientWidth;
+            waveformCanvas.height = container.clientHeight;
+            drawWaveform();
+        }
+
+        window.addEventListener('resize', resizeWaveformCanvas);
+        resizeWaveformCanvas();
     </script>
 </body>
 </html> 

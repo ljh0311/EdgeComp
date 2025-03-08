@@ -27,14 +27,18 @@ This directory contains all the machine learning models used by the Baby Monitor
 ## Model Management
 
 ### Automatic Download
+
 Models are automatically downloaded when:
+
 1. Running the main application: `python src/main.py`
 2. Using the emotion recognition test: `python src/run_emotion_recognition.py`
 
 ### Manual Download
+
 If needed, you can manually download the models:
 
 1. YOLOv8n:
+
    ```bash
    wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
    ```
