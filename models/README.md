@@ -1,34 +1,35 @@
-# Model Files
+# Models Directory
 
-This directory contains the trained models used by the Baby Monitor System.
+This directory contains all the machine learning models used by the Baby Monitor System.
 
 ## Required Models
 
-1. `hubert-base-ls960_emotion.pt` - Emotion detection model (HuBERT-based)
-   - Used for detecting emotions in baby sounds
-   - Trained on 6 emotion classes: Natural, Anger, Worried, Happy, Fear, Sadness
-   - Model accuracy: 77.47%
-   - Primary model for all audio analysis
+1. **YOLOv8n** (Person Detection)
+   - File: `yolov8n.pt`
+   - Downloaded automatically when running the application
+   - Used for person detection in video feed
 
-2. `yolov8n.pt` - Person detection model (YOLOv8 nano)
-   - Used for detecting people and their positions
-   - Pre-trained on COCO dataset
-   - Optimized for real-time detection
+2. **HuBERT** (Emotion Recognition)
+   - Files: Downloaded automatically to this directory when using HuBERT emotion detector
+   - Used for audio emotion recognition
+   - Models are managed by the SpeechBrain library
 
-3. `yolov8n-pose.pt` - Pose estimation model (YOLOv8 nano)
-   - Used for detecting body poses and tracking movement
-   - Pre-trained on COCO keypoints
-   - Used for fall detection and motion analysis
+## Model Management
 
-## Model Sources
+- Models are automatically downloaded when running the application
+- Large model files are excluded from git via `.gitignore`
+- If you need to manually download models:
+  1. Run the main application: `python src/main.py`
+  2. The required models will be downloaded automatically
+  3. Or use the emotion recognition test script: `python src/run_emotion_recognition.py`
 
-- Emotion detection model: HuBERT base model fine-tuned on custom emotion dataset
-- YOLOv8 models: Downloaded from Ultralytics (<https://github.com/ultralytics/yolov8>)
+## Model Versions
 
-## Model Updates
+- YOLOv8n: Latest version from Ultralytics
+- HuBERT: Latest version from SpeechBrain
 
-The system now uses a unified approach for audio processing:
+## Notes
 
-- All audio analysis (emotion detection, cry detection, etc.) is handled by the HuBERT model
-- The model provides high accuracy emotion classification with real-time performance
-- No separate models needed for cry detection as it's part of the emotion classification
+- Models are stored in this directory to keep the repository organized
+- The `.gitignore` file excludes `.pt`, `.pth`, and `.onnx` files to prevent large files in the repository
+- If you encounter any issues with model downloads, check your internet connection and try running the application again
