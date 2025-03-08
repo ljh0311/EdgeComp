@@ -45,15 +45,33 @@ class HuBERTEmotionDetector:
         
         # Load model
         try:
-            model_dir = config['model_path']
-            model_path = os.path.join(model_dir, "hubert-base-ls960_emotion.pt")
+            if isinstance(config, dict):
+                model_dir = config.get('model_path', '')
+            else:
+                model_dir = str(config)
+                
+            if not model_dir:
+                raise ValueError("Model path not provided in config")
+                
+            if os.path.isdir(model_dir):
+                model_path = os.path.join(model_dir, "hubert-base-ls960_emotion.pt")
+            else:
+                model_path = model_dir
             
-            self.device = torch.device(config.get('device', 'cpu'))
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found at {model_path}")
+            
+            # Set device
+            device_str = config.get('device', 'cpu') if isinstance(config, dict) else 'cpu'
+            self.device = torch.device(device_str)
+            
+            # Initialize and load model
             self.model = EmotionClassifier(len(self.EMOTIONS))
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
             self.model.to(self.device)
             self.model.eval()
             
+            # Initialize feature extractor
             self.feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/hubert-base-ls960")
             logger.info(f"Successfully loaded HuBERT model from {model_path}")
             
