@@ -131,12 +131,28 @@ class Camera:
             self.logger.error(f"Error selecting camera: {str(e)}")
             return False
 
-    def set_resolution(self, resolution_str):
-        """Set camera resolution from string format (e.g., '1280x720')."""
+    def set_resolution(self, width, height=None):
+        """Set camera resolution.
+        
+        Args:
+            width: Either the width as an integer, or a resolution string in format 'WIDTHxHEIGHT'
+            height: The height as an integer (optional if width is a resolution string)
+            
+        Returns:
+            bool: True if resolution was set successfully
+        """
         try:
-            width, height = map(int, resolution_str.split('x'))
+            # Handle resolution string format (e.g. '1280x720')
+            if isinstance(width, str):
+                width, height = map(int, width.split('x'))
+            
+            # Validate height parameter is provided
+            if height is None:
+                raise ValueError("Height parameter is required when width is not a resolution string")
+            
             self.width = width
             self.height = height
+            
             if self.cap and self.cap.isOpened():
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -144,6 +160,7 @@ class Camera:
                 actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 return actual_width == width and actual_height == height
             return False
+            
         except Exception as e:
             self.logger.error(f"Error setting resolution: {str(e)}")
             return False

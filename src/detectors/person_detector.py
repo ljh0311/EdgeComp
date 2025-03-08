@@ -71,7 +71,7 @@ class PersonDetector:
             frame (numpy.ndarray): Input frame
 
         Returns:
-            list: List of detections [x1, y1, x2, y2, conf, cls]
+            list: YOLO results object containing detections
         """
         if self.model is None:
             return []
@@ -79,19 +79,7 @@ class PersonDetector:
         try:
             # Run detection
             results = self.model(frame, verbose=False)
-            
-            # Filter for person class (class 0 in COCO dataset)
-            detections = []
-            for r in results:
-                boxes = r.boxes
-                for box in boxes:
-                    if box.cls == 0:  # Person class
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        conf = box.conf[0].cpu().numpy()
-                        cls = box.cls[0].cpu().numpy()
-                        detections.append([x1, y1, x2, y2, conf, cls])
-
-            return detections
+            return results
 
         except Exception as e:
             self.logger.error(f"Error during person detection: {str(e)}")
@@ -116,28 +104,34 @@ class PersonDetector:
             
             # Draw detections
             frame_copy = frame.copy()
-            for x1, y1, x2, y2, conf, cls in detections:
-                # Draw bounding box
-                cv2.rectangle(
-                    frame_copy,
-                    (int(x1), int(y1)),
-                    (int(x2), int(y2)),
-                    (0, 255, 0),  # Green color
-                    2
-                )
-                
-                # Draw label
-                label = f"Person {conf:.2f}"
-                cv2.putText(
-                    frame_copy,
-                    label,
-                    (int(x1), int(y1) - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2
-                )
-                
+            for r in detections:
+                boxes = r.boxes
+                for box in boxes:
+                    if box.cls == 0:  # Person class
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        cls = box.cls[0].cpu().numpy()
+                        # Draw bounding box
+                        cv2.rectangle(
+                            frame_copy,
+                            (int(x1), int(y1)),
+                            (int(x2), int(y2)),
+                            (0, 255, 0),  # Green color
+                            2
+                        )
+                        
+                        # Draw label
+                        label = f"Person {conf:.2f}"
+                        cv2.putText(
+                            frame_copy,
+                            label,
+                            (int(x1), int(y1) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 0),
+                            2
+                        )
+                        
             return frame_copy
             
         except Exception as e:

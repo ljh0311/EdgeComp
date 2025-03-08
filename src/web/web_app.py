@@ -230,15 +230,15 @@ class WebApp:
 
 class BabyMonitorWeb:
     def __init__(self, host='0.0.0.0', port=5000, dev_mode=False):
-        self.app = Flask(__name__)
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
         self.host = host
         self.port = port
+        self.dev_mode = dev_mode
+        self.app = Flask(__name__)
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.logger = logging.getLogger(__name__)
         self.monitor_system = None
         self.last_frame_time = 0
-        self.frame_interval = 1.0 / 30.0  # Target 30 FPS
-        self.dev_mode = dev_mode
+        self.frame_interval = 1.0 / 30.0  # 30 FPS max
         self.setup_routes()
         self.setup_socketio()
 
@@ -526,3 +526,29 @@ class BabyMonitorWeb:
             pass
         except Exception as e:
             self.logger.error(f"Error stopping web interface: {str(e)}")
+
+    def emit_detection(self, detection_data):
+        """Emit detection results to connected clients."""
+        try:
+            data = {
+                'people_count': detection_data.get('people_count', 0),
+                'timestamp': datetime.now().strftime('%H:%M:%S')
+            }
+            
+            # Update motion status
+            if detection_data.get('rapid_motion'):
+                data['motion_status'] = 'Rapid Motion'
+            elif detection_data.get('people_count', 0) > 0:
+                data['motion_status'] = 'Motion Detected'
+            else:
+                data['motion_status'] = 'No Motion'
+            
+            # Add fall detection status
+            if detection_data.get('fall_detected'):
+                data['fall_detected'] = True
+                # Emit a critical alert for fall detection
+                self.emit_alert('critical', 'Fall detected!')
+            
+            self.socketio.emit('detection', data)
+        except Exception as e:
+            self.logger.error(f"Error emitting detection: {str(e)}")
