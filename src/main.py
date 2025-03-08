@@ -497,11 +497,15 @@ class BabyMonitorSystem:
         max_errors = 3
         frame_count = 0
         last_detection_time = 0
-        detection_interval = 0.1  # Run detection every 100ms
+        detection_interval = 0.2  # Reduced detection frequency to 5 FPS
         last_ui_update = 0
         ui_update_interval = 0.033  # Update UI at ~30fps
         last_web_update = 0
         web_update_interval = 0.1  # Update web interface every 100ms
+
+        # Frame buffer for smoother display
+        self.current_frame = None
+        self.frame_lock = threading.Lock()
 
         self.logger.info("Frame processing thread started")
 
@@ -534,17 +538,18 @@ class BabyMonitorSystem:
                 frame_count += 1
                 last_frame_time = current_time
 
-                # Process detections
+                # Process detections at a lower frequency
                 if current_time - last_detection_time >= detection_interval and hasattr(self, 'person_detector'):
                     try:
-                        # Process frame with person detector
-                        processed_frame, status_text = self.person_detector.process_frame(frame)
-                        
-                        # Update detection status in UI
-                        self.root.after(0, lambda t=status_text: self.detection_status.configure(text=f"👀  Detection: {t}"))
-                        
-                        # Use the processed frame for display
-                        frame = processed_frame
+                        with self.frame_lock:
+                            # Process frame with person detector
+                            processed_frame, status_text = self.person_detector.process_frame(frame.copy())
+                            
+                            # Update detection status in UI
+                            self.root.after(0, lambda t=status_text: self.detection_status.configure(text=f"👀  Detection: {t}"))
+                            
+                            # Store the processed frame
+                            self.current_frame = processed_frame
                         
                     except Exception as e:
                         if self.dev_mode:
@@ -555,8 +560,16 @@ class BabyMonitorSystem:
                 # Update UI with camera feed
                 if current_time - last_ui_update >= ui_update_interval:
                     try:
+                        # Use the current processed frame if available, otherwise use the raw frame
+                        display_frame = None
+                        with self.frame_lock:
+                            if self.current_frame is not None:
+                                display_frame = self.current_frame.copy()
+                            else:
+                                display_frame = frame.copy()
+
                         # Convert frame to RGB and resize efficiently
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
                         
                         # Get canvas dimensions once
                         canvas_width = self.video_canvas.winfo_width()
@@ -581,26 +594,15 @@ class BabyMonitorSystem:
                                 frame_rgb = cv2.resize(
                                     frame_rgb, 
                                     (new_width, new_height),
-                                    interpolation=cv2.INTER_NEAREST
+                                    interpolation=cv2.INTER_LINEAR
                                 )
 
-                            # Convert to PIL and PhotoImage in a separate thread
-                            def update_ui(frame_data, w, h):
-                                try:
-                                    frame_pil = Image.fromarray(frame_data)
-                                    photo = ImageTk.PhotoImage(image=frame_pil)
-                                    self.root.after(0, lambda p=photo, w=w, h=h: 
-                                                  self.update_video_frame(p, w, h))
-                                except Exception as e:
-                                    if self.dev_mode:
-                                        self.logger.error(f"Error in UI update: {str(e)}")
+                            # Update UI in the main thread
+                            frame_pil = Image.fromarray(frame_rgb)
+                            photo = ImageTk.PhotoImage(image=frame_pil)
+                            self.root.after(0, lambda p=photo, w=canvas_width, h=canvas_height: 
+                                          self.update_video_frame(p, w, h))
 
-                            ui_thread = threading.Thread(
-                                target=update_ui, 
-                                args=(frame_rgb.copy(), canvas_width, canvas_height),
-                                daemon=True
-                            )
-                            ui_thread.start()
                             last_ui_update = current_time
 
                     except Exception as e:
@@ -610,7 +612,9 @@ class BabyMonitorSystem:
                 # Update web interface
                 if current_time - last_web_update >= web_update_interval and hasattr(self, 'web_app'):
                     try:
-                        self.web_app.emit_frame(frame)
+                        with self.frame_lock:
+                            if self.current_frame is not None:
+                                self.web_app.emit_frame(self.current_frame)
                         last_web_update = current_time
                     except Exception as e:
                         if self.dev_mode:
@@ -889,7 +893,7 @@ class BabyMonitorSystem:
         try:
             # Update camera status
             if self.camera_enabled:
-                self.camera_status.configure(text="��  Camera: Active")
+                self.camera_status.configure(text="  Camera: Active")
             else:
                 self.camera_status.configure(text="📷  Camera: Disabled")
 

@@ -10,6 +10,8 @@ import logging
 import torch
 from pathlib import Path
 
+# Get project root directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
 class Config:
     """Configuration settings."""
@@ -21,7 +23,7 @@ class Config:
     
     # Base paths
     BASE_DIR = Path(__file__).parent.parent
-    MODELS_DIR = BASE_DIR.parent / "models"
+    MODELS_DIR = PROJECT_ROOT / "models"
     
     # System-wide settings
     ENABLE_VISUALIZATION = False  # Disable visualization for Raspberry Pi
@@ -29,7 +31,11 @@ class Config:
     # Camera settings
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
-    CAMERA_FPS = 15  # Optimized for Pi
+    CAMERA_FPS = 30
+    
+    # Model paths
+    YOLO_MODEL_PATH = MODELS_DIR / "yolov8n.pt"
+    HUBERT_MODEL_PATH = MODELS_DIR / "hubert"
     
     # Person detection settings
     PERSON_DETECTION = {

@@ -29,6 +29,10 @@ class PersonDetector:
         self.detection_history = []
         self.history_size = 5
         
+        # Detection smoothing
+        self.smooth_factor = 0.7  # Higher value means more smoothing
+        self.min_detection_confidence = 0.3
+        
         try:
             self._initialize_model(model_path)
             self.logger.info(f"Person detector initialized on {self.device}")
@@ -49,7 +53,7 @@ class PersonDetector:
             self.model.eval()
             
             # Optimize model settings
-            self.model.conf = 0.3  # Lower confidence threshold for better detection
+            self.model.conf = self.min_detection_confidence  # Lower confidence threshold for better detection
             self.model.iou = 0.45  # NMS IoU threshold
             self.model.classes = [0]  # Only detect persons (class 0 in COCO)
             self.model.max_det = 10  # Limit maximum detections
@@ -62,6 +66,41 @@ class PersonDetector:
         except Exception as e:
             self.logger.error(f"Error loading YOLO model: {str(e)}")
             raise
+
+    def _smooth_detections(self, current_detections):
+        """Smooth detection boxes using previous detections."""
+        if not self.prev_detections:
+            return current_detections
+
+        smoothed_detections = []
+        for curr_det in current_detections:
+            # Find matching previous detection
+            matched = False
+            curr_box = curr_det[:4]
+            for prev_det in self.prev_detections:
+                prev_box = prev_det[:4]
+                # Calculate IoU between current and previous detection
+                intersection_x1 = max(curr_box[0], prev_box[0])
+                intersection_y1 = max(curr_box[1], prev_box[1])
+                intersection_x2 = min(curr_box[2], prev_box[2])
+                intersection_y2 = min(curr_box[3], prev_box[3])
+                
+                if intersection_x2 > intersection_x1 and intersection_y2 > intersection_y1:
+                    # Boxes overlap, smooth the coordinates
+                    smoothed_box = [
+                        prev_box[i] * self.smooth_factor + curr_box[i] * (1 - self.smooth_factor)
+                        for i in range(4)
+                    ]
+                    smoothed_det = [*smoothed_box, curr_det[4], curr_det[5], curr_det[6]]
+                    smoothed_detections.append(smoothed_det)
+                    matched = True
+                    break
+            
+            if not matched:
+                # No match found, use current detection as is
+                smoothed_detections.append(curr_det)
+
+        return smoothed_detections
 
     def _determine_status(self, bbox, prev_bbox=None):
         """Determine person's status based on position and movement."""
@@ -117,7 +156,7 @@ class PersonDetector:
                 scale_y = orig_shape[0] / input_size
                 
                 for *xyxy, conf, cls in pred:
-                    if int(cls) == 0 and float(conf) > 0.3:  # Person class with confidence threshold
+                    if int(cls) == 0 and float(conf) > self.min_detection_confidence:
                         # Convert to CPU and scale coordinates back to original image size
                         x1, y1, x2, y2 = [
                             float(coord.cpu() if coord.is_cuda else coord) for coord in xyxy
@@ -148,15 +187,18 @@ class PersonDetector:
                         
                         detections.append([*bbox, confidence, 0, status])  # [x1, y1, x2, y2, conf, cls, status]
             
+            # Smooth detections
+            smoothed_detections = self._smooth_detections(detections)
+            
             # Update previous detections
-            self.prev_detections = [d[:4] for d in detections]
+            self.prev_detections = [d[:4] for d in smoothed_detections]
             
             # Update detection history
-            self.detection_history.append(len(detections))
+            self.detection_history.append(len(smoothed_detections))
             if len(self.detection_history) > self.history_size:
                 self.detection_history.pop(0)
             
-            return detections
+            return smoothed_detections
             
         except Exception as e:
             self.logger.error(f"Error in person detection: {str(e)}")
@@ -186,25 +228,37 @@ class PersonDetector:
             # Draw detections
             frame_copy = frame.copy()
             for x1, y1, x2, y2, conf, cls, status in detections:
-                # Draw bounding box
+                # Draw bounding box with thicker lines
                 cv2.rectangle(
                     frame_copy,
                     (int(x1), int(y1)),
                     (int(x2), int(y2)),
                     (0, 255, 0),  # Green color
-                    2
+                    3  # Thicker line
+                )
+                
+                # Draw filled background for text
+                label = f"Person ({status})"
+                (text_width, text_height), _ = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2
+                )
+                cv2.rectangle(
+                    frame_copy,
+                    (int(x1), int(y1) - text_height - 10),
+                    (int(x1) + text_width, int(y1)),
+                    (0, 255, 0),
+                    -1  # Filled rectangle
                 )
                 
                 # Draw label with status
-                label = f"Person ({status})"
                 cv2.putText(
                     frame_copy,
                     label,
-                    (int(x1), int(y1) - 10),
+                    (int(x1), int(y1) - 5),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2
+                    0.7,  # Larger font
+                    (0, 0, 0),  # Black text
+                    2  # Thicker text
                 )
             
             # Add detailed status text
