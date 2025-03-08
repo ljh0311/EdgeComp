@@ -59,7 +59,7 @@ def setup_gpu():
         return torch.device("cpu")
 
 class BabyMonitorSystem:
-    def __init__(self, dev_mode=False):
+    def __init__(self, dev_mode=False, no_feed=False):
         """Initialize the Baby Monitor System."""
         self.logger = logging.getLogger(__name__)
         self.is_running = False
@@ -68,6 +68,7 @@ class BabyMonitorSystem:
         self.camera_enabled = False  # Start with camera disabled
         self.frame_lock = threading.Lock()
         self.dev_mode = dev_mode
+        self.no_feed = no_feed
         self.waveform_queue = queue.Queue()
 
         # Setup GPU if available
@@ -84,9 +85,10 @@ class BabyMonitorSystem:
             self.web_thread.start()
 
             # Initialize camera but don't start it yet
-            self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
-            self.update_camera_list()
-            self.update_resolution_list()
+            if not self.no_feed:
+                self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
+                self.update_camera_list()
+                self.update_resolution_list()
             self.camera_status.configure(text="📷  Camera: Ready")
 
             # Initialize person detector with GPU support
@@ -106,9 +108,9 @@ class BabyMonitorSystem:
                     self.update_waveform_data
                 )
                 
-                # Initialize with default model (HuBERT)
+                # Initialize with basic model by default
                 self.current_emotion_detector = None
-                self.initialize_emotion_detector('hubert')
+                self.initialize_emotion_detector('basic')
                 
                 self.audio_status.configure(text="🎤  Audio: Ready")
                 self.update_emotion_status()
@@ -136,19 +138,20 @@ class BabyMonitorSystem:
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Left panel (video feed and waveform)
-        left_panel = ttk.Frame(main_container)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        if not self.no_feed:
+            left_panel = ttk.Frame(main_container)
+            left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Video feed frame
-        video_frame = ttk.Frame(left_panel)
-        video_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.video_canvas = tk.Canvas(video_frame, bg="black")
-        self.video_canvas.pack(fill=tk.BOTH, expand=True)
+            # Video feed frame
+            video_frame = ttk.Frame(left_panel)
+            video_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            self.video_canvas = tk.Canvas(video_frame, bg="black")
+            self.video_canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Waveform frame
-        self.waveform_frame = ttk.Frame(left_panel, height=200)
-        self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
-        self.waveform_frame.pack_propagate(False)
+            # Waveform frame
+            self.waveform_frame = ttk.Frame(left_panel, height=200)
+            self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
+            self.waveform_frame.pack_propagate(False)
 
         # Right panel (controls and status)
         right_panel = ttk.Frame(main_container, width=300)
@@ -169,7 +172,7 @@ class BabyMonitorSystem:
             model_frame, state="readonly", width=20
         )
         self.model_select['values'] = [info['name'] for info in AVAILABLE_DETECTORS.values()]
-        self.model_select.set(AVAILABLE_DETECTORS['hubert']['name'])
+        self.model_select.set(AVAILABLE_DETECTORS['basic']['name'])  # Set basic as default
         self.model_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.model_select.bind("<<ComboboxSelected>>", self.on_model_selected)
 
@@ -177,37 +180,38 @@ class BabyMonitorSystem:
         self.model_desc = ttk.Label(controls_frame, text="", wraplength=250)
         self.model_desc.pack(fill=tk.X, padx=5, pady=(0, 5))
 
-        # Camera selection frame
-        camera_selection_frame = ttk.Frame(controls_frame)
-        camera_selection_frame.pack(fill=tk.X, padx=5, pady=5)
+        if not self.no_feed:
+            # Camera selection frame
+            camera_selection_frame = ttk.Frame(controls_frame)
+            camera_selection_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Camera selection combobox
-        ttk.Label(camera_selection_frame, text="Camera:").pack(
-            side=tk.LEFT, padx=(0, 5)
-        )
-        self.camera_select = ttk.Combobox(
-            camera_selection_frame, state="readonly", width=15
-        )
-        self.camera_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.camera_select.bind("<<ComboboxSelected>>", self.on_camera_selected)
+            # Camera selection combobox
+            ttk.Label(camera_selection_frame, text="Camera:").pack(
+                side=tk.LEFT, padx=(0, 5)
+            )
+            self.camera_select = ttk.Combobox(
+                camera_selection_frame, state="readonly", width=15
+            )
+            self.camera_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.camera_select.bind("<<ComboboxSelected>>", self.on_camera_selected)
 
-        # Resolution selection frame
-        resolution_frame = ttk.Frame(controls_frame)
-        resolution_frame.pack(fill=tk.X, padx=5, pady=5)
+            # Resolution selection frame
+            resolution_frame = ttk.Frame(controls_frame)
+            resolution_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Resolution selection combobox
-        ttk.Label(resolution_frame, text="Resolution:").pack(side=tk.LEFT, padx=(0, 5))
-        self.resolution_select = ttk.Combobox(
-            resolution_frame, state="readonly", width=15
-        )
-        self.resolution_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.resolution_select.bind("<<ComboboxSelected>>", self.on_resolution_selected)
+            # Resolution selection combobox
+            ttk.Label(resolution_frame, text="Resolution:").pack(side=tk.LEFT, padx=(0, 5))
+            self.resolution_select = ttk.Combobox(
+                resolution_frame, state="readonly", width=15
+            )
+            self.resolution_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.resolution_select.bind("<<ComboboxSelected>>", self.on_resolution_selected)
 
-        # Camera toggle button
-        self.camera_btn = ttk.Button(
-            controls_frame, text="Camera Feed", command=self.toggle_camera
-        )
-        self.camera_btn.pack(fill=tk.X, padx=5, pady=5)
+            # Camera toggle button
+            self.camera_btn = ttk.Button(
+                controls_frame, text="Camera Feed", command=self.toggle_camera
+            )
+            self.camera_btn.pack(fill=tk.X, padx=5, pady=5)
 
         # Audio toggle button
         self.audio_btn = ttk.Button(
@@ -236,11 +240,9 @@ class BabyMonitorSystem:
         )
         self.detection_status.pack(anchor=tk.W, padx=5, pady=2)
 
-        # Initialize matplotlib for waveform
-        self.setup_waveform()
-
-        # Initialize camera selection
-        self.update_camera_list()
+        if not self.no_feed:
+            # Initialize matplotlib for waveform
+            self.setup_waveform()
 
     def setup_waveform(self):
         """Setup waveform visualization."""
@@ -648,6 +650,12 @@ class BabyMonitorSystem:
     def update_waveform_data(self, audio_data):
         """Queue the waveform data for update in the main thread."""
         try:
+            if self.no_feed:
+                # Only send to web interface
+                if hasattr(self, 'web_app'):
+                    self.web_app.emit_waveform(audio_data)
+                return
+
             # Resize audio data to match waveform buffer size
             if len(audio_data) != len(self.waveform_data):
                 audio_data = np.interp(
@@ -658,6 +666,10 @@ class BabyMonitorSystem:
 
             # Put the data in the queue
             self.waveform_queue.put(audio_data)
+
+            # Send to web interface
+            if hasattr(self, 'web_app'):
+                self.web_app.emit_waveform(audio_data)
 
             # Schedule the waveform update in the main thread
             self.root.after(1, self.process_waveform_queue)
@@ -938,10 +950,11 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Baby Monitor System")
     parser.add_argument("--dev", action="store_true", help="Run in developer mode")
+    parser.add_argument("--noFeed", action="store_true", help="Disable camera feed and soundwave in local GUI")
     args = parser.parse_args()
 
     try:
-        app = BabyMonitorSystem(dev_mode=args.dev)
+        app = BabyMonitorSystem(dev_mode=args.dev, no_feed=args.noFeed)
         app.start()
 
         # Start the Tkinter event loop

@@ -490,6 +490,29 @@ class BabyMonitorWeb:
         except Exception as e:
             self.logger.error(f"Error emitting speech emotion: {str(e)}")
 
+    def emit_waveform(self, audio_data):
+        """Emit waveform data to web clients."""
+        try:
+            # Convert audio data to list for JSON serialization
+            data = audio_data.tolist() if isinstance(audio_data, np.ndarray) else list(audio_data)
+            
+            # Downsample data if too large (keep max 1000 points)
+            if len(data) > 1000:
+                step = len(data) // 1000
+                data = data[::step][:1000]
+            
+            # Normalize data to [-1, 1] range
+            max_val = max(abs(min(data)), abs(max(data)))
+            if max_val > 0:
+                data = [x / max_val for x in data]
+            
+            self.socketio.emit('waveform_data', {
+                'data': data,
+                'timestamp': time.time()
+            })
+        except Exception as e:
+            self.logger.error(f"Error emitting waveform data: {str(e)}")
+
     def start(self):
         """Start the web interface."""
         try:

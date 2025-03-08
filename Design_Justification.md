@@ -5,7 +5,7 @@ Prepared by
 Team's Name: Team #
 
 Team Members Student ID
- 
+
 Submission Date:
 
 ## 1. Introduction
@@ -69,24 +69,28 @@ The system follows a modular architecture with the following key components:
 ### 3.2 Component Details
 
 #### Camera Module
+
 - Platform-specific camera enumeration and initialization
 - Resolution management
 - Frame capture optimization
 - Error handling and recovery
 
 #### Audio Processing
+
 - Real-time audio capture using PyAudio
 - Sound classification using Wav2Vec2 model
 - Emotion recognition from audio
 - Waveform visualization
 
 #### Person Detection
+
 - YOLOv8 nano model for efficient edge processing
 - Real-time person counting
 - Optimized inference on CPU/GPU
 - Configurable detection thresholds
 
 #### Web Interface
+
 - Modern, responsive design
 - Real-time status updates
 - Camera and audio controls
@@ -96,6 +100,7 @@ The system follows a modular architecture with the following key components:
 ### 3.3 Technical Implementation
 
 #### Key Technologies
+
 - **Python 3.8+**: Core development language
 - **OpenCV**: Camera handling and image processing
 - **PyTorch**: Deep learning models
@@ -104,6 +109,7 @@ The system follows a modular architecture with the following key components:
 - **Bootstrap**: Responsive UI design
 
 #### Data Flow
+
 1. Input devices capture audio/video data
 2. Processing modules analyze data in real-time
 3. Results are communicated via Socket.IO
@@ -176,6 +182,7 @@ The system follows a modular architecture with the following key components:
 ### 4.3 Future Extensibility
 
 The modular design allows for:
+
 - Additional detection models
 - New monitoring features
 - Enhanced visualization options
