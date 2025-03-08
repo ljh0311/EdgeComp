@@ -33,12 +33,14 @@ if project_root not in sys.path:
 from src.audio.audio_processor import AudioProcessor
 from src.camera.camera import Camera
 from src.detectors.motion_mog2 import MotionDetector
-from src.detectors.sound_hubert import EmotionDetector
 from src.detectors.vision_yolo import PersonDetector
+from src.emotion.models import AVAILABLE_DETECTORS
+from src.emotion.models.unified_hubert import UnifiedHuBERTDetector
+from src.emotion.models.unified_basic import UnifiedBasicDetector
+from src.emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
 from src.utils.config import Config
 from src.utils.system_monitor import SystemMonitor
 from src.web.web_app import BabyMonitorWeb
-from src.detectors import AVAILABLE_SOUND_DETECTORS
 
 # Configure logging
 logging.basicConfig(**Config.LOGGING)
@@ -166,8 +168,8 @@ class BabyMonitorSystem:
         self.model_select = ttk.Combobox(
             model_frame, state="readonly", width=20
         )
-        self.model_select['values'] = [info['name'] for info in AVAILABLE_SOUND_DETECTORS.values()]
-        self.model_select.set(AVAILABLE_SOUND_DETECTORS['hubert']['name'])
+        self.model_select['values'] = [info['name'] for info in AVAILABLE_DETECTORS.values()]
+        self.model_select.set(AVAILABLE_DETECTORS['hubert']['name'])
         self.model_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.model_select.bind("<<ComboboxSelected>>", self.on_model_selected)
 
@@ -797,7 +799,7 @@ class BabyMonitorSystem:
                 self.current_emotion_detector = None
 
             # Get the detector class and create instance
-            detector_info = AVAILABLE_SOUND_DETECTORS.get(model_key)
+            detector_info = AVAILABLE_DETECTORS.get(model_key)
             if not detector_info:
                 raise ValueError(f"Unknown model key: {model_key}")
                 
@@ -808,10 +810,7 @@ class BabyMonitorSystem:
                 config = Config.EMOTION_DETECTION.copy()
                 config['device'] = self.device  # Ensure device is set
                 
-                if model_key == 'hubert':
-                    # Ensure model path is absolute
-                    config['model_path'] = str(Config.MODELS_DIR)
-                
+                # Create detector instance
                 self.current_emotion_detector = detector_class(config, self.web_app)
                 
                 # Update status and UI
@@ -819,9 +818,9 @@ class BabyMonitorSystem:
                 self.model_select.set(detector_info['name'])
                 
                 if self.dev_mode:
-                    # Show supported emotions in dev mode
-                    emotions = ", ".join(self.current_emotion_detector.supported_emotions)
-                    desc = f"{detector_info['description']}\nEmotions: {emotions}"
+                    # Show model capabilities in dev mode
+                    edge_status = "Edge Device Compatible" if detector_info['edge_device'] else "Server/Desktop Only"
+                    desc = f"{detector_info['description']}\nSupported Emotions: {', '.join(self.current_emotion_detector.supported_emotions)}\n{edge_status}"
                     self.model_desc.configure(text=desc)
                 else:
                     self.model_desc.configure(text="")
@@ -831,12 +830,16 @@ class BabyMonitorSystem:
             except Exception as model_error:
                 self.logger.error(f"Failed to initialize {detector_info['name']} model: {str(model_error)}")
                 
-                # If this was HuBERT, try falling back to Basic model
+                # If this was HuBERT, try falling back to Wav2Vec2
                 if model_key == 'hubert':
+                    self.logger.info("Falling back to Wav2Vec2 model...")
+                    return self.initialize_emotion_detector('wav2vec2')
+                # If Wav2Vec2 fails, try basic model
+                elif model_key == 'wav2vec2':
                     self.logger.info("Falling back to Basic model...")
                     return self.initialize_emotion_detector('basic')
                 else:
-                    # If we're already on the basic model or another model, raise the error
+                    # If we're already on the basic model, raise the error
                     raise
                 
         except Exception as e:
@@ -851,7 +854,7 @@ class BabyMonitorSystem:
                 try:
                     config = Config.EMOTION_DETECTION.copy()
                     config['device'] = self.device
-                    self.current_emotion_detector = AVAILABLE_SOUND_DETECTORS['basic']['class'](
+                    self.current_emotion_detector = AVAILABLE_DETECTORS['basic']['class'](
                         config, self.web_app
                     )
                 except Exception as basic_error:
@@ -875,7 +878,7 @@ class BabyMonitorSystem:
             # Find the model key from the selected name
             selected_name = self.model_select.get()
             model_key = next(
-                key for key, info in AVAILABLE_SOUND_DETECTORS.items()
+                key for key, info in AVAILABLE_DETECTORS.items()
                 if info['name'] == selected_name
             )
             

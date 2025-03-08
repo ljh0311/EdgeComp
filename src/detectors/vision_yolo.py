@@ -15,7 +15,7 @@ import torch
 
 
 class PersonDetector:
-    """Person detector using YOLOv5."""
+    """Person detector using YOLOv8."""
 
     def __init__(self, model_path=None, device=None):
         """Initialize the person detector."""
@@ -44,19 +44,19 @@ class PersonDetector:
         """Initialize the YOLO model."""
         try:
             if model_path:
-                self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path)
+                self.model = YOLO(model_path)
             else:
-                self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+                # Use YOLOv8n by default
+                self.model = YOLO('yolov8n.pt')
             
-            # Move model to appropriate device and set inference mode
-            self.model = self.model.to(self.device)
-            self.model.eval()
+            # Move model to appropriate device
+            self.model.to(self.device)
             
-            # Optimize model settings
-            self.model.conf = self.min_detection_confidence  # Lower confidence threshold for better detection
+            # Set model parameters
+            self.model.conf = self.min_detection_confidence  # Confidence threshold
             self.model.iou = 0.45  # NMS IoU threshold
             self.model.classes = [0]  # Only detect persons (class 0 in COCO)
-            self.model.max_det = 10  # Limit maximum detections
+            self.model.max_det = 10  # Maximum detections per image
             
             if self.device.type == 'cuda':
                 # Enable CUDA optimizations
@@ -137,7 +137,7 @@ class PersonDetector:
             orig_shape = frame_rgb.shape[:2]
             frame_resized = cv2.resize(frame_rgb, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
             
-            # Move input to device and perform inference
+            # Perform inference
             with torch.no_grad():  # Disable gradient calculation for inference
                 if self.device.type == 'cuda':
                     with torch.amp.autocast('cuda', dtype=torch.float16):  # Use FP16 for faster inference
@@ -147,20 +147,20 @@ class PersonDetector:
             
             # Extract detections for persons (class 0)
             detections = []
-            if len(results.pred) > 0 and len(results.pred[0]) > 0:
+            if len(results) > 0:
                 # Get detections from first image
-                pred = results.pred[0]
+                result = results[0]
                 
-                # Filter for person class (0) and convert to CPU if needed
+                # Scale coordinates back to original image size
                 scale_x = orig_shape[1] / input_size
                 scale_y = orig_shape[0] / input_size
                 
-                for *xyxy, conf, cls in pred:
-                    if int(cls) == 0 and float(conf) > self.min_detection_confidence:
-                        # Convert to CPU and scale coordinates back to original image size
-                        x1, y1, x2, y2 = [
-                            float(coord.cpu() if coord.is_cuda else coord) for coord in xyxy
-                        ]
+                # Process each detection
+                for box in result.boxes:
+                    if box.cls == 0:  # Person class
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        confidence = box.conf[0].item()
+                        
                         # Scale coordinates back to original image size
                         bbox = [
                             x1 * scale_x,
@@ -168,7 +168,6 @@ class PersonDetector:
                             x2 * scale_x,
                             y2 * scale_y
                         ]
-                        confidence = float(conf.cpu() if conf.is_cuda else conf)
                         
                         # Find matching previous detection for status
                         prev_bbox = None

@@ -1,25 +1,26 @@
 """
-HuBERT Emotion Detection Model
+Unified HuBERT Emotion Detection
 ============================
-Handles emotion detection using HuBERT model.
+Combines HuBERT detector and model implementation for emotion detection.
 """
 
 import os
 import logging
 import torch
-import torchaudio
+import torch.nn as nn
 import numpy as np
 from transformers import AutoFeatureExtractor
+from .unified_sound_detector import BaseSoundDetector
 
-logger = logging.getLogger(__name__)
-
-class EmotionClassifier(torch.nn.Module):
+class EmotionClassifier(nn.Module):
+    """HuBERT-based emotion classifier."""
+    
     def __init__(self, num_emotions=6):
         super().__init__()
-        self.dropout = torch.nn.Dropout(0.1)
-        self.linear1 = torch.nn.Linear(768, 256)
-        self.linear2 = torch.nn.Linear(256, num_emotions)
-        self.relu = torch.nn.ReLU()
+        self.dropout = nn.Dropout(0.1)
+        self.linear1 = nn.Linear(768, 256)
+        self.linear2 = nn.Linear(256, num_emotions)
+        self.relu = nn.ReLU()
     
     def forward(self, x):
         x = self.dropout(x)
@@ -27,24 +28,31 @@ class EmotionClassifier(torch.nn.Module):
         x = self.linear2(x)
         return x
 
-class HuBERTEmotionDetector:
-    """HuBERT-based emotion detector."""
+class UnifiedHuBERTDetector(BaseSoundDetector):
+    """Unified HuBERT-based emotion detector combining detector and model logic."""
     
     EMOTIONS = ['Natural', 'Anger', 'Worried', 'Happy', 'Fear', 'Sadness']
     
-    def __init__(self, config, web_app=None):
+    def __init__(self, config: dict, web_app=None):
         """Initialize the HuBERT emotion detector.
         
         Args:
             config (dict): Configuration dictionary containing model settings
             web_app: Optional web application instance for real-time updates
         """
-        self.config = config
-        self.web_app = web_app
-        self.is_running = False
+        super().__init__(config, web_app)
         
-        # Load model
         try:
+            self._initialize_model(config)
+            self.logger.info(f"HuBERT detector initialized on {self.device}")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize HuBERT detector: {str(e)}")
+            raise
+    
+    def _initialize_model(self, config: dict):
+        """Initialize the HuBERT model."""
+        try:
+            # Get model path
             if isinstance(config, dict):
                 model_dir = config.get('model_path', '')
             else:
@@ -61,11 +69,7 @@ class HuBERTEmotionDetector:
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model file not found at {model_path}")
             
-            # Set device
-            device_str = config.get('device', 'cpu') if isinstance(config, dict) else 'cpu'
-            self.device = torch.device(device_str)
-            
-            # Initialize and load model
+            # Initialize model components
             self.model = EmotionClassifier(len(self.EMOTIONS))
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
             self.model.to(self.device)
@@ -73,32 +77,26 @@ class HuBERTEmotionDetector:
             
             # Initialize feature extractor
             self.feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/hubert-base-ls960")
-            logger.info(f"Successfully loaded HuBERT model from {model_path}")
             
         except Exception as e:
-            logger.error(f"Failed to load HuBERT model: {str(e)}")
+            self.logger.error(f"Error loading HuBERT model: {str(e)}")
             raise
     
     @property
-    def supported_emotions(self):
-        """Return list of supported emotions."""
+    def model_name(self) -> str:
+        """Return the name of the model"""
+        return "HuBERT (High Accuracy)"
+    
+    @property
+    def supported_emotions(self) -> list:
+        """Return list of supported emotions"""
         return self.EMOTIONS
     
-    def start(self):
-        """Start the emotion detector."""
-        logger.info("Starting HuBERT emotion detector")
-        self.is_running = True
-    
-    def stop(self):
-        """Stop the emotion detector."""
-        logger.info("Stopping HuBERT emotion detector")
-        self.is_running = False
-    
-    def preprocess_audio(self, audio_data):
+    def preprocess_audio(self, audio_data: np.ndarray) -> torch.Tensor:
         """Preprocess audio data for the model.
         
         Args:
-            audio_data: Audio data as numpy array or torch tensor
+            audio_data: Audio data as numpy array
         
         Returns:
             torch.Tensor: Preprocessed audio features
@@ -116,19 +114,19 @@ class HuBERTEmotionDetector:
         # Extract features
         inputs = self.feature_extractor(
             audio_data.numpy(),
-            sampling_rate=self.config.get('sampling_rate', 16000),
+            sampling_rate=self.sample_rate,
             return_tensors="pt"
         )
         return inputs.input_values.to(self.device)
     
-    def detect(self, audio_data):
+    def detect(self, audio_data: np.ndarray) -> tuple:
         """Detect emotions in audio data.
         
         Args:
-            audio_data: Audio data as numpy array or torch tensor
-        
+            audio_data: Audio data array (sampling rate should be 16kHz)
+            
         Returns:
-            tuple: (emotion, confidence)
+            tuple: (emotion_label, confidence)
         """
         if not self.is_running:
             return None, 0.0
@@ -146,12 +144,12 @@ class HuBERTEmotionDetector:
             
             emotion = self.EMOTIONS[emotion_idx]
             
-            # Send to web interface if available
-            if self.web_app:
-                self.web_app.send_emotion(emotion, confidence)
+            # Emit emotion if confidence is high enough
+            if confidence > self.config.get('confidence_threshold', 0.5):
+                self._emit_emotion(emotion, confidence)
             
             return emotion, confidence
             
         except Exception as e:
-            logger.error(f"Error during emotion detection: {str(e)}")
+            self.logger.error(f"Error during emotion detection: {str(e)}")
             return None, 0.0 

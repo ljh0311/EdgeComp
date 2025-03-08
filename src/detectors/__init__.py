@@ -1,42 +1,51 @@
 """
-Detectors Module
-=============
-Provides a unified interface for different types of detectors.
+Detection Modules
+===============
+Collection of detection modules for video and audio analysis.
 """
 
-from .sound_hubert import EmotionDetector as HuBERTDetector
-from .sound_wav2vec2 import Wav2Vec2Detector
-from .sound_basic import BasicDetector
 from .vision_yolo import PersonDetector
 from .motion_mog2 import MotionDetector
+from ..emotion.models.unified_sound_detector import BaseSoundDetector
+from ..emotion.models.unified_basic import UnifiedBasicDetector
+from ..emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
+from ..emotion.models.unified_hubert import UnifiedHuBERTDetector
 
 __all__ = [
-    'HuBERTDetector',
-    'Wav2Vec2Detector',
-    'BasicDetector',
     'PersonDetector',
     'MotionDetector',
-    'AVAILABLE_SOUND_DETECTORS'
+    'BaseSoundDetector',
+    'UnifiedBasicDetector',
+    'UnifiedWav2Vec2Detector',
+    'UnifiedHuBERTDetector'
 ]
 
-# Available sound emotion detectors
-AVAILABLE_SOUND_DETECTORS = {
-    'hubert': {
-        'name': 'HuBERT (High Accuracy)',
-        'class': HuBERTDetector,
-        'description': 'Best accuracy but most resource intensive'
-    },
-    'wav2vec2': {
-        'name': 'Wav2Vec2 (Balanced)',
-        'class': Wav2Vec2Detector,
-        'description': 'Good balance of accuracy and resource usage'
-    },
-    'basic': {
-        'name': 'Basic NN (Fast)',
-        'class': BasicDetector,
-        'description': 'Fastest and most lightweight'
-    }
+# Available emotion detection models
+EMOTION_MODELS = {
+    'basic': UnifiedBasicDetector,
+    'wav2vec2': UnifiedWav2Vec2Detector,
+    'hubert': UnifiedHuBERTDetector
 }
+
+def get_emotion_detector(model_name, config, web_app=None):
+    """Get emotion detector instance by name.
+    
+    Args:
+        model_name (str): Name of the model to use
+        config (dict): Configuration dictionary
+        web_app: Optional web application instance
+        
+    Returns:
+        BaseSoundDetector: Initialized emotion detector
+        
+    Raises:
+        ValueError: If model_name is not recognized
+    """
+    if model_name not in EMOTION_MODELS:
+        raise ValueError(f"Unknown emotion model: {model_name}. Available models: {list(EMOTION_MODELS.keys())}")
+        
+    detector_class = EMOTION_MODELS[model_name]
+    return detector_class(config, web_app)
 
 # Detector capabilities summary:
 # 1. HuBERTDetector (sound_hubert.py):

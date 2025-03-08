@@ -15,6 +15,7 @@ import base64
 import os
 import signal
 from datetime import datetime
+from pathlib import Path
 
 
 class BabyMonitorWeb:
@@ -28,6 +29,9 @@ class BabyMonitorWeb:
         self.last_frame_time = 0
         self.frame_interval = 1.0 / 30.0  # Target 30 FPS
         self.dev_mode = dev_mode
+        self.model_switch_lock = threading.Lock()
+        self.last_emotion_time = 0
+        self.emotion_interval = 0.1  # Update emotion every 100ms
         self.setup_routes()
         self.setup_socketio()
 
@@ -129,10 +133,31 @@ class BabyMonitorWeb:
             self.logger.info("Client connected")
             if self.monitor_system:
                 self.emit_status()
+                self.emit_system_info()
+                # Send current model info
+                if hasattr(self.monitor_system, 'current_emotion_detector'):
+                    self.emit_model_info()
 
         @self.socketio.on('disconnect')
         def handle_disconnect():
             self.logger.info("Client disconnected")
+
+        @self.socketio.on('get_system_info')
+        def handle_get_system_info():
+            """Handle request for system information."""
+            try:
+                if not self.monitor_system:
+                    return {'success': False, 'error': 'Monitor system not initialized'}
+                
+                system_info = {
+                    'platform': self.monitor_system.system_info,
+                    'resources': self.monitor_system.get_resource_usage(),
+                    'recommended_model': self.monitor_system.recommend_model()
+                }
+                return {'success': True, 'system_info': system_info}
+            except Exception as e:
+                self.logger.error(f"Error getting system info: {str(e)}")
+                return {'success': False, 'error': str(e)}
 
         @self.socketio.on('get_cameras')
         def handle_get_cameras(data=None):
@@ -238,6 +263,69 @@ class BabyMonitorWeb:
             except Exception as e:
                 self.logger.error(f"Error handling resolution selection: {str(e)}")
                 self.emit_alert('error', 'Failed to change resolution')
+
+        @self.socketio.on('select_model')
+        def handle_model_selection(data):
+            """Handle emotion model selection."""
+            try:
+                with self.model_switch_lock:
+                    model_key = data.get('model_key')
+                    if not model_key:
+                        return {'success': False, 'error': 'No model key provided'}
+
+                    # Emit loading state
+                    self.socketio.emit('model_loading', {
+                        'status': 'loading',
+                        'message': f'Switching to {model_key} model...'
+                    })
+
+                    # Stop audio processing temporarily
+                    was_audio_enabled = False
+                    if hasattr(self.monitor_system, 'audio_enabled') and self.monitor_system.audio_enabled:
+                        was_audio_enabled = True
+                        self.monitor_system.toggle_audio()
+
+                    try:
+                        # Initialize new model
+                        self.monitor_system.initialize_emotion_detector(model_key)
+                        
+                        # Restart audio if it was enabled
+                        if was_audio_enabled:
+                            self.monitor_system.toggle_audio()
+
+                        # Emit success state
+                        self.socketio.emit('model_loading', {
+                            'status': 'success',
+                            'message': f'Successfully switched to {model_key} model'
+                        })
+                        
+                        # Update model info
+                        self.emit_model_info()
+                        
+                        return {'success': True}
+                    except Exception as e:
+                        error_msg = f"Failed to initialize {model_key} model: {str(e)}"
+                        self.logger.error(error_msg)
+                        
+                        # Try to restore audio
+                        if was_audio_enabled:
+                            self.monitor_system.toggle_audio()
+                            
+                        # Emit error state
+                        self.socketio.emit('model_loading', {
+                            'status': 'error',
+                            'message': error_msg
+                        })
+                        return {'success': False, 'error': error_msg}
+
+            except Exception as e:
+                error_msg = f"Error handling model selection: {str(e)}"
+                self.logger.error(error_msg)
+                self.socketio.emit('model_loading', {
+                    'status': 'error',
+                    'message': error_msg
+                })
+                return {'success': False, 'error': error_msg}
 
     def emit_frame(self, frame):
         """Emit video frame to connected clients."""
@@ -350,6 +438,57 @@ class BabyMonitorWeb:
             })
         except Exception as e:
             self.logger.error(f"Error emitting resolution list: {str(e)}")
+
+    def emit_system_info(self):
+        """Emit system information to connected clients."""
+        try:
+            if self.monitor_system:
+                system_info = {
+                    'platform': self.monitor_system.system_info,
+                    'resources': self.monitor_system.get_resource_usage(),
+                    'recommended_model': self.monitor_system.recommend_model()
+                }
+                self.socketio.emit('system_info', system_info)
+        except Exception as e:
+            self.logger.error(f"Error emitting system info: {str(e)}")
+
+    def emit_resource_usage(self):
+        """Emit resource usage metrics to connected clients."""
+        try:
+            if self.monitor_system:
+                usage = self.monitor_system.get_resource_usage()
+                self.socketio.emit('resource_usage', usage)
+        except Exception as e:
+            self.logger.error(f"Error emitting resource usage: {str(e)}")
+
+    def emit_model_info(self):
+        """Emit current model information to clients."""
+        try:
+            if hasattr(self.monitor_system, 'current_emotion_detector'):
+                detector = self.monitor_system.current_emotion_detector
+                model_info = {
+                    'name': detector.model_name if hasattr(detector, 'model_name') else 'Unknown',
+                    'type': detector.__class__.__name__,
+                    'supported_emotions': detector.supported_emotions if hasattr(detector, 'supported_emotions') else [],
+                    'is_gpu': hasattr(detector, 'device') and 'cuda' in str(detector.device)
+                }
+                self.socketio.emit('model_info', model_info)
+        except Exception as e:
+            self.logger.error(f"Error emitting model info: {str(e)}")
+
+    def emit_speech_emotion(self, emotion_data):
+        """Emit speech emotion detection results to connected clients."""
+        try:
+            current_time = time.time()
+            if current_time - self.last_emotion_time >= self.emotion_interval:
+                if emotion_data and isinstance(emotion_data, dict):
+                    self.socketio.emit('speech_emotion', {
+                        'emotion': emotion_data.get('emotion', 'neutral'),
+                        'confidence': emotion_data.get('confidence', 0.0)
+                    })
+                    self.last_emotion_time = current_time
+        except Exception as e:
+            self.logger.error(f"Error emitting speech emotion: {str(e)}")
 
     def start(self):
         """Start the web interface."""
