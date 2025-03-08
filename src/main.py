@@ -32,12 +32,13 @@ if project_root not in sys.path:
 # Local imports
 from src.audio.audio_processor import AudioProcessor
 from src.camera.camera import Camera
-from src.detectors.motion_detector import MotionDetector
-from src.emotion.emotion_recognizer import EmotionRecognizer
-from src.detectors.person_detector import PersonDetector
+from src.detectors.motion_mog2 import MotionDetector
+from src.detectors.sound_hubert import EmotionDetector
+from src.detectors.vision_yolo import PersonDetector
 from src.utils.config import Config
 from src.utils.system_monitor import SystemMonitor
 from src.web.web_app import BabyMonitorWeb
+from src.detectors import AVAILABLE_SOUND_DETECTORS
 
 # Configure logging
 logging.basicConfig(**Config.LOGGING)
@@ -62,7 +63,7 @@ class BabyMonitorSystem:
         self.is_running = False
         self.camera_error = False
         self.audio_enabled = True
-        self.camera_enabled = True
+        self.camera_enabled = False  # Start with camera disabled
         self.frame_lock = threading.Lock()
         self.dev_mode = dev_mode
         self.waveform_queue = queue.Queue()
@@ -80,21 +81,11 @@ class BabyMonitorSystem:
             self.web_thread = threading.Thread(target=self.web_app.start, daemon=True)
             self.web_thread.start()
 
-            # Initialize camera in a separate thread
-            def init_camera():
-                self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
-                if not self.camera.initialize():
-                    self.logger.error("Failed to initialize camera")
-                    self.camera_error = True
-                    self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Error"))
-                else:
-                    self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Ready"))
-                    # Update camera selection UI
-                    self.root.after(0, self.update_camera_list)
-                    self.root.after(0, self.update_resolution_list)
-
-            camera_thread = threading.Thread(target=init_camera, daemon=True)
-            camera_thread.start()
+            # Initialize camera but don't start it yet
+            self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
+            self.update_camera_list()
+            self.update_resolution_list()
+            self.camera_status.configure(text="📷  Camera: Ready")
 
             # Initialize person detector with GPU support
             self.person_detector = PersonDetector(device=self.device)
@@ -104,15 +95,21 @@ class BabyMonitorSystem:
 
             # Initialize audio components if enabled
             if self.audio_enabled:
+                audio_config = Config.AUDIO_PROCESSING.copy()
+                audio_config['device'] = self.device
                 self.audio_processor = AudioProcessor(
-                    Config.AUDIO_PROCESSING, self.handle_alert
+                    audio_config, self.handle_alert
                 )
                 self.audio_processor.set_visualization_callback(
                     self.update_waveform_data
                 )
-                self.emotion_recognizer = EmotionRecognizer(web_app=self.web_app)
+                
+                # Initialize with default model (HuBERT)
+                self.current_emotion_detector = None
+                self.initialize_emotion_detector('hubert')
+                
                 self.audio_status.configure(text="🎤  Audio: Ready")
-                self.emotion_status.configure(text="😊  Emotion: Ready")
+                self.update_emotion_status()
 
             # Initialize system monitor
             self.monitor = SystemMonitor()
@@ -159,6 +156,24 @@ class BabyMonitorSystem:
         # Controls section
         controls_frame = ttk.LabelFrame(right_panel, text="Controls")
         controls_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Model selection frame
+        model_frame = ttk.Frame(controls_frame)
+        model_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Model selection combobox
+        ttk.Label(model_frame, text="Emotion Model:").pack(side=tk.LEFT, padx=(0, 5))
+        self.model_select = ttk.Combobox(
+            model_frame, state="readonly", width=20
+        )
+        self.model_select['values'] = [info['name'] for info in AVAILABLE_SOUND_DETECTORS.values()]
+        self.model_select.set(AVAILABLE_SOUND_DETECTORS['hubert']['name'])
+        self.model_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.model_select.bind("<<ComboboxSelected>>", self.on_model_selected)
+
+        # Model description (for dev mode)
+        self.model_desc = ttk.Label(controls_frame, text="", wraplength=250)
+        self.model_desc.pack(fill=tk.X, padx=5, pady=(0, 5))
 
         # Camera selection frame
         camera_selection_frame = ttk.Frame(controls_frame)
@@ -253,24 +268,42 @@ class BabyMonitorSystem:
         try:
             if not self.camera_enabled:
                 # Trying to enable camera
-                self.camera_enabled = True
-                self.camera_btn.configure(text="Stop Camera")
                 self.camera_status.configure(text="📷  Camera: Initializing...")
-
+                
                 # Ensure camera is initialized
                 if not hasattr(self, 'camera') or self.camera is None:
                     self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
                 
+                # Try to initialize camera with detailed logging
+                self.logger.info("Initializing camera...")
                 if not self.camera.initialize():
-                    self.camera_enabled = False
-                    self.camera_btn.configure(text="Start Camera")
+                    self.logger.error("Failed to initialize camera")
                     self.camera_status.configure(text="📷  Camera: Failed to Initialize")
                     return
-
+                
+                # Read a test frame to verify camera is working
+                self.logger.info("Testing camera frame capture...")
+                ret, frame = self.camera.get_frame()
+                if not ret or frame is None:
+                    self.logger.error("Camera initialized but failed to get frame")
+                    self.camera_status.configure(text="📷  Camera: No Video Signal")
+                    return
+                
+                self.logger.info(f"Test frame captured successfully: shape={frame.shape}")
+                
+                # Camera is working, enable it
+                self.camera_enabled = True
+                self.camera_btn.configure(text="Stop Camera")
                 self.camera_status.configure(text="📷  Camera: Active")
                 self.web_app.emit_status({"camera_enabled": True})
+                
+                # Start frame processing if not already running
+                if not hasattr(self, 'frame_thread') or not self.frame_thread.is_alive():
+                    self.start_processing_threads()
+                
             else:
                 # Disabling camera
+                self.logger.info("Stopping camera...")
                 self.camera_enabled = False
                 self.camera_btn.configure(text="Start Camera")
                 self.camera_status.configure(text="📷  Camera: Disabled")
@@ -290,28 +323,70 @@ class BabyMonitorSystem:
 
     def toggle_audio(self):
         """Toggle audio monitoring on/off."""
-        self.audio_enabled = not self.audio_enabled
-
         try:
-            if self.audio_enabled:
-                self.audio_btn.configure(text="Audio Monitor")
-                self.audio_status.configure(text="🎤  Audio: Active")
-                if hasattr(self, "audio_processor"):
+            if not self.audio_enabled:
+                # Starting audio
+                self.logger.info("Starting audio monitoring...")
+                
+                # Initialize audio processor if needed
+                if not hasattr(self, 'audio_processor'):
+                    audio_config = Config.AUDIO_PROCESSING.copy()
+                    audio_config['device'] = self.device
+                    self.audio_processor = AudioProcessor(
+                        audio_config, self.handle_alert
+                    )
+                    self.audio_processor.set_visualization_callback(
+                        self.update_waveform_data
+                    )
+                
+                # Start audio processing
+                if self.audio_processor:
                     self.audio_processor.start()
-                if hasattr(self, "emotion_recognizer"):
-                    self.emotion_recognizer.start()
-                self.web_app.emit_status({"audio_enabled": True})
+                    self.audio_enabled = True
+                    self.audio_btn.configure(text="Stop Audio")
+                    self.audio_status.configure(text="🎤  Audio: Active")
+                    
+                    # Start emotion detector if available
+                    if hasattr(self, "current_emotion_detector") and self.current_emotion_detector:
+                        try:
+                            self.current_emotion_detector.start()
+                        except Exception as e:
+                            self.logger.warning(f"Non-critical error starting emotion detector: {str(e)}")
+                    
+                    self.web_app.emit_status({"audio_enabled": True})
+                    
             else:
-                self.audio_btn.configure(text="Audio Monitor")
+                # Stopping audio
+                self.logger.info("Stopping audio monitoring...")
+                self.audio_enabled = False
+                
+                # Stop emotion detector first
+                if hasattr(self, "current_emotion_detector") and self.current_emotion_detector:
+                    try:
+                        self.current_emotion_detector.stop()
+                    except Exception as e:
+                        self.logger.warning(f"Non-critical error stopping emotion detector: {str(e)}")
+                
+                # Stop audio processor
+                if hasattr(self, "audio_processor") and self.audio_processor:
+                    try:
+                        self.audio_processor.stop()
+                    except Exception as e:
+                        self.logger.warning(f"Non-critical error stopping audio processor: {str(e)}")
+                
+                self.audio_btn.configure(text="Start Audio")
                 self.audio_status.configure(text="🎤  Audio: Disabled")
-                if hasattr(self, "audio_processor"):
-                    self.audio_processor.stop()
-                if hasattr(self, "emotion_recognizer"):
-                    self.emotion_recognizer.stop()
                 self.web_app.emit_status({"audio_enabled": False})
+                
         except Exception as e:
             self.logger.error(f"Error toggling audio: {str(e)}")
             self.audio_status.configure(text="🎤  Audio: Error")
+            # Try to cleanup on error
+            if hasattr(self, "audio_processor"):
+                try:
+                    self.audio_processor.stop()
+                except:
+                    pass
 
     def handle_alert(self, message, level="info"):
         """Handle alerts from components."""
@@ -323,28 +398,64 @@ class BabyMonitorSystem:
         if hasattr(self, "web_app"):
             self.web_app.emit_status(status_data)
 
+    def start_processing_threads(self):
+        """Start all processing threads."""
+        try:
+            # Start frame processing thread
+            self.frame_thread = threading.Thread(target=self.process_frames, daemon=True)
+            self.frame_thread.start()
+            self.logger.info("Started frame processing thread")
+            
+            # Start waveform processing
+            self.root.after(10, self.process_waveform_queue)
+            self.logger.info("Started waveform processing")
+            
+        except Exception as e:
+            self.logger.error(f"Error starting processing threads: {str(e)}")
+
     def start(self):
         """Start the monitoring system."""
         if self.is_running:
+            self.logger.warning("System is already running")
             return
 
-        self.is_running = True
+        try:
+            self.is_running = True
+            self.logger.info("Starting monitoring system...")
 
-        # Start frame processing thread
-        self.frame_thread = threading.Thread(target=self.process_frames, daemon=True)
-        self.frame_thread.start()
+            # Ensure camera is initialized and enabled
+            if not hasattr(self, 'camera') or self.camera is None:
+                self.logger.info("Initializing camera...")
+                self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
+                if not self.camera.initialize():
+                    self.logger.error("Failed to initialize camera")
+                    self.camera_error = True
+                else:
+                    self.camera_enabled = True
+                    self.logger.info("Camera initialized successfully")
 
-        # Start audio processing if enabled
-        if self.audio_enabled:
-            if hasattr(self, "audio_processor"):
+            # Start processing threads
+            self.start_processing_threads()
+
+            # Start audio processing if enabled
+            if self.audio_processor and self.audio_enabled:
                 self.audio_processor.start()
-            if hasattr(self, "emotion_recognizer"):
-                self.emotion_recognizer.start()
 
-        # Start processing the waveform queue
-        self.process_waveform_queue()
+            # Start emotion detector if available
+            if self.current_emotion_detector:
+                try:
+                    self.current_emotion_detector.start()
+                    self.logger.info("Started emotion detector")
+                except Exception as e:
+                    self.logger.error(f"Failed to start emotion detector: {str(e)}")
+                    self.initialize_emotion_detector('basic')
 
-        self.logger.info("Baby monitor system started")
+            self.update_status()
+            self.logger.info("Monitoring system started successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring system: {str(e)}")
+            self.stop()  # Clean up if start fails
 
     def stop(self):
         """Stop the monitoring system."""
@@ -360,8 +471,8 @@ class BabyMonitorSystem:
             self.logger.warning(f"Non-critical error stopping audio processor: {str(e)}")
 
         try:
-            if hasattr(self, "emotion_recognizer"):
-                self.emotion_recognizer.stop()
+            if hasattr(self, "current_emotion_detector"):
+                self.current_emotion_detector.stop()
                 # Give emotion recognizer a short time to stop
                 time.sleep(0.5)
         except Exception as e:
@@ -392,6 +503,8 @@ class BabyMonitorSystem:
         last_web_update = 0
         web_update_interval = 0.1  # Update web interface every 100ms
 
+        self.logger.info("Frame processing thread started")
+
         while self.is_running:
             try:
                 if not self.camera_enabled or not hasattr(self, 'camera'):
@@ -405,12 +518,14 @@ class BabyMonitorSystem:
                     time.sleep(max(0.001, (frame_interval - (current_time - last_frame_time)) * 0.95))
                     continue
 
-                # Get frame
+                # Get frame with detailed logging
                 ret, frame = self.camera.get_frame()
+                
                 if not ret or frame is None:
                     error_count += 1
+                    self.logger.warning(f"Failed to get frame (attempt {error_count}/{max_errors})")
                     if error_count >= max_errors:
-                        self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Error - No Frame"))
+                        self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Critical Error"))
                         error_count = 0
                     time.sleep(0.1)
                     continue
@@ -419,46 +534,22 @@ class BabyMonitorSystem:
                 frame_count += 1
                 last_frame_time = current_time
 
-                # Process detections in a separate thread to avoid blocking
+                # Process detections
                 if current_time - last_detection_time >= detection_interval and hasattr(self, 'person_detector'):
-                    def process_detection():
-                        try:
-                            detections = self.person_detector.detect(frame)
-                            
-                            if hasattr(self, 'motion_detector'):
-                                processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
-                                
-                                detection_results = {
-                                    'people_count': len(detections),
-                                    'rapid_motion': rapid_motion,
-                                    'fall_detected': fall_detected,
-                                    'timestamp': datetime.now().strftime('%H:%M:%S')
-                                }
-
-                                # Update UI status in main thread
-                                status_text = "👀  Detection: "
-                                if fall_detected:
-                                    status_text += "Fall Detected!"
-                                elif rapid_motion:
-                                    status_text += "Rapid Motion"
-                                elif detections:
-                                    status_text += f"{len(detections)} Person(s)"
-                                else:
-                                    status_text += "No Activity"
-                                
-                                self.root.after(0, lambda t=status_text: self.detection_status.configure(text=t))
-
-                                # Emit detection results
-                                if hasattr(self, 'web_app'):
-                                    self.web_app.emit_detection(detection_results)
-
-                        except Exception as e:
-                            if self.dev_mode:
-                                self.logger.error(f"Error in detection processing: {str(e)}")
-
-                    # Start detection in a separate thread
-                    detection_thread = threading.Thread(target=process_detection, daemon=True)
-                    detection_thread.start()
+                    try:
+                        # Process frame with person detector
+                        processed_frame, status_text = self.person_detector.process_frame(frame)
+                        
+                        # Update detection status in UI
+                        self.root.after(0, lambda t=status_text: self.detection_status.configure(text=f"👀  Detection: {t}"))
+                        
+                        # Use the processed frame for display
+                        frame = processed_frame
+                        
+                    except Exception as e:
+                        if self.dev_mode:
+                            self.logger.error(f"Error in detection processing: {str(e)}")
+                    
                     last_detection_time = current_time
 
                 # Update UI with camera feed
@@ -526,8 +617,7 @@ class BabyMonitorSystem:
                             self.logger.error(f"Error sending frame to web interface: {str(e)}")
 
             except Exception as e:
-                if self.dev_mode:
-                    self.logger.error(f"Error in frame processing loop: {str(e)}")
+                self.logger.error(f"Error in frame processing loop: {str(e)}")
                 error_count += 1
                 if error_count >= max_errors:
                     self.root.after(0, lambda: self.camera_status.configure(text="📷  Camera: Critical Error"))
@@ -651,8 +741,14 @@ class BabyMonitorSystem:
         try:
             selected_resolution = self.resolution_select.get()
             if selected_resolution:
+                self.camera_status.configure(text="📷  Camera: Changing Resolution...")
                 if self.camera.set_resolution(selected_resolution):
-                    self.camera_status.configure(text="📷  Camera: Ready")
+                    # Verify camera is still working with new resolution
+                    ret, frame = self.camera.get_frame()
+                    if ret and frame is not None:
+                        self.camera_status.configure(text="📷  Camera: Active")
+                    else:
+                        self.camera_status.configure(text="📷  Camera: No Video Signal")
                 else:
                     self.camera_status.configure(text="📷  Camera: Resolution Error")
         except Exception as e:
@@ -661,16 +757,174 @@ class BabyMonitorSystem:
 
     def update_video_frame(self, photo, canvas_width, canvas_height):
         """Update video frame in the main thread."""
-        if not self.is_running:
+        if not self.is_running or not self.camera_enabled:
             return
-        self.video_canvas.delete("all")
-        self.video_canvas.create_image(
-            canvas_width // 2,
-            canvas_height // 2,
-            image=photo,
-            anchor=tk.CENTER
-        )
-        self.video_canvas.image = photo  # Keep a reference
+        
+        try:
+            # Clear previous frame
+            self.video_canvas.delete("all")
+            
+            # Calculate center position
+            x = canvas_width // 2
+            y = canvas_height // 2
+            
+            # Create new image
+            self.video_canvas.create_image(x, y, image=photo, anchor=tk.CENTER)
+            
+            # Keep a reference to prevent garbage collection
+            self.video_canvas.image = photo
+            
+            # Log frame update (in dev mode)
+            if self.dev_mode:
+                self.logger.debug(f"Updated frame display: size={photo.width()}x{photo.height()}")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating video frame: {str(e)}")
+
+    def initialize_emotion_detector(self, model_key):
+        """Initialize the selected emotion detector."""
+        try:
+            if self.current_emotion_detector:
+                # Stop the current detector if it's running
+                try:
+                    self.current_emotion_detector.stop()
+                except:
+                    pass
+                self.current_emotion_detector = None
+
+            # Get the detector class and create instance
+            detector_info = AVAILABLE_SOUND_DETECTORS.get(model_key)
+            if not detector_info:
+                raise ValueError(f"Unknown model key: {model_key}")
+                
+            detector_class = detector_info['class']
+            
+            try:
+                # Initialize detector with proper config
+                config = Config.EMOTION_DETECTION.copy()
+                config['device'] = self.device  # Ensure device is set
+                
+                if model_key == 'hubert':
+                    # Ensure model path is absolute
+                    config['model_path'] = str(Config.MODELS_DIR)
+                
+                self.current_emotion_detector = detector_class(config, self.web_app)
+                
+                # Update status and UI
+                self.update_emotion_status()
+                self.model_select.set(detector_info['name'])
+                
+                if self.dev_mode:
+                    # Show supported emotions in dev mode
+                    emotions = ", ".join(self.current_emotion_detector.supported_emotions)
+                    desc = f"{detector_info['description']}\nEmotions: {emotions}"
+                    self.model_desc.configure(text=desc)
+                else:
+                    self.model_desc.configure(text="")
+                    
+                self.logger.info(f"Successfully initialized {detector_info['name']} model")
+                    
+            except Exception as model_error:
+                self.logger.error(f"Failed to initialize {detector_info['name']} model: {str(model_error)}")
+                
+                # If this was HuBERT, try falling back to Basic model
+                if model_key == 'hubert':
+                    self.logger.info("Falling back to Basic model...")
+                    return self.initialize_emotion_detector('basic')
+                else:
+                    # If we're already on the basic model or another model, raise the error
+                    raise
+                
+        except Exception as e:
+            self.logger.error(f"Error initializing emotion detector: {str(e)}")
+            self.emotion_status.configure(text="😢 Emotion: Error")
+            if self.dev_mode:
+                self.model_desc.configure(text=f"Error: {str(e)}")
+            
+            # Ensure we don't have a None detector
+            if not self.current_emotion_detector:
+                self.logger.info("Initializing with Basic model as last resort...")
+                try:
+                    config = Config.EMOTION_DETECTION.copy()
+                    config['device'] = self.device
+                    self.current_emotion_detector = AVAILABLE_SOUND_DETECTORS['basic']['class'](
+                        config, self.web_app
+                    )
+                except Exception as basic_error:
+                    self.logger.error(f"Failed to initialize Basic model: {str(basic_error)}")
+                    self.current_emotion_detector = None
+
+    def update_emotion_status(self):
+        """Update the emotion detection status in the UI."""
+        if not self.current_emotion_detector:
+            self.emotion_status.configure(text="😐 Emotion: Not Initialized")
+            return
+            
+        status = f"😊 Emotion: {self.current_emotion_detector.model_name}"
+        if self.dev_mode:
+            status += f" ({self.current_emotion_detector.__class__.__name__})"
+        self.emotion_status.configure(text=status)
+
+    def on_model_selected(self, event):
+        """Handle emotion model selection."""
+        try:
+            # Find the model key from the selected name
+            selected_name = self.model_select.get()
+            model_key = next(
+                key for key, info in AVAILABLE_SOUND_DETECTORS.items()
+                if info['name'] == selected_name
+            )
+            
+            # Initialize the selected model
+            self.initialize_emotion_detector(model_key)
+            
+        except Exception as e:
+            self.logger.error(f"Error changing emotion model: {str(e)}")
+            self.emotion_status.configure(text="😢 Emotion: Error")
+            if self.dev_mode:
+                self.model_desc.configure(text=f"Error: {str(e)}")
+
+    def update_status(self):
+        """Update all status indicators."""
+        try:
+            # Update camera status
+            if self.camera_enabled:
+                self.camera_status.configure(text="��  Camera: Active")
+            else:
+                self.camera_status.configure(text="📷  Camera: Disabled")
+
+            # Update audio status
+            if self.audio_enabled:
+                if hasattr(self, 'audio_processor') and self.audio_processor:
+                    self.audio_status.configure(text="🎤  Audio: Active")
+                else:
+                    self.audio_status.configure(text="🎤  Audio: Error")
+            else:
+                self.audio_status.configure(text="🎤  Audio: Disabled")
+
+            # Update emotion status
+            if hasattr(self, 'current_emotion_detector') and self.current_emotion_detector:
+                self.update_emotion_status()
+            else:
+                self.emotion_status.configure(text="😐 Emotion: Not Initialized")
+
+            # Update detection status
+            if hasattr(self, 'person_detector'):
+                self.detection_status.configure(text="👀  Detection: Ready")
+            else:
+                self.detection_status.configure(text="👀  Detection: Not Initialized")
+
+            # Send status to web interface
+            if hasattr(self, 'web_app'):
+                self.web_app.emit_status({
+                    'camera_enabled': self.camera_enabled,
+                    'audio_enabled': self.audio_enabled,
+                    'emotion_enabled': hasattr(self, 'current_emotion_detector') and self.current_emotion_detector is not None,
+                    'detection_enabled': hasattr(self, 'person_detector')
+                })
+
+        except Exception as e:
+            self.logger.error(f"Error updating status: {str(e)}")
 
 
 def main():
