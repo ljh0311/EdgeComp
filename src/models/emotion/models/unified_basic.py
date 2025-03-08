@@ -17,11 +17,23 @@ class LightweightEmotionModel(nn.Module):
     """Ultra-lightweight emotion recognition model for edge devices."""
     
     def __init__(self, input_size=128, num_emotions=4):
+        """
+        Initialize a lightweight emotion recognition model for edge devices.
+
+        Parameters:
+        - input_size (int): The size of the input feature vector. Default is 128.
+        - num_emotions (int): The number of emotions to classify. Default is 4.
+
+        The model consists of two fully connected layers (fc1 and fc2), 
+        followed by a dropout layer for regularization. 
+        The architecture is designed for maximum efficiency on edge devices.
+        """
         super().__init__()
         # Minimal architecture for maximum efficiency
         self.fc1 = nn.Linear(input_size, 64)
         self.fc2 = nn.Linear(64, num_emotions)
         self.dropout = nn.Dropout(0.2)
+
         
     def forward(self, x):
         x = F.relu(self.fc1(x))

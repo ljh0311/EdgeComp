@@ -14,6 +14,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk
+import gc
 
 import cv2
 import matplotlib
@@ -30,17 +31,17 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # Local imports
-from src.audio.audio_processor import AudioProcessor
-from src.camera.camera import Camera
-from src.detectors.motion_mog2 import MotionDetector
-from src.detectors.vision_yolo import PersonDetector
-from src.emotion.models import AVAILABLE_DETECTORS
-from src.emotion.models.unified_hubert import UnifiedHuBERTDetector
-from src.emotion.models.unified_basic import UnifiedBasicDetector
-from src.emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
-from src.utils.config import Config
+from src.core.config import Config
+from src.services.audio.audio_processor import AudioProcessor
+from src.services.camera.camera import Camera
+from src.services.web.web_app import BabyMonitorWeb
+from src.detectors.person_tracker import PersonTracker
+from src.models.emotion.models import AVAILABLE_DETECTORS
+from src.models.emotion.models.unified_hubert import UnifiedHuBERTDetector
+from src.models.emotion.models.unified_basic import UnifiedBasicDetector
+from src.models.emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
 from src.utils.system_monitor import SystemMonitor
-from src.web.web_app import BabyMonitorWeb
+from src.detectors.motion_mog2 import MotionDetector
 
 # Configure logging
 logging.basicConfig(**Config.LOGGING)
@@ -59,7 +60,7 @@ def setup_gpu():
         return torch.device("cpu")
 
 class BabyMonitorSystem:
-    def __init__(self, dev_mode=False, no_feed=False):
+    def __init__(self, dev_mode=False, no_feed=False, no_waveform=False):
         """Initialize the Baby Monitor System."""
         self.logger = logging.getLogger(__name__)
         self.is_running = False
@@ -69,7 +70,10 @@ class BabyMonitorSystem:
         self.frame_lock = threading.Lock()
         self.dev_mode = dev_mode
         self.no_feed = no_feed
+        self.no_waveform = no_waveform
         self.waveform_queue = queue.Queue()
+        self.frame_queue = queue.Queue(maxsize=3)  # Limit frame queue size
+        self.ui_update_interval = 33  # ~30 FPS for UI updates
 
         # Setup GPU if available
         self.device = setup_gpu()
@@ -91,8 +95,9 @@ class BabyMonitorSystem:
                 self.update_resolution_list()
             self.camera_status.configure(text="📷  Camera: Ready")
 
-            # Initialize person detector with GPU support
-            self.person_detector = PersonDetector(device=self.device)
+            # Initialize person tracker with GPU support
+            model_path = os.path.join(project_root, "models", "yolov8n.pt")
+            self.person_detector = PersonTracker(model_path=model_path, device=self.device)
 
             # Initialize motion detector with GPU support
             self.motion_detector = MotionDetector(Config.MOTION_DETECTION, device=self.device)
@@ -149,9 +154,12 @@ class BabyMonitorSystem:
             self.video_canvas.pack(fill=tk.BOTH, expand=True)
 
             # Waveform frame
-            self.waveform_frame = ttk.Frame(left_panel, height=200)
-            self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
-            self.waveform_frame.pack_propagate(False)
+            if not self.no_waveform:
+                self.waveform_frame = ttk.Frame(left_panel, height=200)
+                self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
+                self.waveform_frame.pack_propagate(False)
+                # Initialize matplotlib for waveform
+                self.setup_waveform()
 
         # Right panel (controls and status)
         right_panel = ttk.Frame(main_container, width=300)
@@ -240,12 +248,11 @@ class BabyMonitorSystem:
         )
         self.detection_status.pack(anchor=tk.W, padx=5, pady=2)
 
-        if not self.no_feed:
-            # Initialize matplotlib for waveform
-            self.setup_waveform()
-
     def setup_waveform(self):
         """Setup waveform visualization."""
+        if self.no_waveform:
+            return
+
         self.waveform_figure = Figure(figsize=(6, 2), dpi=100)
         self.waveform_canvas = FigureCanvasTkAgg(
             self.waveform_figure, master=self.waveform_frame
@@ -410,6 +417,10 @@ class BabyMonitorSystem:
             self.frame_thread.start()
             self.logger.info("Started frame processing thread")
             
+            # Start UI update thread
+            self.root.after(self.ui_update_interval, self.update_ui)
+            self.logger.info("Started UI update thread")
+            
             # Start waveform processing
             self.root.after(10, self.process_waveform_queue)
             self.logger.info("Started waveform processing")
@@ -502,14 +513,7 @@ class BabyMonitorSystem:
         frame_count = 0
         last_detection_time = 0
         detection_interval = 0.2  # Reduced detection frequency to 5 FPS
-        last_ui_update = 0
-        ui_update_interval = 0.033  # Update UI at ~30fps
-        last_web_update = 0
-        web_update_interval = 0.1  # Update web interface every 100ms
-
-        # Frame buffer for smoother display
-        self.current_frame = None
-        self.frame_lock = threading.Lock()
+        cleanup_interval = 30  # Memory cleanup every 30 frames
 
         self.logger.info("Frame processing thread started")
 
@@ -521,12 +525,12 @@ class BabyMonitorSystem:
 
                 current_time = time.time()
 
-                # Frame rate control - sleep if we're ahead of schedule
+                # Frame rate control
                 if current_time - last_frame_time < frame_interval:
                     time.sleep(max(0.001, (frame_interval - (current_time - last_frame_time)) * 0.95))
                     continue
 
-                # Get frame with detailed logging
+                # Get frame
                 ret, frame = self.camera.get_frame()
                 
                 if not ret or frame is None:
@@ -543,17 +547,17 @@ class BabyMonitorSystem:
                 last_frame_time = current_time
 
                 # Process detections at a lower frequency
+                processed_frame = frame.copy()
                 if current_time - last_detection_time >= detection_interval and hasattr(self, 'person_detector'):
                     try:
-                        with self.frame_lock:
-                            # Process frame with person detector
-                            processed_frame, status_text = self.person_detector.process_frame(frame.copy())
-                            
-                            # Update detection status in UI
-                            self.root.after(0, lambda t=status_text: self.detection_status.configure(text=f"👀  Detection: {t}"))
-                            
-                            # Store the processed frame
-                            self.current_frame = processed_frame
+                        # Process frame with person detector
+                        processed_frame, status_text = self.person_detector.process_frame(frame)
+                        
+                        # Update detection status in UI
+                        self.root.after(0, lambda t=status_text: self.detection_status.configure(text=f"👀  Detection: {t}"))
+                        
+                        # Clear original frame
+                        del frame
                         
                     except Exception as e:
                         if self.dev_mode:
@@ -561,68 +565,69 @@ class BabyMonitorSystem:
                     
                     last_detection_time = current_time
 
-                # Update UI with camera feed
-                if current_time - last_ui_update >= ui_update_interval:
+                # Queue frame for UI update if queue not full
+                try:
+                    # Convert and resize frame
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    
+                    # Get canvas dimensions
+                    canvas_width = self.video_canvas.winfo_width()
+                    canvas_height = self.video_canvas.winfo_height()
+
+                    if canvas_width > 1 and canvas_height > 1:
+                        # Calculate aspect ratios
+                        frame_aspect = frame_rgb.shape[1] / frame_rgb.shape[0]
+                        canvas_aspect = canvas_width / canvas_height
+
+                        # Calculate new dimensions
+                        if frame_aspect > canvas_aspect:
+                            new_width = canvas_width
+                            new_height = int(canvas_width / frame_aspect)
+                        else:
+                            new_height = canvas_height
+                            new_width = int(canvas_height * frame_aspect)
+
+                        # Resize frame
+                        frame_rgb = cv2.resize(
+                            frame_rgb, 
+                            (new_width, new_height),
+                            interpolation=cv2.INTER_LINEAR
+                        )
+
+                    # Convert to PIL Image
+                    frame_pil = Image.fromarray(frame_rgb)
+                    photo = ImageTk.PhotoImage(image=frame_pil)
+                    
+                    # Try to put in queue, skip if full
                     try:
-                        # Use the current processed frame if available, otherwise use the raw frame
-                        display_frame = None
-                        with self.frame_lock:
-                            if self.current_frame is not None:
-                                display_frame = self.current_frame.copy()
-                            else:
-                                display_frame = frame.copy()
+                        self.frame_queue.put_nowait((photo, canvas_width, canvas_height))
+                    except queue.Full:
+                        pass
 
-                        # Convert frame to RGB and resize efficiently
-                        frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-                        
-                        # Get canvas dimensions once
-                        canvas_width = self.video_canvas.winfo_width()
-                        canvas_height = self.video_canvas.winfo_height()
-
-                        if canvas_width > 1 and canvas_height > 1:
-                            # Calculate aspect ratios
-                            frame_aspect = frame_rgb.shape[1] / frame_rgb.shape[0]
-                            canvas_aspect = canvas_width / canvas_height
-
-                            # Calculate new dimensions maintaining aspect ratio
-                            if frame_aspect > canvas_aspect:
-                                new_width = canvas_width
-                                new_height = int(canvas_width / frame_aspect)
-                            else:
-                                new_height = canvas_height
-                                new_width = int(canvas_height * frame_aspect)
-
-                            # Only resize if dimensions have changed significantly
-                            if (abs(new_width - frame_rgb.shape[1]) > 10 or 
-                                abs(new_height - frame_rgb.shape[0]) > 10):
-                                frame_rgb = cv2.resize(
-                                    frame_rgb, 
-                                    (new_width, new_height),
-                                    interpolation=cv2.INTER_LINEAR
-                                )
-
-                            # Update UI in the main thread
-                            frame_pil = Image.fromarray(frame_rgb)
-                            photo = ImageTk.PhotoImage(image=frame_pil)
-                            self.root.after(0, lambda p=photo, w=canvas_width, h=canvas_height: 
-                                          self.update_video_frame(p, w, h))
-
-                            last_ui_update = current_time
-
-                    except Exception as e:
-                        if self.dev_mode:
-                            self.logger.error(f"Error updating video display: {str(e)}")
+                    # Clear intermediate frames
+                    del frame_rgb
+                    del frame_pil
+                    
+                except Exception as e:
+                    if self.dev_mode:
+                        self.logger.error(f"Error preparing frame for UI: {str(e)}")
 
                 # Update web interface
-                if current_time - last_web_update >= web_update_interval and hasattr(self, 'web_app'):
-                    try:
-                        with self.frame_lock:
-                            if self.current_frame is not None:
-                                self.web_app.emit_frame(self.current_frame)
-                        last_web_update = current_time
-                    except Exception as e:
-                        if self.dev_mode:
-                            self.logger.error(f"Error sending frame to web interface: {str(e)}")
+                try:
+                    if hasattr(self, 'web_app'):
+                        self.web_app.emit_frame(processed_frame)
+                except Exception as e:
+                    if self.dev_mode:
+                        self.logger.error(f"Error sending frame to web interface: {str(e)}")
+
+                # Clear processed frame
+                del processed_frame
+
+                # Periodic memory cleanup
+                if frame_count % cleanup_interval == 0:
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
             except Exception as e:
                 self.logger.error(f"Error in frame processing loop: {str(e)}")
@@ -903,6 +908,31 @@ class BabyMonitorSystem:
             if self.dev_mode:
                 self.model_desc.configure(text=f"Error: {str(e)}")
 
+    def update_ui(self):
+        """Update UI with latest frame."""
+        try:
+            # Process only the most recent frame
+            while self.frame_queue.qsize() > 1:
+                # Discard old frames
+                try:
+                    self.frame_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+            # Get the most recent frame
+            try:
+                photo, canvas_width, canvas_height = self.frame_queue.get_nowait()
+                self.update_video_frame(photo, canvas_width, canvas_height)
+            except queue.Empty:
+                pass
+
+        except Exception as e:
+            self.logger.error(f"Error in UI update: {str(e)}")
+        finally:
+            # Schedule next update if still running
+            if self.is_running:
+                self.root.after(self.ui_update_interval, self.update_ui)
+
     def update_status(self):
         """Update all status indicators."""
         try:
@@ -950,11 +980,12 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Baby Monitor System")
     parser.add_argument("--dev", action="store_true", help="Run in developer mode")
-    parser.add_argument("--noFeed", action="store_true", help="Disable camera feed and soundwave in local GUI")
+    parser.add_argument("--noFeed", action="store_true", help="Disable camera feed in local GUI")
+    parser.add_argument("--noWF", action="store_true", help="Disable waveform visualization in local GUI")
     args = parser.parse_args()
 
     try:
-        app = BabyMonitorSystem(dev_mode=args.dev, no_feed=args.noFeed)
+        app = BabyMonitorSystem(dev_mode=args.dev, no_feed=args.noFeed, no_waveform=args.noWF)
         app.start()
 
         # Start the Tkinter event loop
