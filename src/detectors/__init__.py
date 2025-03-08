@@ -6,10 +6,10 @@ Collection of detection modules for video and audio analysis.
 
 from .vision_yolo import PersonDetector
 from .motion_mog2 import MotionDetector
-from ..emotion.models.unified_sound_detector import BaseSoundDetector
-from ..emotion.models.unified_basic import UnifiedBasicDetector
-from ..emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
-from ..emotion.models.unified_hubert import UnifiedHuBERTDetector
+from ..models.emotion.models.unified_sound_detector import BaseSoundDetector
+from ..models.emotion.models.unified_basic import UnifiedBasicDetector
+from ..models.emotion.models.unified_wav2vec2 import UnifiedWav2Vec2Detector
+from ..models.emotion.models.unified_hubert import UnifiedHuBERTDetector
 
 __all__ = [
     'PersonDetector',

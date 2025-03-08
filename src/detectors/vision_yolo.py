@@ -12,6 +12,9 @@ import sys
 import os
 from pathlib import Path
 import torch
+from torch.serialization import add_safe_globals
+from ultralytics.nn.tasks import DetectionModel
+import gc
 
 
 class PersonDetector:
@@ -27,11 +30,15 @@ class PersonDetector:
         # Track previous detections for motion analysis
         self.prev_detections = []
         self.detection_history = []
-        self.history_size = 5
+        self.history_size = 5  # Limit history size
         
         # Detection smoothing
         self.smooth_factor = 0.7  # Higher value means more smoothing
         self.min_detection_confidence = 0.3
+        
+        # Memory management
+        self.frame_count = 0
+        self.cleanup_interval = 30  # Cleanup every 30 frames
         
         try:
             self._initialize_model(model_path)
@@ -43,6 +50,9 @@ class PersonDetector:
     def _initialize_model(self, model_path=None):
         """Initialize the YOLO model."""
         try:
+            # Add YOLO model to safe globals for PyTorch 2.6+
+            add_safe_globals([DetectionModel])
+            
             if model_path:
                 self.model = YOLO(model_path)
             else:
@@ -66,6 +76,23 @@ class PersonDetector:
         except Exception as e:
             self.logger.error(f"Error loading YOLO model: {str(e)}")
             raise
+
+    def _cleanup_memory(self):
+        """Perform memory cleanup."""
+        # Clear detection history if too long
+        while len(self.detection_history) > self.history_size:
+            self.detection_history.pop(0)
+        
+        # Clear previous detections if too many
+        while len(self.prev_detections) > self.history_size:
+            self.prev_detections.pop(0)
+        
+        # Clear CUDA cache if using GPU
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+        
+        # Force garbage collection
+        gc.collect()
 
     def _smooth_detections(self, current_detections):
         """Smooth detection boxes using previous detections."""
@@ -129,6 +156,9 @@ class PersonDetector:
             if self.model is None:
                 return []
 
+            # Increment frame counter
+            self.frame_count += 1
+
             # Convert frame to RGB (YOLO expects RGB)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
@@ -189,13 +219,22 @@ class PersonDetector:
             # Smooth detections
             smoothed_detections = self._smooth_detections(detections)
             
-            # Update previous detections
-            self.prev_detections = [d[:4] for d in smoothed_detections]
+            # Update previous detections (limit size)
+            self.prev_detections = [d[:4] for d in smoothed_detections][-self.history_size:]
             
-            # Update detection history
+            # Update detection history (limit size)
             self.detection_history.append(len(smoothed_detections))
-            if len(self.detection_history) > self.history_size:
-                self.detection_history.pop(0)
+            self.detection_history = self.detection_history[-self.history_size:]
+            
+            # Periodic cleanup
+            if self.frame_count % self.cleanup_interval == 0:
+                self._cleanup_memory()
+            
+            # Clear intermediate variables
+            del frame_rgb
+            del frame_resized
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
             
             return smoothed_detections
             
@@ -204,16 +243,7 @@ class PersonDetector:
             return []
 
     def process_frame(self, frame):
-        """
-        Process a frame and draw detections on it.
-
-        Args:
-            frame (numpy.ndarray): Input frame
-
-        Returns:
-            numpy.ndarray: Frame with detections drawn
-            str: Status text in format "<person number> <status>"
-        """
+        """Process a frame and draw detections on it."""
         if self.model is None:
             return frame, "0 persons"
 
@@ -224,8 +254,10 @@ class PersonDetector:
             # Create status text
             status_text = f"{len(detections)} person{'s' if len(detections) != 1 else ''}"
             
-            # Draw detections
+            # Create a copy of the frame for drawing
             frame_copy = frame.copy()
+            
+            # Draw detections
             for x1, y1, x2, y2, conf, cls, status in detections:
                 # Draw bounding box with thicker lines
                 cv2.rectangle(
@@ -233,17 +265,17 @@ class PersonDetector:
                     (int(x1), int(y1)),
                     (int(x2), int(y2)),
                     (0, 255, 0),  # Green color
-                    3  # Thicker line
+                    2  # Thinner line for better performance
                 )
                 
                 # Draw filled background for text
                 label = f"Person ({status})"
                 (text_width, text_height), _ = cv2.getTextSize(
-                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1  # Smaller font
                 )
                 cv2.rectangle(
                     frame_copy,
-                    (int(x1), int(y1) - text_height - 10),
+                    (int(x1), int(y1) - text_height - 5),
                     (int(x1) + text_width, int(y1)),
                     (0, 255, 0),
                     -1  # Filled rectangle
@@ -255,18 +287,19 @@ class PersonDetector:
                     label,
                     (int(x1), int(y1) - 5),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,  # Larger font
+                    0.5,  # Smaller font
                     (0, 0, 0),  # Black text
-                    2  # Thicker text
+                    1  # Thinner text
                 )
             
             # Add detailed status text
-            status_details = []
-            for det in detections:
-                status_details.append(det[6])  # Get status
+            status_details = [det[6] for det in detections]  # Get statuses
             if status_details:
                 status_text += ": " + ", ".join(status_details)
-                
+            
+            # Clear the original frame to free memory
+            del frame
+            
             return frame_copy, status_text
             
         except Exception as e:
@@ -276,8 +309,8 @@ class PersonDetector:
     def __del__(self):
         """Cleanup resources."""
         try:
-            # Clear CUDA cache if using GPU
-            if hasattr(self, 'device') and self.device.type == 'cuda':
-                torch.cuda.empty_cache()
+            self._cleanup_memory()
+            if hasattr(self, 'model'):
+                del self.model
         except Exception as e:
             self.logger.error(f"Error cleaning up person detector: {str(e)}")
