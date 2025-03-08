@@ -1,230 +1,230 @@
-# Edge Computing Baby Monitor
+# Baby Monitor System
 
-An intelligent baby monitoring system that leverages edge computing technology to provide real-time monitoring capabilities with advanced detection features and privacy-focused design.
+An intelligent baby monitoring system that combines computer vision and audio processing for comprehensive baby monitoring, featuring emotion detection, person detection, and real-time alerts.
 
-## Overview
+## Project Structure
 
-The Edge Computing Baby Monitor is designed to provide intelligent monitoring capabilities while processing all data locally on edge devices. It combines computer vision, audio processing, and machine learning to offer comprehensive monitoring features without relying on cloud services.
+```
+edge_comp/
+├── models/                  # Model files and weights
+│   ├── yolov8n.pt         # YOLO model for person detection
+│   ├── hubert/            # HuBERT model files for emotion detection
+│   └── README.md          # Model documentation
+├── src/                    # Source code
+│   ├── audio/             # Audio processing modules
+│   │   └── audio_processor.py
+│   ├── camera/            # Camera handling
+│   │   └── camera.py
+│   ├── detectors/         # Detection modules
+│   │   ├── motion_mog2.py
+│   │   ├── sound_hubert.py
+│   │   └── vision_yolo.py
+│   ├── emotion/           # Emotion recognition
+│   ├── utils/             # Utility functions
+│   │   ├── config.py      # System configuration
+│   │   └── system_monitor.py
+│   ├── web/              # Web interface
+│   ├── ui/               # Desktop UI components
+│   └── main.py           # Main application
+├── training/             # Training scripts and notebooks
+│   └── speechbrain-finetune.ipynb
+├── config/              # Configuration files
+├── data/               # Data files
+├── tests/             # Test files
+├── requirements.txt    # Python dependencies
+├── setup.py           # Package setup
+└── .env              # Environment variables (create from template)
+```
 
 ## Features
 
-### ✅ Currently Working
+### ✅ Currently Implemented
 
-- Real-time video capture and processing (Windows/Raspberry Pi)
-- Person detection using YOLOv8 nano model
-- Motion analysis and fall detection
-- Web-based monitoring interface
-- Real-time alerts and notifications
-- Cross-platform support
-- Resource-optimized processing
+- **Video Monitoring**
+  - Real-time video capture and streaming
+  - Support for multiple camera resolutions
+  - Automatic camera detection and selection
+
+- **Person Detection**
+  - YOLOv8 nano model integration
+  - Real-time person tracking
+  - Fall detection capabilities
+
+- **Audio Processing**
+  - Real-time audio capture
+  - Waveform visualization
+  - Multiple audio input device support
+
+- **Emotion Detection**
+  - HuBERT-based emotion recognition
+  - Support for multiple emotion models
+  - Real-time emotion classification
+
+- **User Interface**
+  - Modern desktop UI with Tkinter
+  - Web-based monitoring interface
+  - Real-time status updates
+  - Configurable settings panel
 
 ### 🚧 Under Development
 
-- Audio processing and emotion detection
 - Enhanced motion analysis
-- Environmental monitoring
 - Multi-camera support
 - Mobile application interface
-
-## System Requirements
-
-### Windows
-
-- Windows 10 or later
-- Python 3.8 or higher
-- Webcam
-- Microphone
-- 4GB RAM minimum (8GB recommended)
-- Intel Core i3/AMD Ryzen 3 or better
-
-### Raspberry Pi 400
-
-- Raspberry Pi OS (32-bit or 64-bit)
-- Python 3.8 or higher
-- Raspberry Pi Camera or USB webcam
-- USB microphone
-- 4GB RAM
-- Active cooling recommended
+- Environmental monitoring
+- Custom emotion model training
 
 ## Installation
 
-### Windows Setup
+### Prerequisites
 
-1. Clone the repository:
+- Python 3.8 or higher
+- Webcam
+- Microphone
+- Git (for version control)
 
-```bash
-git clone https://github.com/yourusername/edge-computing-baby-monitor.git
-cd edge-computing-baby-monitor
-```
+### Quick Start
 
-2. Create and activate virtual environment:
+1. **Clone the Repository**
+   ```bash
+   git clone <repository-url>
+   cd edge_comp
+   ```
 
-```bash
-python -m venv venv
-.\venv\Scripts\activate
-```
+2. **Create Virtual Environment**
+   ```bash
+   python -m venv venv
+   
+   # Windows
+   .\venv\Scripts\activate
+   
+   # Linux/Mac
+   source venv/bin/activate
+   ```
 
-3. Install dependencies:
+3. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+4. **Environment Setup**
+   ```bash
+   # Copy template and edit as needed
+   cp .env.template .env
+   ```
 
-4. Download YOLOv8 model:
+5. **Run the Application**
+   ```bash
+   # Normal mode
+   python src/main.py
+   
+   # Developer mode (with additional visualizations)
+   python src/main.py --dev
+   ```
 
-```bash
-mkdir models
-# Download YOLOv8 nano model to models directory
-curl -L https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -o models/yolov8n.pt
-```
+### Model Setup
 
-### Raspberry Pi 400 Setup
+The required models will be downloaded automatically when you first run the application:
 
-1. Clone the repository:
+- **YOLOv8n**: Person detection model
+- **HuBERT**: Emotion recognition model
 
-```bash
-git clone https://github.com/yourusername/edge-computing-baby-monitor.git
-cd edge-computing-baby-monitor
-```
-
-2. Run the installation script:
-
-```bash
-chmod +x install_pi.sh
-./install_pi.sh
-```
-
-The installation script will:
-
-- Install system dependencies
-- Set up the camera module
-- Create Python virtual environment
-- Install optimized Python packages
-- Download required models
-- Configure environment variables
-
-## Usage
-
-### Running on Windows
-
-1. Activate the virtual environment:
-
-```bash
-.\venv\Scripts\activate
-```
-
-2. Run in production mode (status and alerts only):
-
-```bash
-python src/main.py
-```
-
-3. Run in developer mode (with video feed and waveform):
-
-```bash
-python src/main.py --dev
-```
-
-### Running on Raspberry Pi 400
-
-1. Activate the virtual environment:
-
-```bash
-source venv/bin/activate
-```
-
-2. Run in production mode:
-
-```bash
-python src/main.py
-```
-
-3. Run in developer mode:
-
-```bash
-python src/main.py --dev
-```
-
-### Accessing the Web Interface
-
-The web interface will be available at:
-
-```
-http://localhost:5000
-```
-
-For remote access within your local network, use your device's IP address:
-
-```
-http://<device-ip>:5000
-```
+You can also manually download them by following instructions in `models/README.md`.
 
 ## Configuration
 
 ### Environment Variables
 
-- `CAMERA_INDEX`: Camera device index (default: 0)
-- `USE_CUDA`: Enable CUDA acceleration on Windows (default: 0)
-- `LOG_LEVEL`: Logging level (default: INFO)
+Create a `.env` file with the following options:
 
-### Performance Settings
+```env
+CAMERA_INDEX=0           # Camera device index
+USE_CUDA=0              # Enable CUDA (1) or CPU (0)
+LOG_LEVEL=INFO          # Logging level
+```
 
-#### Windows
+### System Configuration
 
-- Frame rate: 30 FPS
-- Detection interval: 1 second
-- Full visualization enabled
+Main configuration settings are in `src/utils/config.py`:
 
-#### Raspberry Pi 400
+- Camera settings (resolution, FPS)
+- Model paths and parameters
+- Audio processing settings
+- Detection thresholds
+- Performance options
 
-- Frame rate: 15 FPS
-- Detection interval: 2 seconds
-- Visualization disabled
-- Frame skipping enabled
-- Reduced audio chunk size
-- Limited thread pool
+## Usage
+
+### Desktop Application
+
+1. **Start the Application**
+   ```bash
+   python src/main.py
+   ```
+
+2. **Camera Controls**
+   - Select camera from dropdown
+   - Choose resolution
+   - Toggle camera feed
+
+3. **Audio Controls**
+   - Enable/disable audio monitoring
+   - Select emotion detection model
+   - View real-time waveform
+
+### Web Interface
+
+Access the monitoring interface at:
+- Local: `http://localhost:5000`
+- Network: `http://<device-ip>:5000`
+
+## Development
+
+### Running Tests
+```bash
+python -m pytest tests/
+```
+
+### Code Style
+```bash
+# Format code
+black src/
+
+# Check style
+flake8 src/
+```
 
 ## Troubleshooting
 
-### Windows
+### Common Issues
 
-1. Camera not detected:
+1. **Camera Not Found**
    - Check camera connection
-   - Try different `CAMERA_INDEX` values
-   - Verify camera works in other applications
+   - Verify camera index in `.env`
+   - Test camera in other applications
 
-2. Performance issues:
-   - Close resource-intensive applications
-   - Reduce resolution in config.py
-   - Disable developer mode
+2. **Audio Issues**
+   - Check microphone connection
+   - Verify audio input device
+   - Check system permissions
 
-### Raspberry Pi 400
+3. **Model Loading Errors**
+   - Check internet connection for first run
+   - Verify model files in `models/` directory
+   - Check CUDA configuration if using GPU
 
-1. Camera issues:
-   - Run `sudo modprobe bcm2835-v4l2`
-   - Check camera connection
-   - Verify camera module is enabled in raspi-config
+### Logs
 
-2. Performance optimization:
-   - Monitor temperature: `vcgencmd measure_temp`
-   - Check CPU usage: `top`
-   - Ensure active cooling
-   - Reduce resolution if needed
+- Application logs: `baby_monitor.log`
+- Check logs for detailed error messages
 
-3. Audio issues:
-   - Check audio device: `arecord -l`
-   - Test microphone: `arecord -D plughw:1,0 test.wav`
-   - Verify audio permissions
+## Contributing
 
-## Support
-
-For issues and support:
-
-1. Check the troubleshooting guide
-2. Review logs in `logs` directory
-3. Open an issue on GitHub
-4. Contact the development team
+1. Fork the repository
+2. Create a feature branch
+3. Commit changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
@@ -233,5 +233,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - YOLOv8 by Ultralytics
+- SpeechBrain project
 - OpenCV community
 - Flask and Socket.IO teams
