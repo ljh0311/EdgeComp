@@ -6,30 +6,64 @@ This directory contains all the machine learning models used by the Baby Monitor
 
 1. **YOLOv8n** (Person Detection)
    - File: `yolov8n.pt`
+   - Purpose: Real-time person detection and tracking
+   - Features:
+     - Person detection and tracking
+     - Fall detection support
+     - Real-time processing optimized
+   - Size: ~6MB
    - Downloaded automatically when running the application
-   - Used for person detection in video feed
 
 2. **HuBERT** (Emotion Recognition)
-   - Files: Downloaded automatically to this directory when using HuBERT emotion detector
-   - Used for audio emotion recognition
-   - Models are managed by the SpeechBrain library
+   - Directory: `hubert/`
+   - Purpose: Audio-based emotion recognition
+   - Features:
+     - Real-time emotion classification
+     - Multiple emotion detection
+     - Optimized for baby sounds
+   - Models managed by SpeechBrain library
+   - Downloaded automatically when using HuBERT emotion detector
 
 ## Model Management
 
-- Models are automatically downloaded when running the application
-- Large model files are excluded from git via `.gitignore`
-- If you need to manually download models:
-  1. Run the main application: `python src/main.py`
-  2. The required models will be downloaded automatically
-  3. Or use the emotion recognition test script: `python src/run_emotion_recognition.py`
+### Automatic Download
+Models are automatically downloaded when:
+1. Running the main application: `python src/main.py`
+2. Using the emotion recognition test: `python src/run_emotion_recognition.py`
+
+### Manual Download
+If needed, you can manually download the models:
+
+1. YOLOv8n:
+   ```bash
+   wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+   ```
+
+2. HuBERT:
+   - Models are managed by SpeechBrain
+   - Will be downloaded automatically on first use
+   - Stored in this directory under `hubert/`
 
 ## Model Versions
 
 - YOLOv8n: Latest version from Ultralytics
 - HuBERT: Latest version from SpeechBrain
 
+## Performance Notes
+
+- YOLOv8n is optimized for real-time processing
+- Both CPU and CUDA acceleration supported
+- Memory usage:
+  - YOLOv8n: ~500MB RAM
+  - HuBERT: ~1GB RAM
+
 ## Notes
 
 - Models are stored in this directory to keep the repository organized
-- The `.gitignore` file excludes `.pt`, `.pth`, and `.onnx` files to prevent large files in the repository
-- If you encounter any issues with model downloads, check your internet connection and try running the application again
+- Large model files (`.pt`, `.pth`, `.onnx`) are excluded from git
+- Model paths are configured in `src/utils/config.py`
+- If download fails:
+  1. Check your internet connection
+  2. Verify you have sufficient disk space
+  3. Try running the application again
+  4. Check the logs for specific error messages
