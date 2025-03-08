@@ -20,8 +20,12 @@ class EmotionDetector(BaseSoundDetector):
             web_app: Optional web application instance for real-time updates
         """
         super().__init__(config, web_app)
-        self.model = HuBERTEmotionDetector(config['model_path'])
-        self.logger.info(f"Initialized {self.model_name}")
+        try:
+            self.model = HuBERTEmotionDetector(config, web_app)
+            self.logger.info(f"Initialized {self.model_name}")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize {self.model_name}: {str(e)}")
+            raise
     
     @property
     def model_name(self):
@@ -31,7 +35,21 @@ class EmotionDetector(BaseSoundDetector):
     @property
     def supported_emotions(self):
         """Return list of supported emotions"""
-        return ["Natural", "Anger", "Worried", "Happy", "Fear", "Sadness"]
+        return self.model.supported_emotions if self.model else []
+    
+    def start(self):
+        """Start the emotion detector."""
+        if self.model:
+            self.model.start()
+            self.is_running = True
+            self.logger.info(f"{self.model_name} started")
+    
+    def stop(self):
+        """Stop the emotion detector."""
+        if self.model:
+            self.model.stop()
+            self.is_running = False
+            self.logger.info(f"{self.model_name} stopped")
     
     def detect(self, audio_data):
         """
@@ -44,10 +62,16 @@ class EmotionDetector(BaseSoundDetector):
             tuple: (emotion_label, confidence)
         """
         try:
+            if not self.is_running or not self.model:
+                return None, 0.0
+                
             emotion, confidence = self.model.detect(audio_data)
-            if self.web_app:
-                self.web_app.emit_emotion(emotion, confidence)
+            if emotion and confidence > 0:
+                level = self.get_emotion_level(emotion, confidence)
+                if level and self.web_app:
+                    self.web_app.emit_emotion(emotion, confidence, level)
             return emotion, confidence
+            
         except Exception as e:
             self.logger.error(f"Error in emotion detection: {str(e)}")
             return None, 0.0
@@ -63,12 +87,12 @@ class EmotionDetector(BaseSoundDetector):
         Returns:
             str: Alert level ('critical', 'warning', or None)
         """
-        if confidence < self.config['confidence_threshold']:
+        if confidence < self.config.get('confidence_threshold', 0.5):
             return None
             
-        if emotion in ['Anger', 'Fear', 'Sadness'] and confidence > self.config['critical_threshold']:
+        if emotion in ['Anger', 'Fear', 'Sadness'] and confidence > self.config.get('critical_threshold', 0.7):
             return 'critical'
-        elif emotion in ['Worried'] or confidence > self.config['warning_threshold']:
+        elif emotion in ['Worried'] or confidence > self.config.get('warning_threshold', 0.6):
             return 'warning'
         
         return None 
