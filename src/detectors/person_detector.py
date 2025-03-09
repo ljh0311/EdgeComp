@@ -51,7 +51,7 @@ class PersonDetector:
 
             # Initialize model
             self.model = YOLO(model_path)
-            self.model.to('cpu')  # Use CPU by default
+            self.model.to("cpu")  # Use CPU by default
 
             # Restore stdout
             sys.stdout = self.original_stdout
@@ -101,7 +101,7 @@ class PersonDetector:
         try:
             # Run detection
             detections = self.detect(frame)
-            
+
             # Draw detections
             frame_copy = frame.copy()
             for r in detections:
@@ -117,9 +117,9 @@ class PersonDetector:
                             (int(x1), int(y1)),
                             (int(x2), int(y2)),
                             (0, 255, 0),  # Green color
-                            2
+                            2,
                         )
-                        
+
                         # Draw label
                         label = f"Person {conf:.2f}"
                         cv2.putText(
@@ -129,11 +129,11 @@ class PersonDetector:
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.5,
                             (0, 255, 0),
-                            2
+                            2,
                         )
-                        
+
             return frame_copy
-            
+
         except Exception as e:
             self.logger.error(f"Error processing frame: {str(e)}")
             return frame
@@ -141,5 +141,5 @@ class PersonDetector:
     def __del__(self):
         """Cleanup when object is deleted."""
         # Restore stdout
-        if hasattr(self, 'original_stdout'):
+        if hasattr(self, "original_stdout"):
             sys.stdout = self.original_stdout
