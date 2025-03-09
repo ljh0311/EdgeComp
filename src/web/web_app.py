@@ -14,218 +14,10 @@ import time
 import base64
 import os
 import signal
+from scipy import signal as scipy_signal
 from datetime import datetime
-
-
-class WebApp:
-    def __init__(self, monitor_system):
-        self.app = Flask(__name__)
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
-        self.monitor_system = monitor_system
-        self.logger = logging.getLogger(__name__)
-        self.setup_routes()
-        self.setup_socketio()
-
-    def setup_routes(self):
-        @self.app.route('/')
-        def index():
-            return render_template('index.html')
-
-        @self.app.route('/status')
-        def status():
-            return jsonify({
-                'camera_enabled': self.monitor_system.camera_enabled,
-                'audio_enabled': self.monitor_system.audio_enabled,
-                'motion_detected': self.monitor_system.motion_detected,
-                'emotion_detected': self.monitor_system.emotion_detected
-            })
-
-    def setup_socketio(self):
-        @self.socketio.on('connect')
-        def handle_connect():
-            self.emit_status()
-
-        @self.socketio.on('get_cameras')
-        def handle_get_cameras(data=None):
-            try:
-                if not self.monitor_system:
-                    return {'success': False, 'error': 'Monitor system not initialized'}
-                
-                cameras = []
-                camera_list = self.monitor_system.camera.get_camera_list()
-                
-                for camera_name in camera_list:
-                    resolutions = self.monitor_system.camera.get_camera_resolutions(camera_name)
-                    cameras.append({
-                        'id': camera_name,
-                        'name': camera_name,
-                        'resolutions': [{'width': int(res.split('x')[0]), 'height': int(res.split('x')[1])} 
-                                      for res in resolutions]
-                    })
-                
-                return {'success': True, 'cameras': cameras}
-            except Exception as e:
-                self.logger.error(f"Error getting cameras: {str(e)}")
-                return {'success': False, 'error': str(e)}
-
-        @self.socketio.on('select_camera')
-        def handle_select_camera(data):
-            try:
-                if not self.monitor_system:
-                    return {'success': False, 'error': 'Monitor system not initialized'}
-                
-                camera_name = data.get('camera_name')
-                if not camera_name:
-                    return {'success': False, 'error': 'No camera name provided'}
-
-                if self.monitor_system.camera.select_camera(camera_name):
-                    return {'success': True, 'message': f'Selected camera: {camera_name}'}
-                else:
-                    return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
-            except Exception as e:
-                self.logger.error(f"Error selecting camera: {str(e)}")
-                return {'success': False, 'error': str(e)}
-
-        @self.socketio.on('set_resolution')
-        def handle_set_resolution(data):
-            try:
-                width = int(data.get('width'))
-                height = int(data.get('height'))
-                success = self.monitor_system.camera.set_resolution(width, height)
-                return {'success': success}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-
-        @self.socketio.on('toggle_camera')
-        def handle_toggle_camera():
-            try:
-                self.monitor_system.toggle_camera()
-                self.emit_status()
-                return {'success': True}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-
-        @self.socketio.on('toggle_audio')
-        def handle_toggle_audio():
-            try:
-                self.monitor_system.toggle_audio()
-                self.emit_status()
-                return {'success': True}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-
-    def emit_frame(self, frame):
-        """Emit a video frame to all connected clients."""
-        if frame is not None:
-            try:
-                # Encode frame as JPEG
-                _, buffer = cv2.imencode('.jpg', frame)
-                # Convert to base64 string
-                b64_string = base64.b64encode(buffer).decode('utf-8')
-                # Emit the frame
-                self.socketio.emit('frame', {'data': b64_string})
-            except Exception as e:
-                self.logger.error(f"Error emitting frame: {str(e)}")
-
-    def emit_audio_data(self, samples):
-        """Emit audio data for visualization."""
-        if samples is not None:
-            try:
-                # Normalize samples to [-1, 1] range
-                normalized = samples.astype(float) / np.iinfo(samples.dtype).max
-                # Downsample for visualization
-                downsampled = signal.resample(normalized, 100)
-                self.socketio.emit('audio_data', {'samples': downsampled.tolist()})
-            except Exception as e:
-                self.logger.error(f"Error emitting audio data: {str(e)}")
-
-    def emit_status(self):
-        """Emit current system status to all connected clients."""
-        self.socketio.emit('status', {
-            'camera_enabled': self.monitor_system.camera_enabled,
-            'audio_enabled': self.monitor_system.audio_enabled,
-            'motion_detected': self.monitor_system.motion_detected,
-            'emotion_detected': self.monitor_system.emotion_detected
-        })
-
-    def start(self):
-        """Start the web server."""
-        host = '0.0.0.0'  # Listen on all network interfaces
-        port = 5000
-        self.logger.info(f"Starting web server on {host}:{port}")
-        self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False)
-
-    def emit_detection(self, detection_data):
-        """Emit detection results to connected clients."""
-        try:
-            data = {
-                'people_count': detection_data.get('people_count', 0),
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            }
-            
-            # Update motion status
-            if detection_data.get('rapid_motion'):
-                data['motion_status'] = 'Rapid Motion'
-            elif detection_data.get('people_count', 0) > 0:
-                data['motion_status'] = 'Motion Detected'
-            else:
-                data['motion_status'] = 'No Motion'
-            
-            # Add fall detection status
-            if detection_data.get('fall_detected'):
-                data['fall_detected'] = True
-                # Emit a critical alert for fall detection
-                self.emit_alert('critical', 'Fall detected!')
-            
-            self.socketio.emit('detection', data)
-        except Exception as e:
-            self.logger.error(f"Error emitting detection: {str(e)}")
-
-    def emit_audio_detection(self, sound_type):
-        """Emit audio detection results to connected clients."""
-        try:
-            self.socketio.emit('audio_detection', {
-                'sound_type': sound_type,
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            })
-        except Exception as e:
-            self.logger.error(f"Error emitting audio detection: {str(e)}")
-
-    def emit_emotion(self, emotion, confidence):
-        """Emit emotion detection results to connected clients."""
-        try:
-            self.socketio.emit('emotion', {
-                'emotion': emotion,
-                'confidence': confidence,
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            })
-        except Exception as e:
-            self.logger.error(f"Error emitting emotion: {str(e)}")
-
-    def emit_audio_data(self, audio_data):
-        """Emit audio waveform data to connected clients."""
-        try:
-            if audio_data is not None:
-                # Convert to list and normalize
-                data = audio_data.astype(float)
-                data = data / np.abs(data).max() if np.abs(data).max() > 0 else data
-                # Only send a subset of points to reduce bandwidth
-                step = max(1, len(data) // 100)  # Limit to ~100 points
-                data = data[::step]
-                self.socketio.emit('waveform', {'data': data.tolist()})
-        except Exception as e:
-            self.logger.error(f"Error emitting audio data: {str(e)}")
-
-    def emit_alert(self, level, message):
-        """Emit alert to connected clients."""
-        try:
-            self.socketio.emit('alert', {
-                'level': level,
-                'message': message,
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            })
-        except Exception as e:
-            self.logger.error(f"Error emitting alert: {str(e)}")
+from queue import Queue, Empty
+from threading import Lock
 
 
 class BabyMonitorWeb:
@@ -234,17 +26,121 @@ class BabyMonitorWeb:
         self.port = port
         self.dev_mode = dev_mode
         self.app = Flask(__name__)
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
         self.logger = logging.getLogger(__name__)
         self.monitor_system = None
         self.last_frame_time = 0
         self.frame_interval = 1.0 / 30.0  # 30 FPS max
+        
+        # Add thread safety
+        self.frame_lock = Lock()
+        self.audio_lock = Lock()
+        self.thread_lock = Lock()  # For thread management
+        
+        # Add frame and audio queues with size limits
+        self.frame_queue = Queue(maxsize=10)  # Increased but limited buffer
+        self.audio_queue = Queue(maxsize=10)
+        
+        # Add client tracking
+        self.connected_clients = set()
+        self.client_lock = Lock()
+        
+        # Thread management
+        self.should_run = False
+        self.frame_thread = None
+        self.audio_thread = None
+        self.server_thread = None
+        
         self.setup_routes()
         self.setup_socketio()
 
     def set_monitor_system(self, monitor_system):
         """Set reference to the monitor system."""
         self.monitor_system = monitor_system
+        self.start_background_tasks()
+
+    def start_background_tasks(self):
+        """Start background tasks for frame and audio processing."""
+        with self.thread_lock:
+            if not self.frame_thread or not self.frame_thread.is_alive():
+                self.frame_thread = threading.Thread(target=self._process_frames, daemon=True)
+                self.frame_thread.start()
+            
+            if not self.audio_thread or not self.audio_thread.is_alive():
+                self.audio_thread = threading.Thread(target=self._process_audio, daemon=True)
+                self.audio_thread.start()
+
+    def _process_frames(self):
+        """Background task to process and emit frames."""
+        while self.should_run:
+            try:
+                if not self.frame_queue.empty():
+                    with self.frame_lock:
+                        frame = self.frame_queue.get_nowait()
+                        current_time = time.time()
+                        if current_time - self.last_frame_time >= self.frame_interval:
+                            if len(self.connected_clients) > 0:
+                                try:
+                                    # Resize frame if needed
+                                    if frame.shape[1] > 1280:  # If width > 1280
+                                        scale = 1280 / frame.shape[1]
+                                        frame = cv2.resize(frame, None, fx=scale, fy=scale)
+                                    
+                                    # Convert frame to JPEG with quality control
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                    frame_data = base64.b64encode(buffer).decode('utf-8')
+                                    
+                                    # Emit with error handling
+                                    try:
+                                        self.socketio.emit('frame', {'data': frame_data})
+                                        self.last_frame_time = current_time
+                                    except Exception as e:
+                                        self.logger.error(f"Socket.IO emission error: {str(e)}")
+                                except Exception as e:
+                                    self.logger.error(f"Frame processing error: {str(e)}")
+            except Empty:
+                time.sleep(0.01)
+            except Exception as e:
+                self.logger.error(f"Frame thread error: {str(e)}")
+                time.sleep(0.1)
+
+    def _process_audio(self):
+        """Background task to process and emit audio data."""
+        while self.should_run:
+            try:
+                if not self.audio_queue.empty():
+                    with self.audio_lock:
+                        audio_data = self.audio_queue.get_nowait()
+                        if len(self.connected_clients) > 0:
+                            try:
+                                # Convert to float and normalize
+                                data = audio_data.astype(float)
+                                if np.abs(data).max() > 0:
+                                    data = data / np.abs(data).max()
+                                
+                                # Apply bandpass filter
+                                nyquist = 22050
+                                low = 20.0 / nyquist
+                                high = 4000.0 / nyquist
+                                b, a = scipy_signal.butter(4, [low, high], btype='band')
+                                data = scipy_signal.filtfilt(b, a, data)
+                                
+                                # Downsample for visualization
+                                target_points = 100
+                                if len(data) > target_points:
+                                    data = scipy_signal.resample(data, target_points)
+                                
+                                try:
+                                    self.socketio.emit('waveform', {'data': data.tolist()})
+                                except Exception as e:
+                                    self.logger.error(f"Socket.IO emission error: {str(e)}")
+                            except Exception as e:
+                                self.logger.error(f"Audio processing error: {str(e)}")
+            except Empty:
+                time.sleep(0.01)
+            except Exception as e:
+                self.logger.error(f"Audio thread error: {str(e)}")
+                time.sleep(0.1)
 
     def setup_routes(self):
         """Setup Flask routes."""
@@ -265,11 +161,7 @@ class BabyMonitorWeb:
                     cameras.append({
                         'id': str(idx),
                         'name': f'Camera {idx}',
-                        'resolutions': [
-                            {'width': 640, 'height': 480},
-                            {'width': 1280, 'height': 720},
-                            {'width': 1920, 'height': 1080}
-                        ]
+                        'resolutions': ['640x480', '1280x720', '1920x1080']
                     })
                 
                 return jsonify(cameras)
@@ -343,13 +235,17 @@ class BabyMonitorWeb:
         """Setup Socket.IO event handlers."""
         @self.socketio.on('connect')
         def handle_connect():
-            self.logger.info("Client connected")
+            with self.client_lock:
+                self.connected_clients.add(request.sid)
+            self.logger.info(f"Client connected: {request.sid}")
             if self.monitor_system:
                 self.emit_status()
 
         @self.socketio.on('disconnect')
         def handle_disconnect():
-            self.logger.info("Client disconnected")
+            with self.client_lock:
+                self.connected_clients.discard(request.sid)
+            self.logger.info(f"Client disconnected: {request.sid}")
 
         @self.socketio.on('get_cameras')
         def handle_get_cameras(data=None):
@@ -383,9 +279,14 @@ class BabyMonitorWeb:
                 camera_name = data.get('camera_name')
                 if not camera_name:
                     return {'success': False, 'error': 'No camera name provided'}
-
-                if self.monitor_system.camera.select_camera(camera_name):
-                    return {'success': True, 'message': f'Selected camera: {camera_name}'}
+                
+                success = self.monitor_system.camera.select_camera(camera_name)
+                if success:
+                    # Reset frame processing
+                    with self.frame_lock:
+                        while not self.frame_queue.empty():
+                            self.frame_queue.get_nowait()
+                    return {'success': True}
                 else:
                     return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
             except Exception as e:
@@ -397,14 +298,20 @@ class BabyMonitorWeb:
             try:
                 if not self.monitor_system:
                     return {'success': False, 'error': 'Monitor system not initialized'}
-                width = int(data.get('width', 640))
-                height = int(data.get('height', 480))
-                resolution = f"{width}x{height}"
+                
+                resolution = data.get('resolution')
+                if not resolution:
+                    return {'success': False, 'error': 'No resolution provided'}
+                
                 success = self.monitor_system.camera.set_resolution(resolution)
-                return {
-                    'success': success,
-                    'message': f'Resolution set to {resolution}' if success else 'Failed to set resolution'
-                }
+                if success:
+                    # Reset frame processing
+                    with self.frame_lock:
+                        while not self.frame_queue.empty():
+                            self.frame_queue.get_nowait()
+                    return {'success': True}
+                else:
+                    return {'success': False, 'error': 'Failed to set resolution'}
             except Exception as e:
                 self.logger.error(f"Error setting resolution: {str(e)}")
                 return {'success': False, 'error': str(e)}
@@ -432,26 +339,69 @@ class BabyMonitorWeb:
                 return {'success': False, 'error': str(e)}
 
     def emit_frame(self, frame):
-        """Emit video frame to connected clients."""
+        """Queue frame for emission to connected clients."""
         try:
-            current_time = time.time()
-            if current_time - self.last_frame_time >= self.frame_interval:
-                # Convert frame to JPEG
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                # Convert to base64 string
-                frame_data = base64.b64encode(buffer).decode('utf-8')
-                self.socketio.emit('frame', {'data': frame_data})
-                self.last_frame_time = current_time
+            if frame is not None and len(self.connected_clients) > 0:
+                # Clear old frame if queue is full
+                if self.frame_queue.full():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except Empty:
+                        pass
+                self.frame_queue.put_nowait(frame)
         except Exception as e:
-            self.logger.error(f"Error emitting frame: {str(e)}")
+            self.logger.error(f"Error queueing frame: {str(e)}")
 
-    def emit_audio(self, audio_data):
-        """Emit audio data to connected clients."""
+    def emit_audio_data(self, audio_data):
+        """Queue audio data for emission to connected clients."""
         try:
-            if audio_data is not None:
-                self.socketio.emit('audio', {'data': audio_data.tolist()})
+            if audio_data is not None and len(self.connected_clients) > 0:
+                # Clear old audio data if queue is full
+                if self.audio_queue.full():
+                    try:
+                        self.audio_queue.get_nowait()
+                    except Empty:
+                        pass
+                self.audio_queue.put_nowait(audio_data)
         except Exception as e:
-            self.logger.error(f"Error emitting audio: {str(e)}")
+            self.logger.error(f"Error queueing audio data: {str(e)}")
+
+    def emit_detection(self, detection_data):
+        """Emit detection results to connected clients."""
+        try:
+            if len(self.connected_clients) > 0:
+                data = {
+                    'people_count': detection_data.get('people_count', 0),
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'detections': []
+                }
+                
+                # Add individual detection information
+                if 'detections' in detection_data:
+                    for det in detection_data['detections']:
+                        data['detections'].append({
+                            'id': det.get('id', 1),  # Default to 1 if single person
+                            'position': det.get('position', 'unknown'),
+                            'confidence': det.get('confidence', 0.0),
+                            'box': det.get('box', [])  # [x1, y1, x2, y2]
+                        })
+                
+                # Update motion status
+                if detection_data.get('rapid_motion'):
+                    data['motion_status'] = 'Rapid Motion'
+                elif detection_data.get('people_count', 0) > 0:
+                    data['motion_status'] = 'Motion Detected'
+                else:
+                    data['motion_status'] = 'No Motion'
+                
+                # Add fall detection status
+                if detection_data.get('fall_detected'):
+                    data['fall_detected'] = True
+                    self.emit_alert('critical', 'Fall detected!')
+                
+                self.socketio.emit('detection', data)
+        except Exception as e:
+            self.logger.error(f"Error emitting detection: {str(e)}")
 
     def emit_status(self, status_data=None):
         """Emit status update to connected clients."""
@@ -463,53 +413,45 @@ class BabyMonitorWeb:
                     'emotion_enabled': True if hasattr(self.monitor_system, 'emotion_recognizer') else False,
                     'detection_enabled': True if hasattr(self.monitor_system, 'person_detector') else False
                 }
-            self.socketio.emit('status', status_data)
+            if len(self.connected_clients) > 0:
+                self.socketio.emit('status', status_data)
         except Exception as e:
             self.logger.error(f"Error emitting status: {str(e)}")
 
     def emit_alert(self, level, message):
         """Emit alert to connected clients."""
         try:
-            self.socketio.emit('alert', {
-                'level': level,
-                'message': message,
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            })
+            if len(self.connected_clients) > 0:
+                self.socketio.emit('alert', {
+                    'level': level,
+                    'message': message,
+                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                })
         except Exception as e:
             self.logger.error(f"Error emitting alert: {str(e)}")
 
     def emit_emotion(self, emotion, confidence):
         """Emit emotion detection results to connected clients."""
         try:
-            self.socketio.emit('emotion', {
-                'emotion': emotion,
-                'confidence': confidence,
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            })
+            if len(self.connected_clients) > 0:
+                self.socketio.emit('emotion', {
+                    'emotion': emotion,
+                    'confidence': confidence,
+                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                })
         except Exception as e:
             self.logger.error(f"Error emitting emotion: {str(e)}")
-
-    def emit_audio_data(self, audio_data):
-        """Emit audio waveform data to connected clients."""
-        try:
-            if audio_data is not None:
-                # Convert to list and normalize
-                data = audio_data.astype(float)
-                data = data / np.abs(data).max() if np.abs(data).max() > 0 else data
-                # Only send a subset of points to reduce bandwidth
-                step = max(1, len(data) // 100)  # Limit to ~100 points
-                data = data[::step]
-                self.socketio.emit('waveform', {'data': data.tolist()})
-        except Exception as e:
-            self.logger.error(f"Error emitting audio data: {str(e)}")
 
     def start(self):
         """Start the web interface."""
         try:
-            threading.Thread(target=self._run_server, daemon=True).start()
+            self.should_run = True
+            self.server_thread = threading.Thread(target=self._run_server, daemon=True)
+            self.server_thread.start()
             self.logger.info(f"Baby Monitor web system started on http://{self.host}:{self.port}")
         except Exception as e:
             self.logger.error(f"Error starting web interface: {str(e)}")
+            self.should_run = False
             raise
 
     def _run_server(self):
@@ -522,33 +464,35 @@ class BabyMonitorWeb:
     def stop(self):
         """Stop the web interface."""
         try:
-            # Implement cleanup if needed
-            pass
+            self.should_run = False
+            
+            # Stop background threads
+            with self.thread_lock:
+                if self.frame_thread and self.frame_thread.is_alive():
+                    self.frame_thread.join(timeout=2.0)
+                if self.audio_thread and self.audio_thread.is_alive():
+                    self.audio_thread.join(timeout=2.0)
+            
+            # Clear queues
+            with self.frame_lock:
+                while not self.frame_queue.empty():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except Empty:
+                        break
+            
+            with self.audio_lock:
+                while not self.audio_queue.empty():
+                    try:
+                        self.audio_queue.get_nowait()
+                    except Empty:
+                        break
+            
+            # Clear client set
+            with self.client_lock:
+                self.connected_clients.clear()
+            
+            self.logger.info("Web interface stopped successfully")
         except Exception as e:
             self.logger.error(f"Error stopping web interface: {str(e)}")
-
-    def emit_detection(self, detection_data):
-        """Emit detection results to connected clients."""
-        try:
-            data = {
-                'people_count': detection_data.get('people_count', 0),
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            }
-            
-            # Update motion status
-            if detection_data.get('rapid_motion'):
-                data['motion_status'] = 'Rapid Motion'
-            elif detection_data.get('people_count', 0) > 0:
-                data['motion_status'] = 'Motion Detected'
-            else:
-                data['motion_status'] = 'No Motion'
-            
-            # Add fall detection status
-            if detection_data.get('fall_detected'):
-                data['fall_detected'] = True
-                # Emit a critical alert for fall detection
-                self.emit_alert('critical', 'Fall detected!')
-            
-            self.socketio.emit('detection', data)
-        except Exception as e:
-            self.logger.error(f"Error emitting detection: {str(e)}")
+            raise
