@@ -2,6 +2,7 @@
 Emotion recognition module using wav2vec2 model.
 """
 
+import time
 import torch
 import logging
 import threading
@@ -175,3 +176,34 @@ class EmotionRecognizer:
             self.stream.close()
         
         self.logger.info("Emotion recognition stopped") 
+        
+if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Initialize emotion recognizer
+        recognizer = EmotionRecognizer()
+        
+        logger.info("Starting emotion recognition. Press Ctrl+C to stop.")
+        recognizer.start()
+
+        # Keep the main thread running
+        while True:
+            try:
+                # Sleep to prevent high CPU usage
+                time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Stopping emotion recognition...")
+                break
+
+    except Exception as e:
+        logger.error(f"Error in main: {str(e)}")
+    finally:
+        # Ensure cleanup
+        if 'recognizer' in locals():
+            recognizer.stop()
