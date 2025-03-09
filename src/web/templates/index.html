@@ -131,7 +131,8 @@
             padding: 10px;
             margin: 10px 0;
             border-radius: 5px;
-            background: #f8f9fa;
+            background: #333;
+            color: #ffffff;
         }
         
         .detection-item {
@@ -141,6 +142,44 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            color: #ffffff;
+        }
+
+        .monitoring-status {
+            background: #333;
+            color: #ffffff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .monitoring-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #444;
+        }
+
+        .monitoring-item:last-child {
+            border-bottom: none;
+        }
+
+        .monitoring-label {
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .monitoring-value {
+            color: #00ff00;
+        }
+
+        .monitoring-value.warning {
+            color: #ffff00;
+        }
+
+        .monitoring-value.error {
+            color: #ff0000;
         }
         
         .alerts-list {
@@ -178,14 +217,16 @@
         .waveform-container {
             width: 100%;
             height: 150px;
-            background: #f8f9fa;
+            background: #333;
             margin-top: 20px;
             position: relative;
+            border-radius: 8px;
         }
         
         #waveformCanvas {
             width: 100%;
             height: 100%;
+            background: #333;
         }
         
         .placeholder {
@@ -220,10 +261,17 @@
         <div class="main-content">
             <div class="video-section">
                 <div class="video-container">
-                    <img id="videoFeed" class="video-feed">
+                    <img id="videoFeed" class="video-feed" src="" alt="Video Feed">
                     <div class="placeholder" id="cameraPlaceholder">
-                        <i class="fas fa-video-slash"></i>
-                        <p>Camera is disabled</p>
+                        <i class="fas fa-video-slash fa-3x"></i>
+                        <p class="mt-3">Camera is disabled</p>
+                    </div>
+                    <div class="video-overlay" id="videoOverlay">
+                        <div class="detection-box" id="detectionBox" style="display: none;"></div>
+                        <div class="emotion-indicator" id="emotionIndicator" style="display: none;">
+                            <i class="fas fa-smile"></i>
+                            <span class="emotion-text">Happy</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -283,19 +331,45 @@
                 </div>
                 
                 <div class="detection-panel">
-                    <h3><i class="fas fa-user-check"></i> Detection Results</h3>
+                    <h3><i class="fas fa-user-check"></i> Live Monitoring Status</h3>
                     <div class="detection-info">
-                        <div class="d-flex align-items-center mb-2">
-                            <span class="status-icon" id="peopleIcon">👥</span>
-                            <span>People Detected: <span id="peopleCount">0</span></span>
+                        <div class="detection-card mb-3">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="peopleIcon"><i class="fas fa-users"></i></span>
+                                <div class="detection-details">
+                                    <h4>People Present</h4>
+                                    <p>Number of people: <span id="peopleCount" class="highlight">0</span></p>
+                                    <p class="detection-note" id="peopleNote">No one detected</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="d-flex align-items-center mb-2">
-                            <span class="status-icon" id="motionIcon">🔄</span>
-                            <span>Motion Status: <span id="motionStatus">No Motion</span></span>
+
+                        <div class="detection-card mb-3">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="motionIcon"><i class="fas fa-running"></i></span>
+                                <div class="detection-details">
+                                    <h4>Movement Detection</h4>
+                                    <p>Current activity: <span id="motionStatus" class="highlight">No Motion</span></p>
+                                    <p class="detection-note" id="motionNote">Room is quiet</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="d-flex align-items-center">
-                            <span class="status-icon" id="soundIcon">🔊</span>
-                            <span>Sound Status: <span id="soundStatus">No Sound</span></span>
+
+                        <div class="detection-card">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="soundIcon"><i class="fas fa-volume-up"></i></span>
+                                <div class="detection-details">
+                                    <h4>Sound Analysis</h4>
+                                    <p>Sound detected: <span id="soundStatus" class="highlight">No Sound</span></p>
+                                    <p>Emotion: <span id="soundEmotion" class="highlight">None</span></p>
+                                    <div class="emotion-indicators">
+                                        <span class="emotion-dot" id="happyDot" title="Happy">😊</span>
+                                        <span class="emotion-dot" id="sadDot" title="Sad">😢</span>
+                                        <span class="emotion-dot" id="cryingDot" title="Crying">😭</span>
+                                        <span class="emotion-dot" id="laughingDot" title="Laughing">😄</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -303,7 +377,42 @@
                 <div class="alerts-panel">
                     <h3><i class="fas fa-bell"></i> Recent Alerts</h3>
                     <div id="alertsList" class="alerts-list">
-                        <!-- Alerts will be added here -->
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-exclamation-circle"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Fall Detected</span>
+                                    <span class="alert-time">Just now</span>
+                                </div>
+                                <p class="alert-message">Possible fall detected in monitored area</p>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-running"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Rapid Motion</span>
+                                    <span class="alert-time">2 min ago</span>
+                                </div>
+                                <p class="alert-message">Unusual rapid movement detected</p>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-volume-up"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Sound Alert</span>
+                                    <span class="alert-time">5 min ago</span>
+                                </div>
+                                <p class="alert-message">Loud sound detected - possible distress</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -323,7 +432,12 @@
         const errorMessage = document.getElementById('errorMessage');
         const waveformCanvas = document.getElementById('waveformCanvas');
         const waveformCtx = waveformCanvas.getContext('2d');
+        const audioPlaceholder = document.getElementById('audioPlaceholder');
         const alertsList = document.getElementById('alertsList');
+
+        let isConnected = false;
+        let isCameraEnabled = false;
+        let isAudioEnabled = false;
 
         // Initialize canvas size
         function initializeCanvas() {
@@ -336,14 +450,66 @@
         window.addEventListener('load', initializeCanvas);
         window.addEventListener('resize', initializeCanvas);
 
-        let isConnected = false;
-        let isCameraEnabled = false;
-        let isAudioEnabled = false;
-
-        // Fetch available cameras on connection
+        // Socket connection handling
         socket.on('connect', () => {
             console.log('Connected to server');
+            isConnected = true;
             fetchCameras();
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            isConnected = false;
+        });
+
+        // Video feed handling
+        socket.on('frame', (data) => {
+            if (data.data) {
+                videoFeed.src = 'data:image/jpeg;base64,' + data.data;
+                videoFeed.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+            }
+        });
+
+        // Waveform handling
+        socket.on('waveform', (data) => {
+            if (!data.data || !waveformCtx) return;
+
+            const canvas = waveformCanvas;
+            const ctx = waveformCtx;
+            const samples = data.data;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Set drawing style
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 2;
+
+            // Calculate scaling
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerY = height / 2;
+            const scale = height / 2;
+
+            // Draw waveform
+            ctx.beginPath();
+            ctx.moveTo(0, centerY + (samples[0] * scale));
+
+            for (let i = 0; i < samples.length; i++) {
+                const x = (i / samples.length) * width;
+                const y = centerY + (samples[i] * scale);
+                ctx.lineTo(x, y);
+            }
+
+            ctx.stroke();
+            
+            // Show/hide placeholder
+            if (isAudioEnabled) {
+                audioPlaceholder.style.display = 'none';
+            } else {
+                audioPlaceholder.style.display = 'flex';
+            }
         });
 
         function fetchCameras() {
@@ -415,6 +581,7 @@
             }
         });
 
+        // Toggle handlers
         toggleCamera.addEventListener('click', () => {
             socket.emit('toggle_camera', {}, (response) => {
                 if (!response.success) {
@@ -494,45 +661,8 @@
             }
         });
 
-        socket.on('waveform', (data) => {
-            if (data.data && waveformCtx) {
-                waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-                waveformCtx.fillStyle = '#f8f9fa';
-                waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-                
-                const samples = data.data;
-                const width = waveformCanvas.width;
-                const height = waveformCanvas.height;
-                const step = Math.ceil(samples.length / width);
-                const amp = height / 2;
-                
-                waveformCtx.beginPath();
-                waveformCtx.strokeStyle = '#007bff';
-                waveformCtx.lineWidth = 2;
-                
-                for (let i = 0; i < width; i++) {
-                    const x = i;
-                    const y = (samples[i * step] * amp) + (height / 2);
-                    waveformCtx.lineTo(x, y);
-                }
-                
-                waveformCtx.stroke();
-            }
-        });
-
-        socket.on('frame', (data) => {
-            if (data.data) {
-                const img = new Image();
-                img.onload = () => {
-                    videoFeed.src = img.src;
-                    videoFeed.style.display = 'block';
-                    cameraPlaceholder.style.display = 'none';
-                };
-                img.src = 'data:image/jpeg;base64,' + data.data;
-            }
-        });
-
         function updateUI() {
+            // Update camera UI
             if (isCameraEnabled) {
                 toggleCamera.querySelector('i').className = 'fas fa-video';
                 if (videoFeed.src) {
@@ -548,7 +678,13 @@
                 cameraPlaceholder.style.display = 'flex';
             }
 
+            // Update audio UI
             toggleAudio.querySelector('i').className = isAudioEnabled ? 'fas fa-microphone' : 'fas fa-microphone-slash';
+            if (isAudioEnabled) {
+                audioPlaceholder.style.display = 'none';
+            } else {
+                audioPlaceholder.style.display = 'flex';
+            }
         }
 
         function showError(message) {
