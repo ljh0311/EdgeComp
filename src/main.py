@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 class BabyMonitorSystem:
-    def __init__(self, dev_mode=False):
+    def __init__(self, dev_mode=False, only_local=False, only_web=False):
         """Initialize the Baby Monitor System."""
         self.logger = logging.getLogger(__name__)
         self.is_running = False
@@ -51,10 +51,20 @@ class BabyMonitorSystem:
         self.camera_enabled = True
         self.frame_lock = threading.Lock()
         self.dev_mode = dev_mode
+        self.only_local = only_local
+        self.only_web = only_web
+        self.initialized_components = []  # Track initialized components for cleanup
 
-        # Initialize UI first
-        self.root = tk.Tk()
-        self.setup_ui()
+        # Initialize UI first if not web-only
+        if not only_web:
+            try:
+                self.root = tk.Tk()
+                self.setup_ui()
+                self.initialized_components.append('ui')
+            except Exception as e:
+                self.logger.error(f"Failed to initialize UI: {str(e)}")
+                self.cleanup()
+                raise
 
         try:
             # Initialize camera
@@ -62,135 +72,176 @@ class BabyMonitorSystem:
             if not self.camera.initialize():
                 self.logger.error("Failed to initialize camera")
                 self.camera_error = True
-                self.camera_status.configure(text="📷  Camera: Error")
+                if not only_web:
+                    self.camera_status.configure(text="📷  Camera: Error")
             else:
-                self.camera_status.configure(text="📷  Camera: Ready")
-                # Update camera selection UI
-                self.update_camera_list()
-                self.update_resolution_list()
+                self.initialized_components.append('camera')
+                if not only_web:
+                    self.camera_status.configure(text="📷  Camera: Ready")
+                    self.update_camera_list()
+                    self.update_resolution_list()
 
             # Initialize person detector
-            self.person_detector = PersonDetector(
-                model_path=os.path.join(src_dir, "models", "yolov8n.pt")
-            )
+            try:
+                self.person_detector = PersonDetector(
+                    model_path=os.path.join(src_dir, "models", "yolov8n.pt")
+                )
+                self.initialized_components.append('person_detector')
+            except Exception as e:
+                self.logger.error(f"Failed to initialize person detector: {str(e)}")
+                # Continue without person detection
 
             # Initialize motion detector
-            self.motion_detector = MotionDetector(Config.MOTION_DETECTION)
+            try:
+                self.motion_detector = MotionDetector(Config.MOTION_DETECTION)
+                self.initialized_components.append('motion_detector')
+            except Exception as e:
+                self.logger.error(f"Failed to initialize motion detector: {str(e)}")
+                # Continue without motion detection
 
-            # Initialize web interface with dev_mode
-            self.web_app = BabyMonitorWeb(dev_mode=self.dev_mode)
-            self.web_app.set_monitor_system(self)
-            self.web_app.start()
+            # Initialize web interface if not local-only
+            if not only_local:
+                try:
+                    self.web_app = BabyMonitorWeb(dev_mode=self.dev_mode)
+                    self.web_app.set_monitor_system(self)
+                    self.web_app.start()
+                    self.initialized_components.append('web_app')
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize web interface: {str(e)}")
+                    if only_web:  # Web interface is required in web-only mode
+                        self.cleanup()
+                        raise
 
             # Initialize audio components if enabled
             if self.audio_enabled:
-                self.audio_processor = AudioProcessor(
-                    Config.AUDIO_PROCESSING, self.handle_alert
-                )
-                self.audio_processor.set_visualization_callback(
-                    self.update_waveform_data
-                )
-                self.emotion_recognizer = EmotionRecognizer(
-                    model_path=os.path.join(src_dir, "models", "emotion_model.pt"),
-                    web_app=self.web_app,
-                )
-                self.audio_status.configure(text="🎤  Audio: Ready")
-                self.emotion_status.configure(text="😊  Emotion: Ready")
+                try:
+                    self.audio_processor = AudioProcessor(
+                        Config.AUDIO_PROCESSING, self.handle_alert
+                    )
+                    if not only_web:
+                        self.audio_processor.set_visualization_callback(
+                            self.update_waveform_data
+                        )
+                    self.initialized_components.append('audio_processor')
+
+                    self.emotion_recognizer = EmotionRecognizer(
+                        model_path=os.path.join(src_dir, "models", "emotion_model.pt"),
+                        web_app=self.web_app if not only_local else None,
+                    )
+                    self.initialized_components.append('emotion_recognizer')
+
+                    if not only_web:
+                        self.audio_status.configure(text="🎤  Audio: Ready")
+                        self.emotion_status.configure(text="😊  Emotion: Ready")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize audio components: {str(e)}")
+                    self.audio_enabled = False
+                    if not only_web:
+                        self.audio_status.configure(text="🎤  Audio: Error")
 
             self.logger.info("Baby Monitor System initialized successfully")
 
         except Exception as e:
             self.logger.error(f"Error during initialization: {str(e)}")
-            self.detection_status.configure(text="👀  Detection: Error")
+            self.cleanup()
             raise
 
     def setup_ui(self):
         """Setup the main UI window."""
         self.root.title("Baby Monitor")
         self.root.geometry("1200x800")
+        
+        # Configure dark theme colors
+        bg_dark = "#2b2b2b"
+        bg_darker = "#1e1e1e"
+        text_color = "#ffffff"
+        status_bg = "#333333"
+        
+        # Configure style
+        style = ttk.Style()
+        style.configure("Dark.TFrame", background=bg_dark)
+        style.configure("Darker.TFrame", background=bg_darker)
+        style.configure("Dark.TLabelframe", background=bg_dark)
+        style.configure("Dark.TLabelframe.Label", background=bg_dark, foreground=text_color)
+        style.configure("Status.TLabel", background=status_bg, foreground=text_color, padding=5)
+        
+        # Set root window background
+        self.root.configure(bg=bg_dark)
 
         # Create main container
-        main_container = ttk.Frame(self.root)
+        main_container = ttk.Frame(self.root, style="Dark.TFrame")
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Left panel (video feed and waveform)
-        left_panel = ttk.Frame(main_container)
+        left_panel = ttk.Frame(main_container, style="Dark.TFrame")
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Video feed frame
-        video_frame = ttk.Frame(left_panel)
+        video_frame = ttk.Frame(left_panel, style="Darker.TFrame")
         video_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         self.video_canvas = tk.Canvas(video_frame, bg="black")
         self.video_canvas.pack(fill=tk.BOTH, expand=True)
 
         # Waveform frame
-        self.waveform_frame = ttk.Frame(left_panel, height=200)
+        self.waveform_frame = ttk.Frame(left_panel, style="Darker.TFrame", height=200)
         self.waveform_frame.pack(fill=tk.X, pady=(0, 10))
         self.waveform_frame.pack_propagate(False)
 
         # Right panel (controls and status)
-        right_panel = ttk.Frame(main_container, width=300)
+        right_panel = ttk.Frame(main_container, style="Dark.TFrame", width=300)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
         right_panel.pack_propagate(False)
 
         # Controls section
-        controls_frame = ttk.LabelFrame(right_panel, text="Controls")
+        controls_frame = ttk.LabelFrame(right_panel, text="Controls", style="Dark.TLabelframe")
         controls_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Camera selection frame
-        camera_selection_frame = ttk.Frame(controls_frame)
+        camera_selection_frame = ttk.Frame(controls_frame, style="Dark.TFrame")
         camera_selection_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Camera selection combobox
-        ttk.Label(camera_selection_frame, text="Camera:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(camera_selection_frame, text="Camera:", style="Status.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         self.camera_select = ttk.Combobox(camera_selection_frame, state="readonly", width=15)
         self.camera_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.camera_select.bind("<<ComboboxSelected>>", self.on_camera_selected)
 
         # Resolution selection frame
-        resolution_frame = ttk.Frame(controls_frame)
+        resolution_frame = ttk.Frame(controls_frame, style="Dark.TFrame")
         resolution_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Resolution selection combobox
-        ttk.Label(resolution_frame, text="Resolution:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(resolution_frame, text="Resolution:", style="Status.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         self.resolution_select = ttk.Combobox(resolution_frame, state="readonly", width=15)
         self.resolution_select.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.resolution_select.bind("<<ComboboxSelected>>", self.on_resolution_selected)
 
         # Camera toggle button
-        self.camera_btn = ttk.Button(
-            controls_frame, text="Camera Feed", command=self.toggle_camera
-        )
+        self.camera_btn = ttk.Button(controls_frame, text="Camera Feed", command=self.toggle_camera)
         self.camera_btn.pack(fill=tk.X, padx=5, pady=5)
 
         # Audio toggle button
-        self.audio_btn = ttk.Button(
-            controls_frame, text="Audio Monitor", command=self.toggle_audio
-        )
+        self.audio_btn = ttk.Button(controls_frame, text="Audio Monitor", command=self.toggle_audio)
         self.audio_btn.pack(fill=tk.X, padx=5, pady=5)
 
         # Status section
-        status_frame = ttk.LabelFrame(right_panel, text="Status")
+        status_frame = ttk.LabelFrame(right_panel, text="Status", style="Dark.TLabelframe")
         status_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Status labels
-        self.camera_status = ttk.Label(status_frame, text="📷  Camera: Initializing...")
-        self.camera_status.pack(anchor=tk.W, padx=5, pady=2)
+        # Status labels with dark background
+        self.camera_status = ttk.Label(status_frame, text="📷  Camera: Initializing...", style="Status.TLabel")
+        self.camera_status.pack(fill=tk.X, pady=1)
 
-        self.audio_status = ttk.Label(status_frame, text="🎤  Audio: Initializing...")
-        self.audio_status.pack(anchor=tk.W, padx=5, pady=2)
+        self.audio_status = ttk.Label(status_frame, text="🎤  Audio: Initializing...", style="Status.TLabel")
+        self.audio_status.pack(fill=tk.X, pady=1)
 
-        self.emotion_status = ttk.Label(
-            status_frame, text="😊  Emotion: Initializing..."
-        )
-        self.emotion_status.pack(anchor=tk.W, padx=5, pady=2)
+        self.emotion_status = ttk.Label(status_frame, text="😊  Emotion: Initializing...", style="Status.TLabel")
+        self.emotion_status.pack(fill=tk.X, pady=1)
 
-        self.detection_status = ttk.Label(
-            status_frame, text="👀  Detection: Initializing..."
-        )
-        self.detection_status.pack(anchor=tk.W, padx=5, pady=2)
+        self.detection_status = ttk.Label(status_frame, text="👀  Detection: Initializing...", style="Status.TLabel")
+        self.detection_status.pack(fill=tk.X, pady=1)
 
-        # Initialize matplotlib for waveform
+        # Initialize matplotlib for waveform with dark theme
         self.setup_waveform()
 
         # Initialize camera selection
@@ -290,33 +341,34 @@ class BabyMonitorSystem:
         self.process_thread.start()
 
         self.logger.info("Baby monitor system started")
-        self.root.mainloop()
+        
+        # Only enter tkinter mainloop if local GUI is enabled
+        if not self.only_web:
+            self.root.mainloop()
+        else:
+            # For web-only mode, keep the main thread alive
+            try:
+                while self.is_running:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                self.stop()
 
     def stop(self):
         """Stop the monitoring system."""
         self.is_running = False
 
-        # Stop audio components
-        if hasattr(self, "audio_processor"):
-            self.audio_processor.stop()
-        if hasattr(self, "emotion_recognizer"):
-            self.emotion_recognizer.stop()
-
-        # Stop web interface
-        if hasattr(self, "web_app"):
-            self.web_app.stop()
-
-        # Release camera
-        if hasattr(self, "camera"):
-            self.camera.release()
-
-        self.root.quit()
-        self.logger.info("Baby monitor system stopped")
+        try:
+            self.cleanup()
+            self.logger.info("Baby monitor system stopped successfully")
+        except Exception as e:
+            self.logger.error(f"Error stopping system: {str(e)}")
+            raise
 
     def process_frames(self):
         """Process video frames in a separate thread."""
         last_frame_time = 0
         frame_interval = 1.0 / 30.0  # Target 30 FPS
+        max_frame_time = 1.0 / 15.0  # Maximum acceptable frame time before skipping
 
         while self.is_running:
             try:
@@ -324,16 +376,22 @@ class BabyMonitorSystem:
                     time.sleep(0.1)
                     continue
 
-                # Control frame rate
                 current_time = time.time()
-                if current_time - last_frame_time < frame_interval:
+                time_since_last_frame = current_time - last_frame_time
+
+                # Skip frame if we're falling too far behind
+                if time_since_last_frame < frame_interval:
                     time.sleep(0.001)  # Small sleep to prevent CPU overload
                     continue
-
-                last_frame_time = current_time
+                elif time_since_last_frame > max_frame_time:
+                    # We're falling behind, skip this frame
+                    ret, _ = self.camera.get_frame()  # Just read and discard frame
+                    last_frame_time = current_time
+                    continue
 
                 ret, frame = self.camera.get_frame()
                 if not ret or frame is None:
+                    time.sleep(0.01)
                     continue
 
                 # Store original frame with synchronization
@@ -360,30 +418,27 @@ class BabyMonitorSystem:
                 else:
                     processed_frame = frame
 
-                # Update web interface
-                if hasattr(self, "web_app"):
+                # Update web interface with reduced frequency
+                if hasattr(self, "web_app") and time_since_last_frame >= frame_interval * 2:
                     try:
                         self.web_app.emit_frame(processed_frame)
                     except Exception as e:
-                        self.logger.error(
-                            f"Error sending frame to web interface: {str(e)}"
-                        )
+                        self.logger.error(f"Error sending frame to web interface: {str(e)}")
 
-                # Convert frame for display with double buffering
-                try:
-                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                    frame_pil = Image.fromarray(frame_rgb)
+                # Only update local GUI if not in web-only mode
+                if not self.only_web:
+                    try:
+                        # Get current canvas dimensions first to avoid unnecessary processing
+                        canvas_width = self.video_canvas.winfo_width()
+                        canvas_height = self.video_canvas.winfo_height()
 
-                    # Get current canvas dimensions
-                    canvas_width = self.video_canvas.winfo_width()
-                    canvas_height = self.video_canvas.winfo_height()
+                        if canvas_width <= 1 or canvas_height <= 1:
+                            continue
 
-                    if canvas_width > 1 and canvas_height > 1:
-                        # Calculate aspect ratios
-                        frame_aspect = frame_pil.width / frame_pil.height
+                        # Calculate target dimensions once
+                        frame_aspect = processed_frame.shape[1] / processed_frame.shape[0]
                         canvas_aspect = canvas_width / canvas_height
 
-                        # Calculate new dimensions maintaining aspect ratio
                         if frame_aspect > canvas_aspect:
                             new_width = canvas_width
                             new_height = int(canvas_width / frame_aspect)
@@ -391,29 +446,33 @@ class BabyMonitorSystem:
                             new_height = canvas_height
                             new_width = int(canvas_height * frame_aspect)
 
-                        # Resize frame using LANCZOS resampling
-                        frame_pil = frame_pil.resize(
-                            (new_width, new_height), Image.Resampling.LANCZOS
-                        )
+                        # Resize BGR frame directly using cv2 for better performance
+                        resized_frame = cv2.resize(processed_frame, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+                        
+                        # Convert to RGB and PIL Image
+                        frame_rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+                        frame_pil = Image.fromarray(frame_rgb)
 
-                    # Create new PhotoImage in the main thread
-                    def update_canvas(photo):
-                        if not self.is_running:
-                            return
-                        self.video_canvas.delete("all")
-                        self.video_canvas.create_image(
-                            canvas_width // 2,
-                            canvas_height // 2,
-                            image=photo,
-                            anchor=tk.CENTER,
-                        )
-                        self.video_canvas.image = photo  # Keep a reference
+                        # Create new PhotoImage in the main thread
+                        def update_canvas(photo):
+                            if not self.is_running:
+                                return
+                            self.video_canvas.delete("all")
+                            self.video_canvas.create_image(
+                                canvas_width // 2,
+                                canvas_height // 2,
+                                image=photo,
+                                anchor=tk.CENTER,
+                            )
+                            self.video_canvas.image = photo  # Keep a reference
 
-                    photo = ImageTk.PhotoImage(image=frame_pil)
-                    self.root.after(1, update_canvas, photo)
+                        photo = ImageTk.PhotoImage(image=frame_pil)
+                        self.root.after(1, update_canvas, photo)
 
-                except Exception as e:
-                    self.logger.error(f"Error updating video display: {str(e)}")
+                    except Exception as e:
+                        self.logger.error(f"Error updating video display: {str(e)}")
+
+                last_frame_time = current_time
 
             except Exception as e:
                 self.logger.error(f"Error in frame processing loop: {str(e)}")
@@ -436,6 +495,10 @@ class BabyMonitorSystem:
 
     def update_waveform_data(self, audio_data):
         """Update the waveform data with new audio samples."""
+        # Skip waveform updates in web-only mode
+        if self.only_web:
+            return
+
         try:
             # Resize audio data to match waveform buffer size
             if len(audio_data) != len(self.waveform_data):
@@ -517,15 +580,48 @@ class BabyMonitorSystem:
             self.logger.error(f"Error setting resolution: {str(e)}")
             self.camera_status.configure(text="📷  Camera: Resolution Error")
 
+    def cleanup(self):
+        """Clean up initialized components in reverse order."""
+        for component in reversed(self.initialized_components):
+            try:
+                if component == 'web_app':
+                    if hasattr(self, 'web_app'):
+                        self.web_app.stop()
+                elif component == 'camera':
+                    if hasattr(self, 'camera'):
+                        self.camera.release()
+                elif component == 'audio_processor':
+                    if hasattr(self, 'audio_processor'):
+                        self.audio_processor.stop()
+                elif component == 'emotion_recognizer':
+                    if hasattr(self, 'emotion_recognizer'):
+                        self.emotion_recognizer.stop()
+                elif component == 'ui':
+                    if hasattr(self, 'root'):
+                        self.root.quit()
+            except Exception as e:
+                self.logger.error(f"Error cleaning up {component}: {str(e)}")
+        self.initialized_components.clear()
+
 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Baby Monitor System")
     parser.add_argument("--dev", action="store_true", help="Run in developer mode")
+    parser.add_argument("--onlyLocal", action="store_true", help="Run only the local GUI interface")
+    parser.add_argument("--onlyWeb", action="store_true", help="Run only the web interface")
     args = parser.parse_args()
 
+    if args.onlyLocal and args.onlyWeb:
+        print("Error: Cannot specify both --onlyLocal and --onlyWeb")
+        sys.exit(1)
+
     try:
-        app = BabyMonitorSystem(dev_mode=args.dev)
+        app = BabyMonitorSystem(
+            dev_mode=args.dev,
+            only_local=args.onlyLocal,
+            only_web=args.onlyWeb
+        )
         app.start()
     except Exception as e:
         logging.error(f"Application error: {str(e)}")
