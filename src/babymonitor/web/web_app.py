@@ -265,11 +265,18 @@ class BabyMonitorWeb:
                 
                 for camera_name in camera_list:
                     resolutions = self.monitor_system.camera.get_camera_resolutions(camera_name)
+                    # Format resolutions as strings
+                    formatted_resolutions = []
+                    for res in resolutions:
+                        if isinstance(res, str) and 'x' in res:
+                            formatted_resolutions.append(res)
+                        elif isinstance(res, (list, tuple)) and len(res) == 2:
+                            formatted_resolutions.append(f"{res[0]}x{res[1]}")
+                    
                     cameras.append({
-                        'id': camera_name,
-                        'name': camera_name,
-                        'resolutions': [{'width': int(res.split('x')[0]), 'height': int(res.split('x')[1])} 
-                                      for res in resolutions]
+                        'id': camera_name,  # Use camera name as ID
+                        'name': f"Camera {camera_name}" if camera_name.isdigit() else camera_name,
+                        'resolutions': formatted_resolutions
                     })
                 
                 return {'success': True, 'cameras': cameras}
@@ -287,13 +294,28 @@ class BabyMonitorWeb:
                 if not camera_name:
                     return {'success': False, 'error': 'No camera name provided'}
                 
+                # Stop current camera if it's running
+                if self.monitor_system.camera_enabled:
+                    self.monitor_system.toggle_camera()
+                
                 success = self.monitor_system.camera.select_camera(camera_name)
                 if success:
-                    # Reset frame processing
+                    # Clear frame queue
                     with self.frame_lock:
                         while not self.frame_queue.empty():
                             self.frame_queue.get_nowait()
-                    return {'success': True}
+                    
+                    # Restart camera if it was enabled
+                    if self.monitor_system.camera_enabled:
+                        self.monitor_system.toggle_camera()
+                    
+                    # Get current resolution
+                    current_res = self.monitor_system.camera.get_current_resolution()
+                    return {
+                        'success': True,
+                        'message': f'Camera {camera_name} selected',
+                        'current_resolution': current_res
+                    }
                 else:
                     return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
             except Exception as e:
@@ -306,38 +328,27 @@ class BabyMonitorWeb:
                 if not self.monitor_system:
                     return {'success': False, 'error': 'Monitor system not initialized'}
                 
-                # Extract resolution from data
-                width = data.get('width')
-                height = data.get('height')
                 resolution = data.get('resolution')
+                if not resolution:
+                    return {'success': False, 'error': 'No resolution provided'}
                 
-                if resolution:
-                    # If resolution is provided as a string (e.g. "640x480")
-                    try:
-                        width, height = map(int, resolution.split('x'))
-                        success = self.monitor_system.camera.set_resolution(width, height)
-                    except (ValueError, AttributeError) as e:
-                        return {'success': False, 'error': f'Invalid resolution format: {str(e)}'}
-                elif width is not None and height is not None:
-                    # If width and height are provided separately
-                    try:
-                        width = int(width)
-                        height = int(height)
-                        success = self.monitor_system.camera.set_resolution(width, height)
-                    except (ValueError, TypeError) as e:
-                        return {'success': False, 'error': f'Invalid width/height values: {str(e)}'}
-                else:
-                    return {'success': False, 'error': 'Missing resolution parameters'}
-                
-                if success:
-                    # Reset frame processing
-                    with self.frame_lock:
-                        while not self.frame_queue.empty():
-                            self.frame_queue.get_nowait()
-                    current_res = self.monitor_system.camera.get_current_resolution()
-                    return {'success': True, 'message': f'Resolution set to {current_res}'}
-                else:
-                    return {'success': False, 'error': 'Failed to set resolution'}
+                try:
+                    # Parse resolution string (e.g., "640x480")
+                    width, height = map(int, resolution.split('x'))
+                    success = self.monitor_system.camera.set_resolution(f"{width}x{height}")
+                    
+                    if success:
+                        # Reset frame processing
+                        with self.frame_lock:
+                            while not self.frame_queue.empty():
+                                self.frame_queue.get_nowait()
+                        current_res = self.monitor_system.camera.get_current_resolution()
+                        return {'success': True, 'message': f'Resolution set to {current_res}', 'current_resolution': current_res}
+                    else:
+                        current_res = self.monitor_system.camera.get_current_resolution()
+                        return {'success': False, 'error': 'Failed to set resolution', 'current_resolution': current_res}
+                except (ValueError, AttributeError) as e:
+                    return {'success': False, 'error': f'Invalid resolution format: {str(e)}'}
             except Exception as e:
                 self.logger.error(f"Error setting resolution: {str(e)}")
                 return {'success': False, 'error': str(e)}
@@ -456,18 +467,13 @@ class BabyMonitorWeb:
         except Exception as e:
             self.logger.error(f"Error emitting detection: {str(e)}")
 
-    def emit_emotion(self, emotion_data):
+    def emit_emotion(self, emotion, confidence):
         """Emit emotion detection results to connected clients."""
         try:
             if len(self.connected_clients) > 0:
-                # Check for concerning emotions
-                if emotion_data.get('emotion') in ['angry', 'crying']:
-                    self.emit_alert('warning', f"Baby appears to be {emotion_data['emotion']}!", True)
-                
                 self.socketio.emit('emotion', {
-                    'emotion': emotion_data.get('emotion', 'unknown'),
-                    'confidence': emotion_data.get('confidence', 0.0),
-                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                    'emotion': emotion,
+                    'confidence': confidence
                 })
         except Exception as e:
             self.logger.error(f"Error emitting emotion: {str(e)}")
