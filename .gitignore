@@ -4,20 +4,27 @@ __pycache__/
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.env
+.venv
 venv/
 ENV/
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-
-# Logs
-*.log
-logs/
-
-# Environment variables
-.env
 
 # IDE
 .idea/
@@ -25,11 +32,41 @@ logs/
 *.swp
 *.swo
 
-# Models (large files)
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Project specific
 models/*.pt
-models/*.pth
-models/*.onnx
-!models/README.md
+data/IEMOCAP*
+logs/*
+!logs/.gitkeep
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Images and media
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.wav
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Distribution / packaging
+*.egg-info/
+
+# Logs
+logs/
+
+# Environment variables
+.env
 
 # Camera calibration
 *.yaml

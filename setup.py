@@ -21,50 +21,45 @@ if missing_models:
         print(f"  - {model}")
 
 setup(
-    name="edge_comp",
-    version="0.1.0",
+    name="babymonitor",
+    version="1.0.0",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "numpy>=1.19.0",
-        "torch>=1.9.0",
-        "torchaudio>=0.9.0",
-        "transformers>=4.5.0",
-        "librosa>=0.8.1",
-        "scipy>=1.7.0",
-        "PyAudio>=0.2.11",
-        "sounddevice>=0.4.4",
-        "opencv-python>=4.5.3",
-        "python-socketio>=5.4.0",
-        "Flask>=2.0.1",
-        "Flask-SocketIO>=5.1.1",
-        "eventlet>=0.33.0",
-        "pyzmq>=22.3.0",
-        "ultralytics>=8.0.0",  # For YOLOv8
-        "scikit-learn>=0.24.2",  # For audio processing
-        "matplotlib>=3.4.3",  # For visualization
+        "opencv-python",
+        "numpy",
+        "torch",
+        "matplotlib",
+        "pillow",
+        "flask",
+        "flask-socketio",
+        "transformers",
+        "sounddevice",
+        "scipy",
+        "librosa"
     ],
-    python_requires=">=3.8",
-    include_package_data=True,
-    package_data={
-        "edge_comp": ["models/*.pt", "models/*.pth"],
-    },
-    # Add entry points if needed
     entry_points={
         "console_scripts": [
-            "edge-comp=edge_comp.main:main",
+            "babymonitor=babymonitor.core.main:main",
         ],
     },
-    # Add metadata
+    include_package_data=True,
+    package_data={
+        "babymonitor.web": ["templates/*", "static/*"],
+        "edge_comp": ["models/*.pt", "models/*.pth"],
+    },
+    python_requires=">=3.8",
     author="Your Name",
     author_email="your.email@example.com",
-    description="Edge computing application for baby monitoring",
+    description="A comprehensive baby monitoring system with video, audio, and emotion detection",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    keywords="edge-computing, baby-monitor, yolo, emotion-detection",
+    url="https://github.com/yourusername/babymonitor",
     classifiers=[
         "Development Status :: 3 - Alpha",
-        "Intended Audience :: Developers",
+        "Intended Audience :: End Users/Desktop",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
