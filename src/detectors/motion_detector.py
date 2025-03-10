@@ -28,6 +28,7 @@ class MotionDetector:
         self.motion_history_size = config.get('motion_history_size', 10)
         self.fall_detection_frames = config.get('fall_detection_frames', 5)
         self.rapid_motion_threshold = config.get('rapid_motion_threshold', 50)
+        self.iou_threshold = config.get('iou_threshold', 0.5)  # IOU threshold for tracking
         
         # Initialize state
         self.previous_frame = None
@@ -45,7 +46,8 @@ class MotionDetector:
         
         # Track person IDs
         self.next_person_id = 1
-        self.person_trackers = {}  # Maps box coordinates to person IDs
+        self.person_trackers = {}  # Maps person IDs to their last known box
+        self.active_trackers = set()  # Set of currently active person IDs
     
     def _calculate_motion_score(self, current_frame: np.ndarray) -> float:
         """Calculate motion score using background subtraction and frame difference."""
@@ -72,6 +74,65 @@ class MotionDetector:
         
         return False
     
+    def _calculate_iou(self, box1, box2):
+        """Calculate Intersection over Union between two boxes."""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+        
+        # Calculate intersection coordinates
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i < x1_i or y2_i < y1_i:
+            return 0.0
+            
+        # Calculate areas
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        box1_area = (x2_1 - x1_1) * (y2_1 - y1_1)
+        box2_area = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = box1_area + box2_area - intersection
+        
+        return intersection / union if union > 0 else 0.0
+
+    def _match_boxes_to_trackers(self, current_boxes):
+        """Match current boxes to existing trackers using IOU."""
+        matched_pairs = []
+        unmatched_boxes = []
+        
+        # If no trackers exist, all boxes are unmatched
+        if not self.person_trackers:
+            return [], list(range(len(current_boxes)))
+            
+        # Calculate IOU matrix
+        iou_matrix = []
+        for box in current_boxes:
+            ious = []
+            for tracker_id, tracker_box in self.person_trackers.items():
+                iou = self._calculate_iou(box, tracker_box)
+                ious.append((tracker_id, iou))
+            iou_matrix.append(ious)
+        
+        # Match boxes to trackers
+        used_trackers = set()
+        for box_idx, ious in enumerate(iou_matrix):
+            best_iou = self.iou_threshold
+            best_tracker = None
+            
+            for tracker_id, iou in ious:
+                if iou > best_iou and tracker_id not in used_trackers:
+                    best_iou = iou
+                    best_tracker = tracker_id
+            
+            if best_tracker is not None:
+                matched_pairs.append((box_idx, best_tracker))
+                used_trackers.add(best_tracker)
+            else:
+                unmatched_boxes.append(box_idx)
+        
+        return matched_pairs, unmatched_boxes
+
     def _analyze_person_movement(self, 
                                person_id: int, 
                                current_box: Tuple[int, int, int, int], 
@@ -152,12 +213,8 @@ class MotionDetector:
             rapid_motion = self._detect_rapid_motion(motion_score)
             any_fall_detected = False
             
-            # Reset person trackers if no detections
-            if boxes is None or len(boxes) == 0:
-                self.person_trackers.clear()
-                self.next_person_id = 1
-            
             # Process detected persons
+            current_boxes = []
             if boxes is not None and len(boxes) > 0:
                 for result in boxes:
                     if result.boxes is not None:
@@ -167,50 +224,47 @@ class MotionDetector:
                             if cls == 0:  # person class
                                 # Get coordinates
                                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                                current_box = (x1, y1, x2, y2)
-                                
-                                # Get or assign person ID
-                                box_key = f"{x1},{y1},{x2},{y2}"
-                                if box_key not in self.person_trackers:
-                                    self.person_trackers[box_key] = self.next_person_id
-                                    self.next_person_id += 1
-                                person_id = self.person_trackers[box_key]
-                                
-                                # Get previous box if available
-                                previous_box = self.previous_positions.get(person_id)
-                                
-                                # Analyze movement
-                                analysis = self._analyze_person_movement(person_id, current_box, previous_box)
-                                
-                                # Update rapid motion flag
-                                rapid_motion = rapid_motion or analysis['rapid_motion']
-                                any_fall_detected = any_fall_detected or analysis['fall_detected']
-                                
-                                # Draw bounding box and annotations
-                                color = (0, 0, 255) if analysis['fall_detected'] else (0, 255, 0)
-                                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                                
-                                # Add labels
-                                labels = [
-                                    f"Person {person_id}",
-                                    f"Position: {analysis['position']}",
-                                    f"Conf: {float(box.conf[0]):.2f}"
-                                ]
-                                
-                                y_offset = y1 - 10
-                                for label in labels:
-                                    cv2.putText(frame, label, (x1, y_offset),
-                                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                                    y_offset -= 20
-                                
-                                # Store current position for next frame
-                                self.previous_positions[person_id] = current_box
-                                
-                                # Log events
-                                if analysis['fall_detected']:
-                                    self.logger.warning(f"Fall detected for person {person_id}")
-                                if analysis['rapid_motion']:
-                                    self.logger.warning(f"Rapid movement detected for person {person_id}")
+                                current_boxes.append((x1, y1, x2, y2))
+            
+            # Match current boxes with existing trackers
+            matched_pairs, unmatched_boxes = self._match_boxes_to_trackers(current_boxes)
+            
+            # Update trackers and process detections
+            new_trackers = {}
+            self.active_trackers.clear()
+            
+            # Process matched pairs
+            for box_idx, tracker_id in matched_pairs:
+                current_box = current_boxes[box_idx]
+                new_trackers[tracker_id] = current_box
+                self.active_trackers.add(tracker_id)
+                
+                # Analyze movement
+                previous_box = self.previous_positions.get(tracker_id)
+                analysis = self._analyze_person_movement(tracker_id, current_box, previous_box)
+                
+                # Update state and draw annotations
+                self._update_detection_state(frame, current_box, tracker_id, analysis)
+                rapid_motion = rapid_motion or analysis['rapid_motion']
+                any_fall_detected = any_fall_detected or analysis['fall_detected']
+            
+            # Process unmatched boxes (new detections)
+            for box_idx in unmatched_boxes:
+                current_box = current_boxes[box_idx]
+                tracker_id = self.next_person_id
+                self.next_person_id += 1
+                
+                new_trackers[tracker_id] = current_box
+                self.active_trackers.add(tracker_id)
+                
+                # Analyze movement (no previous box)
+                analysis = self._analyze_person_movement(tracker_id, current_box, None)
+                
+                # Update state and draw annotations
+                self._update_detection_state(frame, current_box, tracker_id, analysis)
+            
+            # Update trackers for next frame
+            self.person_trackers = new_trackers
             
             # Update previous frame
             self.previous_frame = gray_frame
@@ -221,7 +275,36 @@ class MotionDetector:
             self.logger.error(f"Error in motion and fall detection: {str(e)}")
             self.previous_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             return frame, False, False
-    
+
+    def _update_detection_state(self, frame, box, person_id, analysis):
+        """Update detection state and draw annotations for a person."""
+        x1, y1, x2, y2 = box
+        
+        # Draw bounding box
+        color = (0, 0, 255) if analysis['fall_detected'] else (0, 255, 0)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        
+        # Add labels
+        labels = [
+            f"Person {person_id}",
+            f"Position: {analysis['position']}",
+        ]
+        
+        y_offset = y1 - 10
+        for label in labels:
+            cv2.putText(frame, label, (x1, y_offset),
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            y_offset -= 20
+        
+        # Store current position for next frame
+        self.previous_positions[person_id] = box
+        
+        # Log events
+        if analysis['fall_detected']:
+            self.logger.warning(f"Fall detected for person {person_id}")
+        if analysis['rapid_motion']:
+            self.logger.warning(f"Rapid movement detected for person {person_id}")
+
     def reset(self):
         """Reset the detector state."""
         self.previous_frame = None
@@ -231,4 +314,5 @@ class MotionDetector:
         self.fall_candidates.clear()
         self.fgbg = cv2.createBackgroundSubtractorMOG2()
         self.person_trackers.clear()
+        self.active_trackers.clear()
         self.next_person_id = 1 

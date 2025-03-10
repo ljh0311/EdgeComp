@@ -54,19 +54,20 @@ class BabyMonitorSystem:
         self.only_local = only_local
         self.only_web = only_web
         self.initialized_components = []  # Track initialized components for cleanup
-
-        # Initialize UI first if not web-only
-        if not only_web:
-            try:
-                self.root = tk.Tk()
-                self.setup_ui()
-                self.initialized_components.append('ui')
-            except Exception as e:
-                self.logger.error(f"Failed to initialize UI: {str(e)}")
-                self.cleanup()
-                raise
+        self.web_app = None  # Initialize web_app reference as None
 
         try:
+            # Initialize UI first if not web-only
+            if not only_web:
+                try:
+                    self.root = tk.Tk()
+                    self.setup_ui()
+                    self.initialized_components.append('ui')
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize UI: {str(e)}")
+                    self.cleanup()
+                    raise
+
             # Initialize camera
             self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
             if not self.camera.initialize():
@@ -295,24 +296,29 @@ class BabyMonitorSystem:
 
         try:
             if self.audio_enabled:
-                self.audio_btn.configure(text="Audio Monitor")
-                self.audio_status.configure(text="🎤  Audio: Active")
                 if hasattr(self, "audio_processor"):
                     self.audio_processor.start()
                 if hasattr(self, "emotion_recognizer"):
                     self.emotion_recognizer.start()
-                self.web_app.emit_status({"audio_enabled": True})
+                if not self.only_local:
+                    self.audio_btn.configure(text="Audio Monitor")
+                    self.audio_status.configure(text="🎤  Audio: Active")
+                if self.web_app:
+                    self.web_app.emit_status({"audio_enabled": True})
             else:
-                self.audio_btn.configure(text="Audio Monitor")
-                self.audio_status.configure(text="🎤  Audio: Disabled")
                 if hasattr(self, "audio_processor"):
                     self.audio_processor.stop()
                 if hasattr(self, "emotion_recognizer"):
                     self.emotion_recognizer.stop()
-                self.web_app.emit_status({"audio_enabled": False})
+                if not self.only_local:
+                    self.audio_btn.configure(text="Audio Monitor")
+                    self.audio_status.configure(text="🎤  Audio: Disabled")
+                if self.web_app:
+                    self.web_app.emit_status({"audio_enabled": False})
         except Exception as e:
             self.logger.error(f"Error toggling audio: {str(e)}")
-            self.audio_status.configure(text="🎤  Audio: Error")
+            if not self.only_local:
+                self.audio_status.configure(text="🎤  Audio: Error")
 
     def handle_alert(self, message, level="info"):
         """Handle alerts from components."""
@@ -407,19 +413,22 @@ class BabyMonitorSystem:
                         processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
                         
                         # Update web interface with detection results
-                        if hasattr(self, "web_app"):
-                            self.web_app.emit_detection({
-                                'people_count': len(detections),
-                                'rapid_motion': rapid_motion,
-                                'fall_detected': fall_detected
-                            })
+                        if self.web_app is not None:  # Check if web_app exists
+                            try:
+                                self.web_app.emit_detection({
+                                    'people_count': len(detections),
+                                    'rapid_motion': rapid_motion,
+                                    'fall_detected': fall_detected
+                                })
+                            except Exception as e:
+                                self.logger.error(f"Error emitting detection results: {str(e)}")
                     else:
                         processed_frame = frame
                 else:
                     processed_frame = frame
 
                 # Update web interface with reduced frequency
-                if hasattr(self, "web_app") and time_since_last_frame >= frame_interval * 2:
+                if self.web_app is not None and time_since_last_frame >= frame_interval * 2:  # Check if web_app exists
                     try:
                         self.web_app.emit_frame(processed_frame)
                     except Exception as e:
