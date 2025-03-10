@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        
+        .video-section {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .info-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .status-panel, .detection-panel, .alerts-panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .emotion-panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 75%;
+        }
+        
+        .video-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #333;
+            color: white;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background: #444;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button.active {
+            background: #28a745;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .status-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .status-icon {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .status-icon.active {
+            color: #28a745;
+        }
+        
+        .status-icon.inactive {
+            color: #dc3545;
+        }
+        
+        .detection-info {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #333;
+            color: #ffffff;
+        }
+        
+        .detection-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #ffffff;
+        }
+
+        .monitoring-status {
+            background: #333;
+            color: #ffffff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .monitoring-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #444;
+        }
+
+        .monitoring-item:last-child {
+            border-bottom: none;
+        }
+
+        .monitoring-label {
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .monitoring-value {
+            color: #00ff00;
+        }
+
+        .monitoring-value.warning {
+            color: #ffff00;
+        }
+
+        .monitoring-value.error {
+            color: #ff0000;
+        }
+        
+        .alerts-list {
+            max-height: 300px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .alert-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+        
+        .alert-item.critical {
+            border-color: #dc3545;
+        }
+        
+        .alert-item.warning {
+            border-color: #ffc107;
+        }
+        
+        .alert-item.info {
+            border-color: #17a2b8;
+        }
+        
+        .alert-time {
+            font-size: 0.8em;
+            color: #888;
+        }
+        
+        .waveform-container {
+            width: 100%;
+            height: 150px;
+            background: #333;
+            margin-top: 20px;
+            position: relative;
+            border-radius: 8px;
+        }
+        
+        #waveformCanvas {
+            width: 100%;
+            height: 100%;
+            background: #333;
+        }
+        
+        .placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            display: none;
+        }
+        
+        #errorMessage {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #dc3545;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+            z-index: 1000;
+        }
+        
+        .status-active { color: #28a745; }
+        .status-inactive { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+
+        .emotion-indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .emotion-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .emotion-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            opacity: 0.5;
+            transition: opacity 0.3s;
+        }
+
+        .emotion-item.active {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <img id="videoFeed" class="video-feed" alt="Camera Feed" style="display: none;">
+                    <div class="placeholder" id="cameraPlaceholder">
+                        <i class="fas fa-video-slash"></i>
+                        <p>Camera is disabled</p>
+                    </div>
+                </div>
+                <div class="controls mt-3">
+                    <div class="control-group">
+                        <select id="cameraSelect" class="form-select">
+                            <option value="">Select Camera</option>
+                        </select>
+                        <select id="resolutionSelect" class="form-select">
+                            <option value="">Select Resolution</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <button id="toggleCamera" class="btn">
+                            <i class="fas fa-video-slash"></i>
+                            Camera Feed
+                        </button>
+                        <button id="toggleAudio" class="btn">
+                            <i class="fas fa-microphone-slash"></i>
+                            Audio Monitor
+                        </button>
+                    </div>
+                </div>
+
+                <div class="audio-visualization">
+                    <div class="waveform-container">
+                        <canvas id="waveformCanvas"></canvas>
+                        <div class="placeholder" id="audioPlaceholder">
+                            <i class="fas fa-volume-mute"></i>
+                            <p>Audio is disabled</p>
+                        </div>
+                    </div>
+                    <div class="decibel-container">
+                        <div class="decibel-meter">
+                            <div class="decibel-bar" id="decibelBar"></div>
+                            <div class="decibel-value" id="decibelValue">0 dB</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <div class="status-panel">
+                    <h3><i class="fas fa-info-circle"></i> System Status</h3>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <i class="fas fa-video status-icon" id="cameraIcon"></i>
+                            <div>Camera</div>
+                            <div id="cameraStatus">Disabled</div>
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-microphone status-icon" id="audioIcon"></i>
+                            <div>Audio</div>
+                            <div id="audioStatus">Disabled</div>
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-running status-icon" id="motionIcon"></i>
+                            <div>Motion</div>
+                            <div id="motionStatus">No Motion</div>
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-smile status-icon" id="emotionIcon"></i>
+                            <div>Emotion</div>
+                            <div id="emotionStatus">None</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="emotion-panel">
+                    <h3>Emotion Recognition</h3>
+                    <div class="monitoring-status">
+                        <div class="monitoring-item">
+                            <span class="monitoring-label">Current Emotion:</span>
+                            <span class="monitoring-value" id="current-emotion">Not detecting</span>
+                        </div>
+                        <div class="monitoring-item">
+                            <span class="monitoring-label">Confidence:</span>
+                            <span class="monitoring-value" id="emotion-confidence">0%</span>
+                        </div>
+                    </div>
+                    <div class="emotion-grid">
+                        <div class="emotion-item" data-emotion="natural">
+                            <div class="emotion-indicator" style="background: #90EE90;"></div>
+                            <span>Natural</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="anger">
+                            <div class="emotion-indicator" style="background: #FF6B6B;"></div>
+                            <span>Anger</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="worried">
+                            <div class="emotion-indicator" style="background: #FFD93D;"></div>
+                            <span>Worried</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="happy">
+                            <div class="emotion-indicator" style="background: #98FB98;"></div>
+                            <span>Happy</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="fear">
+                            <div class="emotion-indicator" style="background: #FF69B4;"></div>
+                            <span>Fear</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="sadness">
+                            <div class="emotion-indicator" style="background: #87CEEB;"></div>
+                            <span>Sadness</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="detection-panel">
+                    <h3><i class="fas fa-user-check"></i> Live Monitoring Status</h3>
+                    <div class="detection-info">
+                        <div class="detection-card mb-3">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="peopleIcon"><i class="fas fa-users"></i></span>
+                                <div class="detection-details">
+                                    <h4>People Present</h4>
+                                    <p>Number of people: <span id="peopleCount" class="highlight">0</span></p>
+                                    <p class="detection-note" id="peopleNote">No one detected</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="detection-card mb-3">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="motionIcon"><i class="fas fa-running"></i></span>
+                                <div class="detection-details">
+                                    <h4>Movement Detection</h4>
+                                    <p>Current activity: <span id="motionStatus" class="highlight">No Motion</span></p>
+                                    <p class="detection-note" id="motionNote">Room is quiet</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="detection-card">
+                            <div class="d-flex align-items-center">
+                                <span class="status-icon" id="soundIcon"><i class="fas fa-volume-up"></i></span>
+                                <div class="detection-details">
+                                    <h4>Sound Analysis</h4>
+                                    <p>Sound detected: <span id="soundStatus" class="highlight">No Sound</span></p>
+                                    <p>Emotion: <span id="soundEmotion" class="highlight">None</span></p>
+                                    <div class="emotion-indicators">
+                                        <span class="emotion-dot" id="happyDot" title="Happy">😊</span>
+                                        <span class="emotion-dot" id="sadDot" title="Sad">😢</span>
+                                        <span class="emotion-dot" id="cryingDot" title="Crying">😭</span>
+                                        <span class="emotion-dot" id="laughingDot" title="Laughing">😄</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alerts-panel">
+                    <h3><i class="fas fa-bell"></i> Recent Alerts</h3>
+                    <div id="alertsList" class="alerts-list">
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-exclamation-circle"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Fall Detected</span>
+                                    <span class="alert-time">Just now</span>
+                                </div>
+                                <p class="alert-message">Possible fall detected in monitored area</p>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-running"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Rapid Motion</span>
+                                    <span class="alert-time">2 min ago</span>
+                                </div>
+                                <p class="alert-message">Unusual rapid movement detected</p>
+                            </div>
+                        </div>
+                        <div class="alert-item">
+                            <div class="alert-icon">
+                                <i class="fas fa-volume-up"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-type">Sound Alert</span>
+                                    <span class="alert-time">5 min ago</span>
+                                </div>
+                                <p class="alert-message">Loud sound detected - possible distress</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="errorMessage"></div>
+
+    <script type="text/javascript">
+        // DOM element references
+        const elements = {
+            video: {
+                feed: document.getElementById('videoFeed'),
+                placeholder: document.getElementById('cameraPlaceholder'),
+                select: document.getElementById('cameraSelect'),
+                resolutionSelect: document.getElementById('resolutionSelect'),
+                toggleButton: document.getElementById('toggleCamera')
+            },
+            audio: {
+                toggleButton: document.getElementById('toggleAudio'),
+                placeholder: document.getElementById('audioPlaceholder'),
+                waveform: {
+                    canvas: document.getElementById('waveformCanvas'),
+                    ctx: document.getElementById('waveformCanvas').getContext('2d')
+                },
+                decibel: {
+                    bar: document.getElementById('decibelBar'),
+                    value: document.getElementById('decibelValue')
+                }
+            },
+            status: {
+                camera: document.getElementById('cameraStatus'),
+                audio: document.getElementById('audioStatus'),
+                motion: document.getElementById('motionStatus'),
+                emotion: document.getElementById('emotionStatus')
+            },
+            alerts: {
+                list: document.getElementById('alertsList'),
+                error: document.getElementById('errorMessage')
+            }
+        };
+
+        // State management
+        const state = {
+            connection: {
+                isConnected: false,
+                isCameraEnabled: false,
+                isAudioEnabled: false
+            },
+            audio: {
+                context: null,
+                alertSound: null,
+                lastDecibelValue: 0
+            }
+        };
+
+        // Socket event handlers
+        const socket = io();
+
+        socket.on('connect', () => {
+            state.connection.isConnected = true;
+            console.log('Connected to server');
+            fetchCameras();
+            updateStatus('Connected');
+        });
+
+        socket.on('disconnect', () => {
+            state.connection.isConnected = false;
+            console.log('Disconnected from server');
+            updateStatus('Disconnected');
+        });
+
+        socket.on('frame', (data) => {
+            if (data?.data) {
+                elements.video.feed.src = 'data:image/jpeg;base64,' + data.data;
+                elements.video.feed.style.display = 'block';
+                elements.video.placeholder.style.display = 'none';
+            } else {
+                elements.video.feed.style.display = 'none';
+                elements.video.placeholder.style.display = 'flex';
+            }
+        });
+
+        socket.on('waveform', (data) => {
+            if (data?.data) {
+                waveform.draw(data.data);
+                // Calculate decibel value from waveform data
+                const maxAmplitude = Math.max(...data.data.map(Math.abs));
+                const decibelValue = 20 * Math.log10(maxAmplitude + 1e-6);
+                updateDecibelMeter(decibelValue);
+            }
+        });
+
+        socket.on('detection', (data) => {
+            // Update motion status
+            if (elements.status.motion) {
+                elements.status.motion.textContent = data.motion_status || 'No Motion';
+                elements.status.motion.className = data.motion_status === 'No Motion' ? 'status-inactive' : 'status-active';
+            }
+
+            // Update people count
+            const peopleCount = document.getElementById('peopleCount');
+            if (peopleCount) {
+                peopleCount.textContent = data.people_count || '0';
+                const peopleNote = document.getElementById('peopleNote');
+                if (peopleNote) {
+                    peopleNote.textContent = data.people_count > 0 ? 
+                        `${data.people_count} person${data.people_count > 1 ? 's' : ''} detected` : 
+                        'No one detected';
+                }
+            }
+        });
+
+        socket.on('emotion', (data) => {
+            if (elements.status.emotion) {
+                elements.status.emotion.textContent = data.emotion || 'None';
+                elements.status.emotion.className = data.emotion === 'None' ? 'status-inactive' : 'status-active';
+            }
+            // Update current emotion and confidence
+            document.getElementById('current-emotion').textContent = data.emotion.charAt(0).toUpperCase() + data.emotion.slice(1);
+            document.getElementById('emotion-confidence').textContent = `${(data.confidence * 100).toFixed(1)}%`;
+            
+            // Update emotion indicators
+            document.querySelectorAll('.emotion-item').forEach(item => {
+                if (item.dataset.emotion === data.emotion) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        });
+
+        // Camera management
+        function fetchCameras() {
+            socket.emit('get_cameras', {}, (response) => {
+                if (response.success) {
+                    populateCameraSelect(response.cameras);
+                } else {
+                    showError(response.error || 'Failed to get cameras');
+                }
+            });
+        }
+
+        function populateCameraSelect(cameras) {
+            elements.video.select.innerHTML = '<option value="">Select Camera</option>';
+            
+            cameras.forEach(camera => {
+                const option = document.createElement('option');
+                option.value = camera.id;
+                option.textContent = camera.name;
+                option.dataset.resolutions = JSON.stringify(camera.resolutions);
+                elements.video.select.appendChild(option);
+            });
+
+            // Auto-select if only one camera
+            if (cameras.length === 1) {
+                elements.video.select.value = cameras[0].id;
+                updateResolutionSelect(cameras[0].resolutions);
+            }
+        }
+
+        // Add camera selection event listener
+        elements.video.select.addEventListener('change', () => {
+            const selectedOption = elements.video.select.selectedOptions[0];
+            if (selectedOption && selectedOption.value) {
+                socket.emit('select_camera', { camera_name: selectedOption.value }, (response) => {
+                    if (response.success) {
+                        const resolutions = JSON.parse(selectedOption.dataset.resolutions);
+                        updateResolutionSelect(resolutions);
+                        showSuccess('Camera selected successfully');
+                    } else {
+                        showError(response.error || 'Failed to select camera');
+                    }
+                });
+            }
+        });
+
+        // Add resolution selection event listener
+        elements.video.resolutionSelect.addEventListener('change', () => {
+            const resolution = elements.video.resolutionSelect.value;
+            if (resolution) {
+                setResolution(resolution);
+            }
+        });
+
+        function updateResolutionSelect(resolutions) {
+            elements.video.resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
+            
+            if (Array.isArray(resolutions)) {
+                resolutions.forEach(resolution => {
+                    const option = document.createElement('option');
+                    option.value = resolution;
+                    option.textContent = resolution;
+                    elements.video.resolutionSelect.appendChild(option);
+                });
+
+                // Auto-select first resolution if available
+                if (resolutions.length > 0) {
+                    elements.video.resolutionSelect.value = resolutions[0];
+                    setResolution(resolutions[0]);
+                }
+            }
+        }
+
+        function setResolution(resolution) {
+            if (!resolution) return;
+            
+            socket.emit('set_resolution', { resolution }, (response) => {
+                if (response.success) {
+                    showSuccess(`Resolution set to ${resolution}`);
+                } else {
+                    showError(response.error || 'Failed to set resolution');
+                    // Reset to current resolution if available
+                    if (response.current_resolution) {
+                        elements.video.resolutionSelect.value = response.current_resolution;
+                    }
+                }
+            });
+        }
+
+        // Audio visualization
+        const waveform = {
+            initialize() {
+                const container = elements.audio.waveform.canvas.parentElement;
+                elements.audio.waveform.canvas.width = container.offsetWidth;
+                elements.audio.waveform.canvas.height = container.offsetHeight;
+                
+                // Set dark theme for canvas
+                elements.audio.waveform.ctx.fillStyle = '#333';
+                elements.audio.waveform.ctx.fillRect(0, 0, 
+                    elements.audio.waveform.canvas.width, 
+                    elements.audio.waveform.canvas.height
+                );
+            },
+            
+            draw(samples) {
+                if (!samples || !elements.audio.waveform.ctx) return;
+
+                const canvas = elements.audio.waveform.canvas;
+                const ctx = elements.audio.waveform.ctx;
+                
+                // Clear previous frame
+                ctx.fillStyle = '#333';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Setup drawing style
+                ctx.strokeStyle = '#4CAF50';
+                ctx.lineWidth = 2;
+                
+                // Calculate dimensions
+                const width = canvas.width;
+                const height = canvas.height;
+                const centerY = height / 2;
+                const scale = height / 2;
+                
+                // Draw waveform
+                ctx.beginPath();
+                ctx.moveTo(0, centerY + (samples[0] * scale));
+                
+                samples.forEach((sample, i) => {
+                    const x = (i / samples.length) * width;
+                    const y = centerY + (sample * scale);
+                    ctx.lineTo(x, y);
+                });
+                
+                ctx.stroke();
+            }
+        };
+
+        function updateDecibelMeter(value) {
+            // Update the decibel bar width (0-100%)
+            const normalizedValue = Math.min(Math.max((value + 60) / 60 * 100, 0), 100);
+            elements.audio.decibel.bar.style.width = `${normalizedValue}%`;
+            
+            // Update the color based on intensity
+            if (normalizedValue > 80) {
+                elements.audio.decibel.bar.style.backgroundColor = '#dc3545';  // Red
+            } else if (normalizedValue > 60) {
+                elements.audio.decibel.bar.style.backgroundColor = '#ffc107';  // Yellow
+            } else {
+                elements.audio.decibel.bar.style.backgroundColor = '#4CAF50';  // Green
+            }
+            
+            // Update the displayed value
+            elements.audio.decibel.value.textContent = `${value.toFixed(1)} dB`;
+        }
+
+        // Event listeners
+        elements.video.toggleButton.addEventListener('click', () => {
+            socket.emit('toggle_camera');
+        });
+
+        elements.audio.toggleButton.addEventListener('click', () => {
+            socket.emit('toggle_audio');
+        });
+
+        // Status updates
+        socket.on('status', (data) => {
+            state.connection.isCameraEnabled = data.camera_enabled;
+            state.connection.isAudioEnabled = data.audio_enabled;
+            updateUI();
+        });
+
+        // Initialize
+        window.addEventListener('load', () => {
+            waveform.initialize();
+            updateUI();
+        });
+
+        window.addEventListener('resize', () => {
+            waveform.initialize();
+        });
+
+        // UI helpers
+        function updateUI() {
+            // Camera UI
+            if (state.connection.isCameraEnabled) {
+                elements.video.toggleButton.className = 'btn active';
+                elements.video.toggleButton.querySelector('i').className = 'fas fa-video';
+                elements.status.camera.textContent = 'Active';
+                elements.status.camera.className = 'status-active';
+            } else {
+                elements.video.toggleButton.className = 'btn';
+                elements.video.toggleButton.querySelector('i').className = 'fas fa-video-slash';
+                elements.status.camera.textContent = 'Disabled';
+                elements.status.camera.className = 'status-inactive';
+                elements.video.feed.style.display = 'none';
+                elements.video.placeholder.style.display = 'flex';
+            }
+
+            // Audio UI
+            if (state.connection.isAudioEnabled) {
+                elements.audio.toggleButton.className = 'btn active';
+                elements.audio.toggleButton.querySelector('i').className = 'fas fa-microphone';
+                elements.status.audio.textContent = 'Active';
+                elements.status.audio.className = 'status-active';
+                elements.audio.placeholder.style.display = 'none';
+            } else {
+                elements.audio.toggleButton.className = 'btn';
+                elements.audio.toggleButton.querySelector('i').className = 'fas fa-microphone-slash';
+                elements.status.audio.textContent = 'Disabled';
+                elements.status.audio.className = 'status-inactive';
+                elements.audio.placeholder.style.display = 'flex';
+            }
+        }
+
+        function showError(message) {
+            elements.alerts.error.textContent = message;
+            elements.alerts.error.style.display = 'block';
+            setTimeout(() => {
+                elements.alerts.error.style.display = 'none';
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            elements.alerts.error.textContent = message;
+            elements.alerts.error.style.backgroundColor = '#4CAF50';
+            elements.alerts.error.style.display = 'block';
+            setTimeout(() => {
+                elements.alerts.error.style.display = 'none';
+                elements.alerts.error.style.backgroundColor = '#f44336';
+            }, 3000);
+        }
+
+        function updateStatus(status) {
+            // Implement the logic to update the status display
+            console.log('System status:', status);
+        }
+    </script>
+</body>
+</html> 
