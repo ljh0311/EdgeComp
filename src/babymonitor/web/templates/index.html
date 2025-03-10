@@ -297,6 +297,80 @@
         .emotion-item.active {
             opacity: 1;
         }
+
+        @keyframes alertHighlight {
+            0% { background-color: #4a4a4a; }
+            50% { background-color: #333; }
+            100% { background-color: #2d2d2d; }
+        }
+        
+        .alert-item {
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid;
+            margin-bottom: 10px;
+            transition: background-color 0.3s;
+        }
+        
+        .alert-item.critical {
+            border-color: #dc3545;
+        }
+        
+        .alert-item.warning {
+            border-color: #ffc107;
+        }
+        
+        .alert-item.info {
+            border-color: #17a2b8;
+        }
+        
+        .alert-icon {
+            font-size: 1.2em;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #333;
+            border-radius: 50%;
+        }
+        
+        .alert-content {
+            flex: 1;
+        }
+        
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .alert-type {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .alert-time {
+            font-size: 0.8em;
+            color: #888;
+        }
+        
+        .alert-message {
+            margin: 0;
+            color: #ddd;
+        }
+        
+        .alert-details {
+            margin-top: 5px;
+            font-size: 0.8em;
+            color: #888;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
@@ -562,6 +636,7 @@
             console.log('Connected to server');
             fetchCameras();
             updateStatus('Connected');
+            socket.emit('request_alerts', { limit: 5 });
         });
 
         socket.on('disconnect', () => {
@@ -629,6 +704,80 @@
                 }
             });
         });
+
+        socket.on('alert', (data) => {
+            addAlert(data);
+            
+            // Play notification sound for critical alerts or if notification is requested
+            if (data.level === 'critical' || data.should_notify) {
+                playNotificationSound();
+            }
+        });
+
+        function addAlert(data) {
+            const alertsList = document.getElementById('alertsList');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert-item ${data.level}`;
+            
+            // Get appropriate icon based on alert type
+            let icon = 'exclamation-circle';
+            switch(data.type) {
+                case 'fall':
+                    icon = 'person-falling';
+                    break;
+                case 'rapid_motion':
+                    icon = 'running';
+                    break;
+                case 'emotion':
+                    icon = 'face-sad-tear';
+                    break;
+                case 'system':
+                    icon = 'server';
+                    break;
+                case 'audio':
+                    icon = 'volume-high';
+                    break;
+                case 'person':
+                    icon = 'user';
+                    break;
+            }
+            
+            alertDiv.innerHTML = `
+                <div class="alert-icon">
+                    <i class="fas fa-${icon}"></i>
+                </div>
+                <div class="alert-content">
+                    <div class="alert-header">
+                        <span class="alert-type">${data.type.replace('_', ' ').toUpperCase()}</span>
+                        <span class="alert-time">${data.timestamp}</span>
+                    </div>
+                    <p class="alert-message">${data.message}</p>
+                    ${data.details ? `<div class="alert-details">${JSON.stringify(data.details)}</div>` : ''}
+                </div>
+            `;
+            
+            // Add to the beginning of the list
+            alertsList.insertBefore(alertDiv, alertsList.firstChild);
+            
+            // Limit the number of alerts shown
+            while (alertsList.children.length > 10) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+            
+            // Highlight new alert
+            alertDiv.style.animation = 'alertHighlight 2s';
+        }
+
+        // Add notification sound
+        const notificationSound = new Audio('/static/notification.mp3');
+
+        function playNotificationSound() {
+            try {
+                notificationSound.play();
+            } catch (e) {
+                console.warn('Could not play notification sound:', e);
+            }
+        }
 
         // Camera management
         function fetchCameras() {

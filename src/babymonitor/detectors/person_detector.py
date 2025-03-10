@@ -306,68 +306,63 @@ class PersonDetector:
             return []
 
     def process_frame(self, frame):
-        """Process a frame and draw detections."""
+        """Process a frame and draw detections efficiently."""
         if frame is None or not isinstance(frame, np.ndarray):
             return frame
 
         try:
-            # Create copy only if we have detections
+            # Get detections without modifying frame yet
             detections = self.detect(frame)
             if not detections or len(detections[0].boxes) == 0:
                 return frame
 
+            # Create copy only once if we have detections
             frame_copy = frame.copy()
-            original_h, original_w = frame.shape[:2]
+            h, w = frame.shape[:2]
             
             for r in detections:
                 boxes = r.boxes
                 for i in range(len(boxes)):
                     if boxes.cls[i] == 0:  # Person class
-                        # Get coordinates and scale them if needed
-                        if hasattr(boxes, 'scaled_xyxy'):
-                            box_coords = boxes.scaled_xyxy[i]
-                        else:
-                            box_coords = boxes.xyxy[i]
-                            # Scale coordinates if frame was resized
-                            if original_h > 416 or original_w > 416:
-                                scale_x = original_w / 416
-                                scale_y = original_h / 416
-                                box_coords[0] *= scale_x
-                                box_coords[1] *= scale_y
-                                box_coords[2] *= scale_x
-                                box_coords[3] *= scale_y
+                        # Get coordinates
+                        box = boxes.xyxy[i].cpu().numpy()
                         
-                        x1, y1, x2, y2 = map(int, box_coords.cpu().numpy())
-                        conf = float(boxes.conf[i].cpu().numpy())
+                        # Ensure coordinates are within frame boundaries
+                        x1 = max(0, min(int(box[0]), w - 1))
+                        y1 = max(0, min(int(box[1]), h - 1))
+                        x2 = max(0, min(int(box[2]), w - 1))
+                        y2 = max(0, min(int(box[3]), h - 1))
                         
-                        # Draw high-visibility bounding box
-                        # Draw thick red outline for better visibility
-                        cv2.rectangle(frame_copy, (x1-2, y1-2), (x2+2, y2+2), (0, 0, 255), 4)
-                        # Draw yellow inner box
-                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                        # Skip if box is too small
+                        if x2 - x1 < 10 or y2 - y1 < 10:
+                            continue
                         
-                        # Draw efficient label with better visibility
-                        label = f"Person {conf:.2f}"
-                        font_scale = 0.8  # Larger font for better visibility
-                        thickness = 2
-                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        # Draw bounding box efficiently
+                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         
-                        # Get text size
-                        (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
+                        # Add label with confidence
+                        conf = float(boxes.conf[i])
+                        label = f"Person {i+1} ({conf:.2f})"
                         
-                        # Draw label background (semi-transparent)
-                        sub_img = frame_copy[y1-text_h-10:y1, x1:x1+text_w+6]
-                        black_rect = np.zeros(sub_img.shape, dtype=np.uint8)
-                        alpha = 0.7
-                        frame_copy[y1-text_h-10:y1, x1:x1+text_w+6] = cv2.addWeighted(sub_img, 1-alpha, black_rect, alpha, 0)
+                        # Calculate label position
+                        label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                        label_y = max(y1, label_size[1] + 10)
                         
-                        # Draw white text for maximum visibility
-                        cv2.putText(frame_copy, label,
-                                  (x1+2, y1-8),
-                                  font,
-                                  font_scale,
-                                  (255, 255, 255),
-                                  thickness)
+                        # Draw label background
+                        cv2.rectangle(frame_copy, 
+                                   (x1, label_y - label_size[1] - 10),
+                                   (x1 + label_size[0], label_y),
+                                   (0, 255, 0), 
+                                   -1)  # Filled rectangle
+                        
+                        # Draw label text
+                        cv2.putText(frame_copy,
+                                  label,
+                                  (x1, label_y - 5),
+                                  cv2.FONT_HERSHEY_SIMPLEX,
+                                  0.5,
+                                  (0, 0, 0),
+                                  1)
 
             return frame_copy
 

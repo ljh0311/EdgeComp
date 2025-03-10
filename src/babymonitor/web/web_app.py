@@ -18,6 +18,7 @@ from scipy import signal as scipy_signal
 from datetime import datetime
 from queue import Queue, Empty
 from threading import Lock
+from ..alerts.alert_manager import AlertManager, AlertLevel, AlertType
 
 
 class BabyMonitorWeb:
@@ -60,6 +61,10 @@ class BabyMonitorWeb:
         self.frame_thread = None
         self.audio_thread = None
         self.server_thread = None
+        
+        # Initialize alert manager
+        self.alert_manager = AlertManager()
+        self.alert_manager.add_alert_handler(self._handle_alert)
         
         self.setup_routes()
         self.setup_socketio()
@@ -597,7 +602,7 @@ class BabyMonitorWeb:
             if len(self.connected_clients) > 0:
                 # Format emotion data
                 emotion_data = {
-                    'emotion': emotion.lower(),  # Ensure lowercase to match frontend
+                    'emotion': emotion.lower(),
                     'confidence': confidence,
                     'timestamp': datetime.now().strftime('%H:%M:%S')
                 }
@@ -605,11 +610,12 @@ class BabyMonitorWeb:
                 # Emit emotion update
                 self.socketio.emit('emotion', emotion_data)
                 
-                # Emit alert for concerning emotions
-                if emotion.lower() in ['anger', 'fear', 'sadness'] and confidence > 0.7:
-                    self.emit_alert('warning', f'High confidence {emotion.lower()} emotion detected', True)
-                elif emotion.lower() == 'worried' and confidence > 0.8:
-                    self.emit_alert('warning', 'High distress detected', True)
+                # Create emotion alert if needed
+                self.alert_manager.create_emotion_alert(
+                    emotion,
+                    confidence,
+                    details={'confidence': confidence}
+                )
         except Exception as e:
             self.logger.error(f"Error emitting emotion: {str(e)}")
 
@@ -641,12 +647,12 @@ class BabyMonitorWeb:
             # Check for enabled features without data
             if status_data:
                 if status_data.get('camera_enabled') and not hasattr(self.monitor_system, 'camera'):
-                    self.emit_alert('warning', 'Camera is enabled but not properly initialized', True)
+                    self.alert_manager.create_system_alert('Camera is enabled but not properly initialized')
                 if status_data.get('audio_enabled'):
                     if not hasattr(self.monitor_system, 'audio_processor'):
-                        self.emit_alert('warning', 'Audio is enabled but not properly initialized', True)
+                        self.alert_manager.create_system_alert('Audio is enabled but not properly initialized')
                     if not hasattr(self.monitor_system, 'emotion_recognizer'):
-                        self.emit_alert('warning', 'Emotion recognition is not available', False)
+                        self.alert_manager.create_system_alert('Emotion recognition is not available', AlertLevel.INFO)
             
             if len(self.connected_clients) > 0:
                 self.socketio.emit('status', status_data)
@@ -673,6 +679,29 @@ class BabyMonitorWeb:
                     })
         except Exception as e:
             self.logger.error(f"Error emitting metrics: {str(e)}")
+
+    def _handle_alert(self, alert):
+        """Handle new alerts from AlertManager."""
+        try:
+            if len(self.connected_clients) > 0:
+                self.socketio.emit('alert', {
+                    'type': alert.type.value,
+                    'level': alert.level.value,
+                    'message': alert.message,
+                    'timestamp': alert.timestamp.strftime('%H:%M:%S'),
+                    'details': alert.details,
+                    'should_notify': alert.should_notify
+                })
+        except Exception as e:
+            self.logger.error(f"Error handling alert: {str(e)}")
+
+    def emit_fall_detected(self, details=None):
+        """Emit fall detection alert."""
+        self.alert_manager.create_fall_alert(details)
+
+    def emit_rapid_motion(self, details=None):
+        """Emit rapid motion alert."""
+        self.alert_manager.create_rapid_motion_alert(details)
 
     def start(self):
         """Start the web interface."""
