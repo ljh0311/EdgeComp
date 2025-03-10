@@ -339,68 +339,77 @@
     </div>
 
     <script>
-      // Connect to Socket.IO
-      const socket = io()
+      // Connect to Socket.IO with the correct path
+      const socket = io({
+        path: '/socket.io',
+        transports: ['websocket', 'polling']
+      });
       
       // Device control functions
       function updateDeviceInfo(info) {
+        console.log('Received device info:', info);  // Debug log
+        
         // Update current device display
-        const currentDevice = info.current_device.toUpperCase()
-        document.getElementById('current-device').textContent = currentDevice
+        const currentDevice = info.current_device ? info.current_device.toUpperCase() : 'UNKNOWN';
+        document.getElementById('current-device').textContent = currentDevice;
         
         // Update GPU information
-        const gpuName = document.getElementById('gpu-name')
-        const gpuMemory = document.getElementById('gpu-memory')
-        const switchCpuBtn = document.getElementById('switch-cpu')
-        const switchGpuBtn = document.getElementById('switch-gpu')
+        const gpuName = document.getElementById('gpu-name');
+        const gpuMemory = document.getElementById('gpu-memory');
+        const switchCpuBtn = document.getElementById('switch-cpu');
+        const switchGpuBtn = document.getElementById('switch-gpu');
         
-        if (info.gpu_available) {
+        if (info.gpu_name) {
           // GPU is available in the system
-          gpuName.textContent = info.gpu_name || 'Available'
+          gpuName.textContent = info.gpu_name;
+          gpuMemory.textContent = info.gpu_memory_total || 'N/A';
+          
           if (currentDevice === 'CUDA') {
             // Currently using GPU
-            gpuMemory.textContent = `${info.gpu_memory_used || 0} / ${info.gpu_memory_total || 0} MB`
-            switchCpuBtn.disabled = false
-            switchGpuBtn.disabled = true
+            switchCpuBtn.disabled = false;
+            switchGpuBtn.disabled = true;
           } else {
             // Currently using CPU but GPU is available
-            gpuMemory.textContent = 'Not in use'
-            switchCpuBtn.disabled = true
-            switchGpuBtn.disabled = false
+            switchCpuBtn.disabled = true;
+            switchGpuBtn.disabled = false;
           }
         } else {
           // No GPU available
-          gpuName.textContent = 'Not Available'
-          gpuMemory.textContent = 'N/A'
-          switchCpuBtn.disabled = true
-          switchGpuBtn.disabled = true
+          gpuName.textContent = 'Not Available';
+          gpuMemory.textContent = 'N/A';
+          switchCpuBtn.disabled = true;
+          switchGpuBtn.disabled = true;
         }
       }
       
       function switchDevice(forceCPU) {
+        console.log('Switching device, force CPU:', forceCPU);  // Debug log
+        
         // Disable both buttons during switch
-        document.getElementById('switch-cpu').disabled = true
-        document.getElementById('switch-gpu').disabled = true
+        document.getElementById('switch-cpu').disabled = true;
+        document.getElementById('switch-gpu').disabled = true;
         
         // Show switching status
-        const currentDevice = document.getElementById('current-device')
-        currentDevice.textContent = 'Switching...'
+        const currentDevice = document.getElementById('current-device');
+        currentDevice.textContent = 'Switching...';
         
-        socket.emit('switch_device', { force_cpu: forceCPU })
+        socket.emit('switch_device', { force_cpu: forceCPU });
       }
       
       // Add socket listeners for device control
       socket.on('device_info', (data) => {
-        updateDeviceInfo(data)
-      })
+        console.log('Received device info event:', data);  // Debug log
+        updateDeviceInfo(data);
+      });
       
       socket.on('switch_result', (data) => {
+        console.log('Received switch result:', data);  // Debug log
         if (data.success) {
-          updateDeviceInfo(data.device_info)
+          updateDeviceInfo(data.device_info);
         } else {
-          alert('Failed to switch device: ' + data.error)
+          alert('Failed to switch device: ' + data.error);
         }
-      })
+      });
       
       // Initialize charts
       const fpsChart = Plotly.newPlot(
@@ -505,44 +514,52 @@
       
       // Update metrics display
       function updateMetrics(data) {
+        console.log('Updating metrics:', data);  // Debug log
+        
+        if (!data || !data.current) {
+          console.error('Invalid metrics data received');
+          return;
+        }
+        
         // Update current values
-        const current = data.current
-        document.getElementById('fps-value').textContent = current.fps.toFixed(1)
-        document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1)
-        document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1)
-        document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1)
+        const current = data.current;
+        document.getElementById('fps-value').textContent = current.fps.toFixed(1);
+        document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1);
+        document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1);
+        document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1);
       
         // Update status colors
-        updateStatusColor('fps-value', current.fps, 30, 15)
-        updateStatusColor('frame-time-value', current.frame_time, 20, 33, true)
-        updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true)
-        updateStatusColor('memory-value', current.memory_usage, 70, 90, true)
+        updateStatusColor('fps-value', current.fps, 30, 15);
+        updateStatusColor('frame-time-value', current.frame_time, 20, 33, true);
+        updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true);
+        updateStatusColor('memory-value', current.memory_usage, 70, 90, true);
       
-        // Update charts with timestamps
-        const history = data.history
-        const now = new Date()
-        const offset = 8 * 60 * 60 * 1000 // GMT+8 offset in milliseconds
+        // Update charts
+        if (data.history) {
+          const history = data.history;
+          const now = new Date();
+          
+          // Create timestamp array
+          const timestamps = Array(history.fps.length).fill().map((_, i) => {
+            return new Date(now - (history.fps.length - i - 1) * 1000).toISOString();
+          });
+          
+          // Update charts with new data
+          Plotly.update('fps-chart', {
+            x: [timestamps],
+            y: [history.fps]
+          });
         
-        // Create timestamp arrays for each metric
-        const timestamps = history.timestamps || Array(history.fps.length).fill().map((_, i) => {
-          const utcTime = now - (history.fps.length - i - 1) * 1000
-          return new Date(utcTime + offset).toISOString()
-        })
+          Plotly.update('frame-time-chart', {
+            x: [timestamps],
+            y: [history.frame_time]
+          });
         
-        Plotly.update('fps-chart', {
-          x: [timestamps],
-          y: [history.fps]
-        })
-      
-        Plotly.update('frame-time-chart', {
-          x: [timestamps],
-          y: [history.frame_time]
-        })
-      
-        Plotly.update('system-resources-chart', {
-          x: [timestamps, timestamps],
-          y: [history.cpu_usage, history.memory_usage]
-        })
+          Plotly.update('system-resources-chart', {
+            x: [timestamps, timestamps],
+            y: [history.cpu_usage, history.memory_usage]
+          });
+        }
       }
       
       function updateStatusColor(elementId, value, warningThreshold, criticalThreshold, isInverse = false) {
@@ -568,18 +585,28 @@
       
       // Socket.IO event handlers
       socket.on('connect', () => {
-        console.log('Connected to server')
-        socket.emit('request_metrics')
-      })
+        console.log('Connected to server');
+        // Request initial device info and metrics
+        socket.emit('request_device_info');
+        socket.emit('request_metrics');
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('Disconnected from server');
+      });
       
       socket.on('metrics_update', (data) => {
-        updateMetrics(data)
-      })
+        console.log('Received metrics update:', data);  // Debug log
+        updateMetrics(data);
+      });
       
-      // Request metrics update every second
+      // Request updates periodically
       setInterval(() => {
-        socket.emit('request_metrics')
-      }, 1000)
+        if (socket.connected) {
+          socket.emit('request_device_info');
+          socket.emit('request_metrics');
+        }
+      }, 1000);
       
       // Test handling functions
       function runTest(testType) {
