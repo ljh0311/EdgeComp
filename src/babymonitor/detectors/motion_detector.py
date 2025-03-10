@@ -25,8 +25,8 @@ class MotionDetector:
         self.fall_threshold = config.get('fall_threshold', 1.5)
         self.standing_ratio = config.get('standing_ratio', 0.4)
         self.sitting_ratio = config.get('sitting_ratio', 0.8)
-        self.motion_history_size = config.get('motion_history_size', 10)
-        self.fall_detection_frames = config.get('fall_detection_frames', 5)
+        self.motion_history_size = config.get('motion_history_size', 5)
+        self.fall_detection_frames = config.get('fall_detection_frames', 3)
         self.rapid_motion_threshold = config.get('rapid_motion_threshold', 50)
         self.iou_threshold = config.get('iou_threshold', 0.5)  # IOU threshold for tracking
         
@@ -37,22 +37,30 @@ class MotionDetector:
         self.position_history = collections.defaultdict(lambda: collections.deque(maxlen=self.fall_detection_frames))
         self.fall_candidates = collections.defaultdict(int)
         
-        # Initialize motion detection
+        # Initialize motion detection with optimized parameters
         self.fgbg = cv2.createBackgroundSubtractorMOG2(
-            history=config.get('bg_history', 500),
-            varThreshold=config.get('var_threshold', 16),
-            detectShadows=config.get('detect_shadows', True)
+            history=config.get('bg_history', 120),
+            varThreshold=config.get('var_threshold', 25),
+            detectShadows=False
         )
+        
+        # Pre-allocate buffers
+        self.gray_buffer = None
+        self.mask_buffer = None
         
         # Track person IDs
         self.next_person_id = 1
-        self.person_trackers = {}  # Maps person IDs to their last known box
-        self.active_trackers = set()  # Set of currently active person IDs
+        self.person_trackers = {}
+        self.active_trackers = set()
+        
+        # Performance optimization flags
+        self.skip_frames = 0
+        self.process_every_n = 2
     
     def _calculate_motion_score(self, current_frame: np.ndarray) -> float:
         """Calculate motion score using background subtraction and frame difference."""
         # Apply background subtraction
-        fg_mask = self.fgbg.apply(current_frame)
+        fg_mask = self.fgbg.apply(current_frame, learningRate=0.02)
         
         # Calculate frame difference if previous frame exists
         if self.previous_frame is not None:
@@ -203,11 +211,21 @@ class MotionDetector:
             tuple: (annotated_frame, is_rapid_motion, is_fall_detected)
         """
         try:
-            # Convert frame to grayscale for motion detection
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # Skip frames for performance
+            self.skip_frames = (self.skip_frames + 1) % self.process_every_n
+            if self.skip_frames != 0:
+                return frame, False, False
+            
+            # Initialize or resize buffers if needed
+            if self.gray_buffer is None or self.gray_buffer.shape != (frame.shape[0], frame.shape[1]):
+                self.gray_buffer = np.empty((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+                self.mask_buffer = np.empty_like(self.gray_buffer)
+            
+            # Convert frame to grayscale
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY, dst=self.gray_buffer)
             
             # Calculate motion score
-            motion_score = self._calculate_motion_score(gray_frame)
+            motion_score = self._calculate_motion_score(self.gray_buffer)
             
             # Detect rapid motion
             rapid_motion = self._detect_rapid_motion(motion_score)
@@ -219,61 +237,55 @@ class MotionDetector:
                 for result in boxes:
                     if result.boxes is not None:
                         for box in result.boxes:
-                            # Get class information from boxes
-                            cls = int(box.cls[0].item())  # Get class ID
-                            if cls == 0:  # person class
-                                # Get coordinates
-                                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                                current_boxes.append((x1, y1, x2, y2))
+                            if int(box.cls[0].item()) == 0:  # person class
+                                current_boxes.append(tuple(map(int, box.xyxy[0].tolist())))
             
-            # Match current boxes with existing trackers
-            matched_pairs, unmatched_boxes = self._match_boxes_to_trackers(current_boxes)
-            
-            # Update trackers and process detections
-            new_trackers = {}
-            self.active_trackers.clear()
-            
-            # Process matched pairs
-            for box_idx, tracker_id in matched_pairs:
-                current_box = current_boxes[box_idx]
-                new_trackers[tracker_id] = current_box
-                self.active_trackers.add(tracker_id)
+            # Only process person tracking if there are detections
+            if current_boxes:
+                # Match current boxes with existing trackers
+                matched_pairs, unmatched_boxes = self._match_boxes_to_trackers(current_boxes)
                 
-                # Analyze movement
-                previous_box = self.previous_positions.get(tracker_id)
-                analysis = self._analyze_person_movement(tracker_id, current_box, previous_box)
+                # Update trackers and process detections
+                new_trackers = {}
+                self.active_trackers.clear()
                 
-                # Update state and draw annotations
-                self._update_detection_state(frame, current_box, tracker_id, analysis)
-                rapid_motion = rapid_motion or analysis['rapid_motion']
-                any_fall_detected = any_fall_detected or analysis['fall_detected']
-            
-            # Process unmatched boxes (new detections)
-            for box_idx in unmatched_boxes:
-                current_box = current_boxes[box_idx]
-                tracker_id = self.next_person_id
-                self.next_person_id += 1
+                # Process matched pairs
+                for box_idx, tracker_id in matched_pairs:
+                    current_box = current_boxes[box_idx]
+                    new_trackers[tracker_id] = current_box
+                    self.active_trackers.add(tracker_id)
+                    
+                    # Analyze movement
+                    previous_box = self.previous_positions.get(tracker_id)
+                    analysis = self._analyze_person_movement(tracker_id, current_box, previous_box)
+                    
+                    # Update state and draw annotations
+                    self._update_detection_state(frame, current_box, tracker_id, analysis)
+                    rapid_motion = rapid_motion or analysis['rapid_motion']
+                    any_fall_detected = any_fall_detected or analysis['fall_detected']
                 
-                new_trackers[tracker_id] = current_box
-                self.active_trackers.add(tracker_id)
+                # Process unmatched boxes (new detections)
+                for box_idx in unmatched_boxes:
+                    current_box = current_boxes[box_idx]
+                    tracker_id = self.next_person_id
+                    self.next_person_id += 1
+                    
+                    new_trackers[tracker_id] = current_box
+                    self.active_trackers.add(tracker_id)
+                    
+                    analysis = self._analyze_person_movement(tracker_id, current_box, None)
+                    self._update_detection_state(frame, current_box, tracker_id, analysis)
                 
-                # Analyze movement (no previous box)
-                analysis = self._analyze_person_movement(tracker_id, current_box, None)
-                
-                # Update state and draw annotations
-                self._update_detection_state(frame, current_box, tracker_id, analysis)
-            
-            # Update trackers for next frame
-            self.person_trackers = new_trackers
+                # Update trackers for next frame
+                self.person_trackers = new_trackers
             
             # Update previous frame
-            self.previous_frame = gray_frame
+            np.copyto(self.previous_frame, self.gray_buffer) if self.previous_frame is not None else self.gray_buffer.copy()
             
             return frame, rapid_motion, any_fall_detected
             
         except Exception as e:
             self.logger.error(f"Error in motion and fall detection: {str(e)}")
-            self.previous_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             return frame, False, False
 
     def _update_detection_state(self, frame, box, person_id, analysis):

@@ -55,6 +55,138 @@
         .status-critical {
             color: #F44336;
         }
+        .dev-tools-container {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .dev-tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .dev-tool-card {
+            background-color: #383838;
+            border-radius: 6px;
+            padding: 15px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .dev-tool-card:hover {
+            background-color: #454545;
+        }
+        .dev-tool-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 8px;
+        }
+        .dev-tool-description {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 12px;
+        }
+        .dev-tool-button {
+            background-color: #2d2d2d;
+            border: 1px solid #4CAF50;
+            color: #4CAF50;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .dev-tool-button:hover {
+            background-color: #4CAF50;
+            color: #fff;
+        }
+        .section-title {
+            color: #4CAF50;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+        }
+        
+        .modal-content {
+            background-color: #2d2d2d;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close-button {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        
+        .close-button:hover {
+            color: #fff;
+        }
+        
+        .test-status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .test-status.running {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        .test-status.success {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .test-status.error {
+            background-color: #F44336;
+            color: white;
+        }
+        
+        .test-output {
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            color: #ddd;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .dev-tool-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -89,6 +221,49 @@
 
     <div class="chart-container">
         <div id="system-resources-chart"></div>
+    </div>
+
+    <h2 class="section-title">Developer Tools</h2>
+    <div class="dev-tools-container">
+        <div class="dev-tools-grid">
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Camera Performance Test</div>
+                <div class="dev-tool-description">Test raw camera performance and FPS without processing.</div>
+                <button class="dev-tool-button" onclick="runTest('camera')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Motion Detection Test</div>
+                <div class="dev-tool-description">Test motion detection performance and accuracy.</div>
+                <button class="dev-tool-button" onclick="runTest('motion')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Full Performance Test</div>
+                <div class="dev-tool-description">Run comprehensive performance tests on all components.</div>
+                <button class="dev-tool-button" onclick="runTest('full')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Debug Mode</div>
+                <div class="dev-tool-description">Launch application in debug mode with developer window.</div>
+                <button class="dev-tool-button" onclick="runTest('debug')">Launch Debug</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Results Modal -->
+    <div id="testModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Test Results</h2>
+                <span class="close-button" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="testStatus" class="test-status"></div>
+                <pre id="testOutput" class="test-output"></pre>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -211,6 +386,83 @@
         setInterval(() => {
             socket.emit('request_metrics');
         }, 1000);
+
+        // Test handling functions
+        function runTest(testType) {
+            // Disable all test buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = true;
+            });
+            
+            // Show modal with running status
+            const modal = document.getElementById('testModal');
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            modal.style.display = 'block';
+            status.className = 'test-status running';
+            status.textContent = `Running ${testType} test...`;
+            output.textContent = '';
+            
+            // Emit test request
+            socket.emit('run_test', { type: testType });
+        }
+        
+        function closeModal() {
+            document.getElementById('testModal').style.display = 'none';
+            // Re-enable all test buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = false;
+            });
+        }
+        
+        // Socket.IO event handlers for tests
+        socket.on('test_started', (data) => {
+            const status = document.getElementById('testStatus');
+            status.className = 'test-status running';
+            status.textContent = `Running ${data.type} test...`;
+        });
+        
+        socket.on('test_result', (data) => {
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            status.className = 'test-status success';
+            status.textContent = data.message || 'Test completed successfully';
+            
+            if (data.results) {
+                output.textContent = JSON.stringify(data.results, null, 2);
+            }
+            
+            // Re-enable buttons after delay
+            setTimeout(() => {
+                document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                    btn.disabled = false;
+                });
+            }, 1000);
+        });
+        
+        socket.on('test_error', (data) => {
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            status.className = 'test-status error';
+            status.textContent = 'Test failed';
+            output.textContent = data.error;
+            
+            // Re-enable buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = false;
+            });
+        });
+
+        // Close modal if user clicks outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('testModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
     </script>
 </body>
 </html> 
