@@ -17,6 +17,8 @@ import matplotlib
 from queue import Empty
 from pathlib import Path
 import matplotlib.pyplot as plt
+from collections import deque
+import psutil
 
 matplotlib.use("TkAgg")
 from matplotlib.figure import Figure
@@ -59,6 +61,15 @@ class BabyMonitorSystem:
         self.initialized_components = []  # Track initialized components for cleanup
         self.web_app = None  # Initialize web_app reference as None
         self.dev_window = None  # Initialize dev window reference as None
+
+        # Performance metrics
+        self.metrics_lock = threading.Lock()
+        self.fps_history = deque(maxlen=100)  # Store last 100 FPS values
+        self.frame_times = deque(maxlen=100)  # Store last 100 frame processing times
+        self.cpu_history = deque(maxlen=100)  # Store last 100 CPU usage values
+        self.memory_history = deque(maxlen=100)  # Store last 100 memory usage values
+        self.last_metrics_update = time.time()
+        self.metrics_update_interval = 1.0  # Update metrics every second
 
         try:
             # Initialize camera first
@@ -151,15 +162,15 @@ class BabyMonitorSystem:
                         )
                     self.initialized_components.append('audio_processor')
 
-                    model_path = os.path.join(src_dir, "models", "emotion_model.pt")
-                    if os.path.exists(model_path):
-                        self.emotion_recognizer = EmotionRecognizer(
-                            model_path=model_path,
-                            web_app=self.web_app if not only_local else None,
-                        )
+                    # Initialize emotion recognizer
+                    try:
+                        self.emotion_recognizer = EmotionRecognizer()
+                        if self.web_app:
+                            self.emotion_recognizer.web_app = self.web_app
                         self.initialized_components.append('emotion_recognizer')
-                    else:
-                        self.logger.warning(f"Emotion model not found at {model_path}")
+                        self.logger.info("Emotion recognizer initialized successfully")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize emotion recognizer: {str(e)}")
                         self.emotion_recognizer = None
 
                     if not only_web:
@@ -434,15 +445,30 @@ class BabyMonitorSystem:
         """Process video frames in a separate thread."""
         last_frame_time = 0
         frame_interval = 1.0 / 60.0  # Target 60 FPS
+        frame_count = 0
+        fps_update_time = time.time()
+        
+        # Pre-allocate reusable frame buffer
+        processed_frame = None
+        resized_frame = None
 
         while self.is_running:
             try:
+                frame_start_time = time.time()
+                
                 if not self.camera_enabled:
                     time.sleep(0.001)
                     continue
 
                 current_time = time.time()
+                
+                # Skip frame if we're processing too fast
                 time_since_last_frame = current_time - last_frame_time
+                if time_since_last_frame < frame_interval:
+                    sleep_time = frame_interval - time_since_last_frame
+                    if sleep_time > 0.001:  # Only sleep for meaningful intervals
+                        time.sleep(sleep_time)
+                    continue
 
                 # Get frame from camera
                 ret, frame = self.camera.get_frame()
@@ -481,6 +507,36 @@ class BabyMonitorSystem:
                     except Exception as e:
                         self.logger.error(f"Motion detection error: {str(e)}")
 
+                # Update performance metrics
+                frame_count += 1
+                frame_end_time = time.time()
+                frame_processing_time = frame_end_time - frame_start_time
+                
+                with self.metrics_lock:
+                    self.frame_times.append(frame_processing_time * 1000)  # Convert to ms
+                    
+                    # Update FPS every second
+                    if current_time - fps_update_time >= 1.0:
+                        fps = frame_count / (current_time - fps_update_time)
+                        self.fps_history.append(fps)
+                        frame_count = 0
+                        fps_update_time = current_time
+                    
+                    # Update system metrics every second
+                    if current_time - self.last_metrics_update >= self.metrics_update_interval:
+                        self.cpu_history.append(psutil.cpu_percent())
+                        self.memory_history.append(psutil.Process().memory_percent())
+                        self.last_metrics_update = current_time
+                        
+                        # Emit metrics to web interface
+                        if self.web_app is not None:
+                            self.web_app.emit_metrics({
+                                'fps': self.fps_history[-1] if self.fps_history else 0,
+                                'frame_time': sum(self.frame_times) / len(self.frame_times) if self.frame_times else 0,
+                                'cpu_usage': self.cpu_history[-1] if self.cpu_history else 0,
+                                'memory_usage': self.memory_history[-1] if self.memory_history else 0
+                            })
+
                 # Update web interface
                 if self.web_app is not None and self.camera_enabled:
                     try:
@@ -507,15 +563,24 @@ class BabyMonitorSystem:
                                 new_height = canvas_height
                                 new_width = int(canvas_height * frame_aspect)
 
-                            # Resize frame efficiently
-                            if new_width != processed_frame.shape[1] or new_height != processed_frame.shape[0]:
+                            # Only resize if dimensions have changed
+                            if (resized_frame is None or 
+                                resized_frame.shape[1] != new_width or 
+                                resized_frame.shape[0] != new_height):
                                 resized_frame = cv2.resize(processed_frame, (new_width, new_height),
                                                          interpolation=cv2.INTER_NEAREST)
                             else:
-                                resized_frame = processed_frame
+                                # Reuse existing buffer
+                                cv2.resize(processed_frame, (new_width, new_height),
+                                         dst=resized_frame, interpolation=cv2.INTER_NEAREST)
 
                             # Convert to RGB and create PhotoImage
-                            frame_rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+                            # Use numpy operations instead of cv2.cvtColor for better performance
+                            frame_rgb = np.empty(resized_frame.shape, dtype=np.uint8)
+                            frame_rgb[..., 0] = resized_frame[..., 2]
+                            frame_rgb[..., 1] = resized_frame[..., 1]
+                            frame_rgb[..., 2] = resized_frame[..., 0]
+                            
                             frame_pil = Image.fromarray(frame_rgb)
                             photo = ImageTk.PhotoImage(image=frame_pil)
 
@@ -540,12 +605,7 @@ class BabyMonitorSystem:
                     except Exception as e:
                         self.logger.error(f"Error updating video display: {str(e)}")
 
-                # Update frame timing
-                if time_since_last_frame >= frame_interval:
-                    last_frame_time = current_time
-                else:
-                    # Small sleep to prevent busy waiting
-                    time.sleep(max(0, frame_interval - time_since_last_frame))
+                last_frame_time = current_time
 
             except Exception as e:
                 self.logger.error(f"Error in frame processing loop: {str(e)}")
