@@ -47,6 +47,12 @@
             border-radius: 10px;
         }
         
+        .emotion-panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
         .video-container {
             position: relative;
             width: 100%;
@@ -263,6 +269,34 @@
         .status-active { color: #28a745; }
         .status-inactive { color: #dc3545; }
         .status-warning { color: #ffc107; }
+
+        .emotion-indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .emotion-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .emotion-item {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            opacity: 0.5;
+            transition: opacity 0.3s;
+        }
+
+        .emotion-item.active {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -337,6 +371,46 @@
                             <i class="fas fa-smile status-icon" id="emotionIcon"></i>
                             <div>Emotion</div>
                             <div id="emotionStatus">None</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="emotion-panel">
+                    <h3>Emotion Recognition</h3>
+                    <div class="monitoring-status">
+                        <div class="monitoring-item">
+                            <span class="monitoring-label">Current Emotion:</span>
+                            <span class="monitoring-value" id="current-emotion">Not detecting</span>
+                        </div>
+                        <div class="monitoring-item">
+                            <span class="monitoring-label">Confidence:</span>
+                            <span class="monitoring-value" id="emotion-confidence">0%</span>
+                        </div>
+                    </div>
+                    <div class="emotion-grid">
+                        <div class="emotion-item" data-emotion="natural">
+                            <div class="emotion-indicator" style="background: #90EE90;"></div>
+                            <span>Natural</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="anger">
+                            <div class="emotion-indicator" style="background: #FF6B6B;"></div>
+                            <span>Anger</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="worried">
+                            <div class="emotion-indicator" style="background: #FFD93D;"></div>
+                            <span>Worried</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="happy">
+                            <div class="emotion-indicator" style="background: #98FB98;"></div>
+                            <span>Happy</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="fear">
+                            <div class="emotion-indicator" style="background: #FF69B4;"></div>
+                            <span>Fear</span>
+                        </div>
+                        <div class="emotion-item" data-emotion="sadness">
+                            <div class="emotion-indicator" style="background: #87CEEB;"></div>
+                            <span>Sadness</span>
                         </div>
                     </div>
                 </div>
@@ -486,12 +560,13 @@
             state.connection.isConnected = true;
             console.log('Connected to server');
             fetchCameras();
+            updateStatus('Connected');
         });
 
         socket.on('disconnect', () => {
             state.connection.isConnected = false;
             console.log('Disconnected from server');
-            updateUI();
+            updateStatus('Disconnected');
         });
 
         socket.on('frame', (data) => {
@@ -540,6 +615,18 @@
                 elements.status.emotion.textContent = data.emotion || 'None';
                 elements.status.emotion.className = data.emotion === 'None' ? 'status-inactive' : 'status-active';
             }
+            // Update current emotion and confidence
+            document.getElementById('current-emotion').textContent = data.emotion.charAt(0).toUpperCase() + data.emotion.slice(1);
+            document.getElementById('emotion-confidence').textContent = `${(data.confidence * 100).toFixed(1)}%`;
+            
+            // Update emotion indicators
+            document.querySelectorAll('.emotion-item').forEach(item => {
+                if (item.dataset.emotion === data.emotion) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
         });
 
         // Camera management
@@ -558,7 +645,7 @@
             
             cameras.forEach(camera => {
                 const option = document.createElement('option');
-                option.value = camera.name;
+                option.value = camera.id;
                 option.textContent = camera.name;
                 option.dataset.resolutions = JSON.stringify(camera.resolutions);
                 elements.video.select.appendChild(option);
@@ -566,32 +653,15 @@
 
             // Auto-select if only one camera
             if (cameras.length === 1) {
-                elements.video.select.value = cameras[0].name;
+                elements.video.select.value = cameras[0].id;
                 updateResolutionSelect(cameras[0].resolutions);
             }
         }
 
-        function updateResolutionSelect(resolutions) {
-            elements.video.resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
-            
-            resolutions.forEach(resolution => {
-                const option = document.createElement('option');
-                option.value = resolution;
-                option.textContent = resolution;
-                elements.video.resolutionSelect.appendChild(option);
-            });
-
-            // Auto-select first resolution
-            if (resolutions.length > 0) {
-                elements.video.resolutionSelect.value = resolutions[0];
-                setResolution(resolutions[0]);
-            }
-        }
-
-        // Event listeners for camera controls
+        // Add camera selection event listener
         elements.video.select.addEventListener('change', () => {
             const selectedOption = elements.video.select.selectedOptions[0];
-            if (selectedOption?.value) {
+            if (selectedOption && selectedOption.value) {
                 socket.emit('select_camera', { camera_name: selectedOption.value }, (response) => {
                     if (response.success) {
                         const resolutions = JSON.parse(selectedOption.dataset.resolutions);
@@ -604,6 +674,7 @@
             }
         });
 
+        // Add resolution selection event listener
         elements.video.resolutionSelect.addEventListener('change', () => {
             const resolution = elements.video.resolutionSelect.value;
             if (resolution) {
@@ -611,12 +682,37 @@
             }
         });
 
+        function updateResolutionSelect(resolutions) {
+            elements.video.resolutionSelect.innerHTML = '<option value="">Select Resolution</option>';
+            
+            if (Array.isArray(resolutions)) {
+                resolutions.forEach(resolution => {
+                    const option = document.createElement('option');
+                    option.value = resolution;
+                    option.textContent = resolution;
+                    elements.video.resolutionSelect.appendChild(option);
+                });
+
+                // Auto-select first resolution if available
+                if (resolutions.length > 0) {
+                    elements.video.resolutionSelect.value = resolutions[0];
+                    setResolution(resolutions[0]);
+                }
+            }
+        }
+
         function setResolution(resolution) {
+            if (!resolution) return;
+            
             socket.emit('set_resolution', { resolution }, (response) => {
                 if (response.success) {
-                    showSuccess('Resolution set successfully');
+                    showSuccess(`Resolution set to ${resolution}`);
                 } else {
                     showError(response.error || 'Failed to set resolution');
+                    // Reset to current resolution if available
+                    if (response.current_resolution) {
+                        elements.video.resolutionSelect.value = response.current_resolution;
+                    }
                 }
             });
         }
@@ -763,6 +859,11 @@
                 elements.alerts.error.style.display = 'none';
                 elements.alerts.error.style.backgroundColor = '#f44336';
             }, 3000);
+        }
+
+        function updateStatus(status) {
+            // Implement the logic to update the status display
+            console.log('System status:', status);
         }
     </script>
 </body>
