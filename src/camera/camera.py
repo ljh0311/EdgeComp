@@ -131,6 +131,10 @@ class Camera:
             self.logger.error(f"Error selecting camera: {str(e)}")
             return False
 
+    def get_available_cameras(self):
+        """Get list of available cameras."""
+        return self.available_cameras
+
     def set_resolution(self, width, height=None):
         """Set camera resolution.
         
@@ -142,13 +146,19 @@ class Camera:
             bool: True if resolution was set successfully
         """
         try:
-            # Handle resolution string format (e.g. '1280x720')
+            # Handle resolution string format (e.g. '1280x720' or {'width': 1280, 'height': 720})
             if isinstance(width, str):
                 width, height = map(int, width.split('x'))
+            elif isinstance(width, dict):
+                height = width.get('height')
+                width = width.get('width')
             
-            # Validate height parameter is provided
-            if height is None:
-                raise ValueError("Height parameter is required when width is not a resolution string")
+            # Validate parameters
+            if width is None or height is None:
+                raise ValueError("Both width and height are required")
+            
+            width = int(width)
+            height = int(height)
             
             self.width = width
             self.height = height
@@ -158,7 +168,12 @@ class Camera:
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
                 actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                return actual_width == width and actual_height == height
+                success = actual_width == width and actual_height == height
+                if success:
+                    self.logger.info(f"Resolution set to {width}x{height}")
+                else:
+                    self.logger.warning(f"Requested resolution {width}x{height} but got {actual_width}x{actual_height}")
+                return success
             return False
             
         except Exception as e:
@@ -234,16 +249,4 @@ class Camera:
 
     def get_available_cameras(self):
         """Get list of available cameras."""
-        return self.available_cameras
-
-    def set_resolution(self, width, height):
-        """Set camera resolution."""
-        self.width = width
-        self.height = height
-        if self.cap and self.cap.isOpened():
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            return actual_width == width and actual_height == height
-        return False 
+        return self.available_cameras 

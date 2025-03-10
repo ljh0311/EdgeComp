@@ -218,13 +218,17 @@ class BabyMonitorWeb:
                     data = request.get_json()
                     width = int(data.get('width', 640))
                     height = int(data.get('height', 480))
-                    self.monitor_system.camera.width = width
-                    self.monitor_system.camera.height = height
-                    success = self.monitor_system.camera.initialize()
-                    return jsonify({
-                        'status': 'success' if success else 'error',
-                        'message': f'Set resolution to {width}x{height}'
-                    })
+                    success = self.monitor_system.camera.set_resolution(width, height)
+                    if success:
+                        return jsonify({
+                            'status': 'success',
+                            'message': f'Set resolution to {width}x{height}'
+                        })
+                    else:
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'Failed to set resolution'
+                        })
                 else:
                     return jsonify({'error': f'Unknown action: {action}'})
             except Exception as e:
@@ -299,17 +303,36 @@ class BabyMonitorWeb:
                 if not self.monitor_system:
                     return {'success': False, 'error': 'Monitor system not initialized'}
                 
+                # Extract resolution from data
+                width = data.get('width')
+                height = data.get('height')
                 resolution = data.get('resolution')
-                if not resolution:
-                    return {'success': False, 'error': 'No resolution provided'}
                 
-                success = self.monitor_system.camera.set_resolution(resolution)
+                if resolution:
+                    # If resolution is provided as a string (e.g. "640x480")
+                    try:
+                        width, height = map(int, resolution.split('x'))
+                        success = self.monitor_system.camera.set_resolution(width, height)
+                    except (ValueError, AttributeError) as e:
+                        return {'success': False, 'error': f'Invalid resolution format: {str(e)}'}
+                elif width is not None and height is not None:
+                    # If width and height are provided separately
+                    try:
+                        width = int(width)
+                        height = int(height)
+                        success = self.monitor_system.camera.set_resolution(width, height)
+                    except (ValueError, TypeError) as e:
+                        return {'success': False, 'error': f'Invalid width/height values: {str(e)}'}
+                else:
+                    return {'success': False, 'error': 'Missing resolution parameters'}
+                
                 if success:
                     # Reset frame processing
                     with self.frame_lock:
                         while not self.frame_queue.empty():
                             self.frame_queue.get_nowait()
-                    return {'success': True}
+                    current_res = self.monitor_system.camera.get_current_resolution()
+                    return {'success': True, 'message': f'Resolution set to {current_res}'}
                 else:
                     return {'success': False, 'error': 'Failed to set resolution'}
             except Exception as e:
