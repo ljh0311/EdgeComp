@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Monitor - Performance Metrics</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+        .metrics-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .metric-label {
+            font-size: 14px;
+            color: #888;
+        }
+        .chart-container {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            height: 300px;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #4CAF50;
+        }
+        .status-good {
+            color: #4CAF50;
+        }
+        .status-warning {
+            color: #FFC107;
+        }
+        .status-critical {
+            color: #F44336;
+        }
+        .dev-tools-container {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .dev-tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .dev-tool-card {
+            background-color: #383838;
+            border-radius: 6px;
+            padding: 15px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .dev-tool-card:hover {
+            background-color: #454545;
+        }
+        .dev-tool-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 8px;
+        }
+        .dev-tool-description {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 12px;
+        }
+        .dev-tool-button {
+            background-color: #2d2d2d;
+            border: 1px solid #4CAF50;
+            color: #4CAF50;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .dev-tool-button:hover {
+            background-color: #4CAF50;
+            color: #fff;
+        }
+        .section-title {
+            color: #4CAF50;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+        }
+        
+        .modal-content {
+            background-color: #2d2d2d;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close-button {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        
+        .close-button:hover {
+            color: #fff;
+        }
+        
+        .test-status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .test-status.running {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        .test-status.success {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .test-status.error {
+            background-color: #F44336;
+            color: white;
+        }
+        
+        .test-output {
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            color: #ddd;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .dev-tool-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Performance Metrics</h1>
+    
+    <div class="metrics-container">
+        <div class="metric-card">
+            <div class="metric-label">FPS</div>
+            <div id="fps-value" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Frame Processing Time (ms)</div>
+            <div id="frame-time-value" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">CPU Usage (%)</div>
+            <div id="cpu-value" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Memory Usage (%)</div>
+            <div id="memory-value" class="metric-value">--</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div id="fps-chart"></div>
+    </div>
+
+    <div class="chart-container">
+        <div id="frame-time-chart"></div>
+    </div>
+
+    <div class="chart-container">
+        <div id="system-resources-chart"></div>
+    </div>
+
+    <h2 class="section-title">Developer Tools</h2>
+    <div class="dev-tools-container">
+        <div class="dev-tools-grid">
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Camera Performance Test</div>
+                <div class="dev-tool-description">Test raw camera performance and FPS without processing.</div>
+                <button class="dev-tool-button" onclick="runTest('camera')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Motion Detection Test</div>
+                <div class="dev-tool-description">Test motion detection performance and accuracy.</div>
+                <button class="dev-tool-button" onclick="runTest('motion')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Full Performance Test</div>
+                <div class="dev-tool-description">Run comprehensive performance tests on all components.</div>
+                <button class="dev-tool-button" onclick="runTest('full')">Run Test</button>
+            </div>
+            
+            <div class="dev-tool-card">
+                <div class="dev-tool-title">Debug Mode</div>
+                <div class="dev-tool-description">Launch application in debug mode with developer window.</div>
+                <button class="dev-tool-button" onclick="runTest('debug')">Launch Debug</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Results Modal -->
+    <div id="testModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Test Results</h2>
+                <span class="close-button" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="testStatus" class="test-status"></div>
+                <pre id="testOutput" class="test-output"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Connect to Socket.IO
+        const socket = io();
+        
+        // Initialize charts
+        const fpsChart = Plotly.newPlot('fps-chart', [{
+            y: [],
+            type: 'scatter',
+            name: 'FPS',
+            line: { color: '#4CAF50' }
+        }], {
+            title: 'Frames Per Second',
+            paper_bgcolor: '#2d2d2d',
+            plot_bgcolor: '#2d2d2d',
+            font: { color: '#ffffff' },
+            xaxis: { showgrid: true, gridcolor: '#444' },
+            yaxis: { showgrid: true, gridcolor: '#444' }
+        });
+
+        const frameTimeChart = Plotly.newPlot('frame-time-chart', [{
+            y: [],
+            type: 'scatter',
+            name: 'Frame Time (ms)',
+            line: { color: '#2196F3' }
+        }], {
+            title: 'Frame Processing Time',
+            paper_bgcolor: '#2d2d2d',
+            plot_bgcolor: '#2d2d2d',
+            font: { color: '#ffffff' },
+            xaxis: { showgrid: true, gridcolor: '#444' },
+            yaxis: { showgrid: true, gridcolor: '#444' }
+        });
+
+        const systemResourcesChart = Plotly.newPlot('system-resources-chart', [
+            {
+                y: [],
+                type: 'scatter',
+                name: 'CPU Usage (%)',
+                line: { color: '#FFC107' }
+            },
+            {
+                y: [],
+                type: 'scatter',
+                name: 'Memory Usage (%)',
+                line: { color: '#F44336' }
+            }
+        ], {
+            title: 'System Resources',
+            paper_bgcolor: '#2d2d2d',
+            plot_bgcolor: '#2d2d2d',
+            font: { color: '#ffffff' },
+            xaxis: { showgrid: true, gridcolor: '#444' },
+            yaxis: { showgrid: true, gridcolor: '#444' }
+        });
+
+        // Update metrics display
+        function updateMetrics(data) {
+            // Update current values
+            const current = data.current;
+            document.getElementById('fps-value').textContent = current.fps.toFixed(1);
+            document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1);
+            document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1);
+            document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1);
+
+            // Update status colors
+            updateStatusColor('fps-value', current.fps, 30, 15);
+            updateStatusColor('frame-time-value', current.frame_time, 20, 33, true);
+            updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true);
+            updateStatusColor('memory-value', current.memory_usage, 70, 90, true);
+
+            // Update charts
+            const history = data.history;
+            Plotly.update('fps-chart', {
+                y: [history.fps]
+            });
+
+            Plotly.update('frame-time-chart', {
+                y: [history.frame_time]
+            });
+
+            Plotly.update('system-resources-chart', {
+                y: [history.cpu_usage, history.memory_usage]
+            });
+        }
+
+        function updateStatusColor(elementId, value, warningThreshold, criticalThreshold, isInverse = false) {
+            const element = document.getElementById(elementId);
+            if (isInverse) {
+                if (value >= criticalThreshold) {
+                    element.className = 'metric-value status-critical';
+                } else if (value >= warningThreshold) {
+                    element.className = 'metric-value status-warning';
+                } else {
+                    element.className = 'metric-value status-good';
+                }
+            } else {
+                if (value <= criticalThreshold) {
+                    element.className = 'metric-value status-critical';
+                } else if (value <= warningThreshold) {
+                    element.className = 'metric-value status-warning';
+                } else {
+                    element.className = 'metric-value status-good';
+                }
+            }
+        }
+
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('request_metrics');
+        });
+
+        socket.on('metrics_update', (data) => {
+            updateMetrics(data);
+        });
+
+        // Request metrics update every second
+        setInterval(() => {
+            socket.emit('request_metrics');
+        }, 1000);
+
+        // Test handling functions
+        function runTest(testType) {
+            // Disable all test buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = true;
+            });
+            
+            // Show modal with running status
+            const modal = document.getElementById('testModal');
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            modal.style.display = 'block';
+            status.className = 'test-status running';
+            status.textContent = `Running ${testType} test...`;
+            output.textContent = '';
+            
+            // Emit test request
+            socket.emit('run_test', { type: testType });
+        }
+        
+        function closeModal() {
+            document.getElementById('testModal').style.display = 'none';
+            // Re-enable all test buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = false;
+            });
+        }
+        
+        // Socket.IO event handlers for tests
+        socket.on('test_started', (data) => {
+            const status = document.getElementById('testStatus');
+            status.className = 'test-status running';
+            status.textContent = `Running ${data.type} test...`;
+        });
+        
+        socket.on('test_result', (data) => {
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            status.className = 'test-status success';
+            status.textContent = data.message || 'Test completed successfully';
+            
+            if (data.results) {
+                output.textContent = JSON.stringify(data.results, null, 2);
+            }
+            
+            // Re-enable buttons after delay
+            setTimeout(() => {
+                document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                    btn.disabled = false;
+                });
+            }, 1000);
+        });
+        
+        socket.on('test_error', (data) => {
+            const status = document.getElementById('testStatus');
+            const output = document.getElementById('testOutput');
+            
+            status.className = 'test-status error';
+            status.textContent = 'Test failed';
+            output.textContent = data.error;
+            
+            // Re-enable buttons
+            document.querySelectorAll('.dev-tool-button').forEach(btn => {
+                btn.disabled = false;
+            });
+        });
+
+        // Close modal if user clicks outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('testModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html> 

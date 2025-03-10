@@ -1,0 +1,316 @@
+"""
+Person Detection Module
+=====================
+Handles person detection, tracking, and position analysis using YOLO.
+"""
+
+import cv2
+import numpy as np
+from ultralytics import YOLO
+import logging
+import sys
+import os
+from pathlib import Path
+import torch
+from torch.serialization import add_safe_globals
+from ultralytics.nn.tasks import DetectionModel
+import gc
+
+
+class PersonDetector:
+    """Person detector using YOLOv8."""
+
+    def __init__(self, model_path=None, device=None):
+        """Initialize the person detector."""
+        self.logger = logging.getLogger(__name__)
+        
+        # Set device
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Track previous detections for motion analysis
+        self.prev_detections = []
+        self.detection_history = []
+        self.history_size = 5  # Limit history size
+        
+        # Detection smoothing
+        self.smooth_factor = 0.7  # Higher value means more smoothing
+        self.min_detection_confidence = 0.3
+        
+        # Memory management
+        self.frame_count = 0
+        self.cleanup_interval = 30  # Cleanup every 30 frames
+        
+        try:
+            self._initialize_model(model_path)
+            self.logger.info(f"Person detector initialized on {self.device}")
+        except Exception as e:
+            self.logger.error(f"Error initializing person detector: {str(e)}")
+            raise
+
+    def _initialize_model(self, model_path=None):
+        """Initialize the YOLO model."""
+        try:
+            # Add YOLO model to safe globals for PyTorch 2.6+
+            add_safe_globals([DetectionModel])
+            
+            if model_path:
+                self.model = YOLO(model_path)
+            else:
+                # Use YOLOv8n by default
+                self.model = YOLO('yolov8n.pt')
+            
+            # Move model to appropriate device
+            self.model.to(self.device)
+            
+            # Set model parameters
+            self.model.conf = self.min_detection_confidence  # Confidence threshold
+            self.model.iou = 0.45  # NMS IoU threshold
+            self.model.classes = [0]  # Only detect persons (class 0 in COCO)
+            self.model.max_det = 10  # Maximum detections per image
+            
+            if self.device.type == 'cuda':
+                # Enable CUDA optimizations
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cudnn.deterministic = False
+                
+        except Exception as e:
+            self.logger.error(f"Error loading YOLO model: {str(e)}")
+            raise
+
+    def _cleanup_memory(self):
+        """Perform memory cleanup."""
+        # Clear detection history if too long
+        while len(self.detection_history) > self.history_size:
+            self.detection_history.pop(0)
+        
+        # Clear previous detections if too many
+        while len(self.prev_detections) > self.history_size:
+            self.prev_detections.pop(0)
+        
+        # Clear CUDA cache if using GPU
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+        
+        # Force garbage collection
+        gc.collect()
+
+    def _smooth_detections(self, current_detections):
+        """Smooth detection boxes using previous detections."""
+        if not self.prev_detections:
+            return current_detections
+
+        smoothed_detections = []
+        for curr_det in current_detections:
+            # Find matching previous detection
+            matched = False
+            curr_box = curr_det[:4]
+            for prev_det in self.prev_detections:
+                prev_box = prev_det[:4]
+                # Calculate IoU between current and previous detection
+                intersection_x1 = max(curr_box[0], prev_box[0])
+                intersection_y1 = max(curr_box[1], prev_box[1])
+                intersection_x2 = min(curr_box[2], prev_box[2])
+                intersection_y2 = min(curr_box[3], prev_box[3])
+                
+                if intersection_x2 > intersection_x1 and intersection_y2 > intersection_y1:
+                    # Boxes overlap, smooth the coordinates
+                    smoothed_box = [
+                        prev_box[i] * self.smooth_factor + curr_box[i] * (1 - self.smooth_factor)
+                        for i in range(4)
+                    ]
+                    smoothed_det = [*smoothed_box, curr_det[4], curr_det[5], curr_det[6]]
+                    smoothed_detections.append(smoothed_det)
+                    matched = True
+                    break
+            
+            if not matched:
+                # No match found, use current detection as is
+                smoothed_detections.append(curr_det)
+
+        return smoothed_detections
+
+    def _determine_status(self, bbox, prev_bbox=None):
+        """Determine person's status based on position and movement."""
+        x1, y1, x2, y2 = bbox[:4]
+        height = y2 - y1
+        width = x2 - x1
+        aspect_ratio = width / height if height > 0 else 0
+
+        # Determine if lying down based on aspect ratio
+        if aspect_ratio > 1.5:
+            return "lying"
+        
+        # If we have previous detection, check for movement
+        if prev_bbox is not None:
+            prev_x1, prev_y1, prev_x2, prev_y2 = prev_bbox[:4]
+            movement = abs(x1 - prev_x1) + abs(y1 - prev_y1)
+            if movement > 20:  # Threshold for movement detection
+                return "moving"
+        
+        return "seated"
+
+    def detect(self, frame):
+        """Detect persons in a frame."""
+        try:
+            # Skip processing if model not loaded
+            if self.model is None:
+                return []
+
+            # Increment frame counter
+            self.frame_count += 1
+
+            # Convert frame to RGB (YOLO expects RGB)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Resize frame to a fixed size for faster processing
+            input_size = 416  # Reduced from 640 for better performance
+            orig_shape = frame_rgb.shape[:2]
+            frame_resized = cv2.resize(frame_rgb, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
+            
+            # Perform inference
+            with torch.no_grad():  # Disable gradient calculation for inference
+                if self.device.type == 'cuda':
+                    with torch.amp.autocast('cuda', dtype=torch.float16):  # Use FP16 for faster inference
+                        results = self.model(frame_resized)
+                else:
+                    results = self.model(frame_resized)
+            
+            # Extract detections for persons (class 0)
+            detections = []
+            if len(results) > 0:
+                # Get detections from first image
+                result = results[0]
+                
+                # Scale coordinates back to original image size
+                scale_x = orig_shape[1] / input_size
+                scale_y = orig_shape[0] / input_size
+                
+                # Process each detection
+                for box in result.boxes:
+                    if box.cls == 0:  # Person class
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        confidence = box.conf[0].item()
+                        
+                        # Scale coordinates back to original image size
+                        bbox = [
+                            x1 * scale_x,
+                            y1 * scale_y,
+                            x2 * scale_x,
+                            y2 * scale_y
+                        ]
+                        
+                        # Find matching previous detection for status
+                        prev_bbox = None
+                        if self.prev_detections:
+                            # Find closest previous detection
+                            min_dist = float('inf')
+                            for prev in self.prev_detections:
+                                px1, py1 = prev[:2]
+                                curr_dist = ((x1 * scale_x - px1) ** 2 + (y1 * scale_y - py1) ** 2) ** 0.5
+                                if curr_dist < min_dist:
+                                    min_dist = curr_dist
+                                    prev_bbox = prev
+                        
+                        # Determine status
+                        status = self._determine_status(bbox, prev_bbox)
+                        
+                        detections.append([*bbox, confidence, 0, status])  # [x1, y1, x2, y2, conf, cls, status]
+            
+            # Smooth detections
+            smoothed_detections = self._smooth_detections(detections)
+            
+            # Update previous detections (limit size)
+            self.prev_detections = [d[:4] for d in smoothed_detections][-self.history_size:]
+            
+            # Update detection history (limit size)
+            self.detection_history.append(len(smoothed_detections))
+            self.detection_history = self.detection_history[-self.history_size:]
+            
+            # Periodic cleanup
+            if self.frame_count % self.cleanup_interval == 0:
+                self._cleanup_memory()
+            
+            # Clear intermediate variables
+            del frame_rgb
+            del frame_resized
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+            
+            return smoothed_detections
+            
+        except Exception as e:
+            self.logger.error(f"Error in person detection: {str(e)}")
+            return []
+
+    def process_frame(self, frame):
+        """Process a frame and draw detections on it."""
+        if self.model is None:
+            return frame, "0 persons"
+
+        try:
+            # Run detection
+            detections = self.detect(frame)
+            
+            # Create status text
+            status_text = f"{len(detections)} person{'s' if len(detections) != 1 else ''}"
+            
+            # Create a copy of the frame for drawing
+            frame_copy = frame.copy()
+            
+            # Draw detections
+            for x1, y1, x2, y2, conf, cls, status in detections:
+                # Draw bounding box with thicker lines
+                cv2.rectangle(
+                    frame_copy,
+                    (int(x1), int(y1)),
+                    (int(x2), int(y2)),
+                    (0, 255, 0),  # Green color
+                    2  # Thinner line for better performance
+                )
+                
+                # Draw filled background for text
+                label = f"Person ({status})"
+                (text_width, text_height), _ = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1  # Smaller font
+                )
+                cv2.rectangle(
+                    frame_copy,
+                    (int(x1), int(y1) - text_height - 5),
+                    (int(x1) + text_width, int(y1)),
+                    (0, 255, 0),
+                    -1  # Filled rectangle
+                )
+                
+                # Draw label with status
+                cv2.putText(
+                    frame_copy,
+                    label,
+                    (int(x1), int(y1) - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,  # Smaller font
+                    (0, 0, 0),  # Black text
+                    1  # Thinner text
+                )
+            
+            # Add detailed status text
+            status_details = [det[6] for det in detections]  # Get statuses
+            if status_details:
+                status_text += ": " + ", ".join(status_details)
+            
+            # Clear the original frame to free memory
+            del frame
+            
+            return frame_copy, status_text
+            
+        except Exception as e:
+            self.logger.error(f"Error processing frame: {str(e)}")
+            return frame, "Error"
+
+    def __del__(self):
+        """Cleanup resources."""
+        try:
+            self._cleanup_memory()
+            if hasattr(self, 'model'):
+                del self.model
+        except Exception as e:
+            self.logger.error(f"Error cleaning up person detector: {str(e)}")
