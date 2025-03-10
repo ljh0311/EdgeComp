@@ -16,6 +16,7 @@ from pathlib import Path
 import requests
 from tqdm import tqdm
 import torch
+from torch.cuda.amp import autocast as nullcontext
 
 
 class PersonDetector:
@@ -185,7 +186,7 @@ class PersonDetector:
             progress_bar.close()
             self.logger.info(f"Model downloaded successfully to {model_path}")
             return model_path
-            
+
         except Exception as e:
             self.logger.error(f"Error downloading model: {e}")
             raise
@@ -199,15 +200,29 @@ class PersonDetector:
                 
                 # Initialize model with optimized settings
                 self.model = YOLO(model_path)
-                self.model.to(self.device)
                 
-                if self.device == "cuda":
-                    self.model.model.half()  # Use FP16 for faster inference
-                
-                # Optimize for inference
+                # Configure model parameters before moving to device
                 self.model.conf = 0.3  # Lower confidence threshold for better detection
                 self.model.iou = 0.3   # Lower IoU threshold
                 self.model.max_det = 4  # Limit detections for better performance
+                
+                # Handle device-specific configurations
+                if self.device == "cuda":
+                    # Move model to GPU first
+                    self.model.to(self.device)
+                    
+                    # Enable automatic mixed precision
+                    self.model.amp = True
+                    
+                    # Configure for GPU inference
+                    self.model.model.float()  # Ensure model is in float32 first
+                    torch.backends.cudnn.benchmark = True
+                    if torch.cuda.is_available():
+                        torch.backends.cuda.matmul.allow_tf32 = True
+                        torch.backends.cudnn.allow_tf32 = True
+                else:
+                    # CPU configuration
+                    self.model.to(self.device)
                 
                 # Verify model works with a test input
                 test_frame = np.zeros((32, 32, 3), dtype=np.uint8)
@@ -259,7 +274,19 @@ class PersonDetector:
                 scale = 1.0
 
             # Run detection with optimized settings
-            results = self.model(processed_frame, verbose=False)
+            with torch.cuda.amp.autocast() if self.device == "cuda" else nullcontext():
+                results = self.model(processed_frame, verbose=False)
+            
+            # If we scaled the image, adjust the detection coordinates
+            if scale != 1.0:
+                # Create new scaled boxes instead of modifying the original
+                for r in results:
+                    if r.boxes is not None and len(r.boxes.xyxy) > 0:
+                        # Scale coordinates back to original size
+                        scaled_boxes = r.boxes.xyxy.clone()
+                        scaled_boxes = scaled_boxes / scale
+                        # Store scaled coordinates in a custom attribute
+                        r.boxes.scaled_xyxy = scaled_boxes
             
             # Update metrics
             end_time = time.time()
@@ -271,13 +298,6 @@ class PersonDetector:
                 self._fps = self._frame_count / elapsed
                 self._frame_count = 0
                 self._start_time = end_time
-            
-            # If we scaled the image, adjust the detection coordinates
-            if scale != 1.0:
-                for r in results:
-                    if r.boxes is not None:
-                        # Scale coordinates back to original size
-                        r.boxes.xyxy = r.boxes.xyxy / scale
             
             return results
 
@@ -295,43 +315,55 @@ class PersonDetector:
             detections = self.detect(frame)
             if not detections or len(detections[0].boxes) == 0:
                 return frame
-            
+
             frame_copy = frame.copy()
+            original_h, original_w = frame.shape[:2]
             
             for r in detections:
                 boxes = r.boxes
-                for box in boxes:
-                    if box.cls == 0:  # Person class
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        conf = box.conf[0].cpu().numpy()
+                for i in range(len(boxes)):
+                    if boxes.cls[i] == 0:  # Person class
+                        # Get coordinates and scale them if needed
+                        if hasattr(boxes, 'scaled_xyxy'):
+                            box_coords = boxes.scaled_xyxy[i]
+                        else:
+                            box_coords = boxes.xyxy[i]
+                            # Scale coordinates if frame was resized
+                            if original_h > 416 or original_w > 416:
+                                scale_x = original_w / 416
+                                scale_y = original_h / 416
+                                box_coords[0] *= scale_x
+                                box_coords[1] *= scale_y
+                                box_coords[2] *= scale_x
+                                box_coords[3] *= scale_y
                         
-                        # Optimize drawing operations
-                        x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+                        x1, y1, x2, y2 = map(int, box_coords.cpu().numpy())
+                        conf = float(boxes.conf[i].cpu().numpy())
                         
                         # Draw high-visibility bounding box
-                        # White outer box for maximum contrast
-                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (255, 255, 255), 3)
-                        # Green inner box
-                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        # Draw thick red outline for better visibility
+                        cv2.rectangle(frame_copy, (x1-2, y1-2), (x2+2, y2+2), (0, 0, 255), 4)
+                        # Draw yellow inner box
+                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 255), 2)
                         
                         # Draw efficient label with better visibility
                         label = f"Person {conf:.2f}"
-                        font_scale = 0.5  # Smaller font for Raspberry Pi
-                        thickness = 1
+                        font_scale = 0.8  # Larger font for better visibility
+                        thickness = 2
                         font = cv2.FONT_HERSHEY_SIMPLEX
                         
                         # Get text size
                         (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
                         
-                        # Draw label background (black) for better visibility
-                        cv2.rectangle(frame_copy, 
-                                    (x1, y1 - text_h - 8),
-                                    (x1 + text_w + 4, y1),
-                                    (0, 0, 0), -1)
+                        # Draw label background (semi-transparent)
+                        sub_img = frame_copy[y1-text_h-10:y1, x1:x1+text_w+6]
+                        black_rect = np.zeros(sub_img.shape, dtype=np.uint8)
+                        alpha = 0.7
+                        frame_copy[y1-text_h-10:y1, x1:x1+text_w+6] = cv2.addWeighted(sub_img, 1-alpha, black_rect, alpha, 0)
                         
-                        # Draw text in white for maximum contrast
+                        # Draw white text for maximum visibility
                         cv2.putText(frame_copy, label,
-                                  (x1 + 2, y1 - 5),
+                                  (x1+2, y1-8),
                                   font,
                                   font_scale,
                                   (255, 255, 255),
