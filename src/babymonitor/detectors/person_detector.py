@@ -2,6 +2,7 @@
 Person Detection Module
 =====================
 Handles person detection, tracking, and position analysis using YOLO.
+Supports both CPU and GPU execution.
 """
 
 import cv2
@@ -10,58 +11,221 @@ from ultralytics import YOLO
 import logging
 import sys
 import os
+import time
 from pathlib import Path
+import requests
+from tqdm import tqdm
+import torch
 
 
 class PersonDetector:
-    def __init__(self, model_path=None):
+    # Default model URL and name for automatic download
+    DEFAULT_MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"
+    DEFAULT_MODEL_NAME = "yolov8n.pt"
+    
+    def __init__(self, model_path=None, max_retries=3, force_cpu=False):
         """
         Initialize the person detector.
 
         Args:
             model_path (str, optional): Path to the YOLO model file. If None, uses default.
+            max_retries (int, optional): Maximum number of retries for model initialization.
+            force_cpu (bool, optional): Force CPU usage even if GPU is available.
         """
+        # Setup logging
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+        # Initialize metrics
+        self._fps = 0
+        self._processing_time = 0
+        self._last_frame_time = time.time()
+        self._frame_count = 0
+        self._start_time = time.time()
+
         self.model = None
-
-        # Create a null device to suppress YOLO's output
-        class NullDevice:
-            def write(self, s):
-                pass
-
-            def flush(self):
-                pass
-
-        # Store original stdout
-        self.original_stdout = sys.stdout
-        # Create null device for suppressing output
-        self.null_device = NullDevice()
+        self.max_retries = max_retries
+        self.force_cpu = force_cpu
+        self._select_device()
 
         # Use default model path if none provided
         if model_path is None:
-            model_path = str(Path(__file__).parent.parent / "yolov8n.pt")
+            model_path = str(Path(__file__).parent.parent / self.DEFAULT_MODEL_NAME)
+        
+        # Ensure model exists or download it
+        if not os.path.exists(model_path):
+            try:
+                model_path = self._download_model(model_path)
+            except Exception as e:
+                self.logger.error(f"Failed to download model: {e}")
+                raise FileNotFoundError("Model file not found and download failed")
 
-        self._initialize_model(model_path)
+        self._initialize_model_with_retry(model_path)
 
-    def _initialize_model(self, model_path):
-        """Initialize the YOLO model."""
+    def _select_device(self):
+        """Select the appropriate device (CPU/GPU) based on availability and settings."""
+        if self.force_cpu:
+            self.device = "cpu"
+            self.logger.info("Forced CPU usage")
+            return
+
         try:
-            # Temporarily redirect stdout to suppress YOLO's output
-            sys.stdout = self.null_device
-
-            # Initialize model
-            self.model = YOLO(model_path)
-            self.model.to("cpu")  # Use CPU by default
-
-            # Restore stdout
-            sys.stdout = self.original_stdout
-            self.logger.info("Person detection model initialized successfully")
-
+            if torch.cuda.is_available():
+                self.device = "cuda"
+                torch.backends.cudnn.benchmark = True
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # Convert to GB
+                self.logger.info(f"Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+            else:
+                self.device = "cpu"
+                self.logger.info("No GPU detected, using CPU")
         except Exception as e:
-            # Restore stdout
-            sys.stdout = self.original_stdout
-            self.logger.error(f"Error initializing person detection model: {str(e)}")
+            self.device = "cpu"
+            self.logger.warning(f"Error detecting GPU, falling back to CPU: {e}")
+
+    def switch_device(self, force_cpu=None):
+        """
+        Switch between CPU and GPU execution.
+        
+        Args:
+            force_cpu (bool): If True, force CPU usage. If False, try to use GPU.
+        
+        Returns:
+            bool: True if switch was successful, False otherwise
+        """
+        if force_cpu is not None:
+            self.force_cpu = force_cpu
+        
+        old_device = self.device
+        self._select_device()
+        
+        if old_device != self.device:
+            try:
+                if self.model is not None:
+                    # Clear CUDA cache if switching from GPU
+                    if old_device == "cuda":
+                        torch.cuda.empty_cache()
+                    
+                    # Move model to new device
+                    self.model.to(self.device)
+                    
+                    # Optimize for GPU if applicable
+                    if self.device == "cuda":
+                        self.model.model.half()  # Use FP16 for GPU
+                    
+                    self.logger.info(f"Successfully switched to {self.device}")
+                return True
+            except Exception as e:
+                self.logger.error(f"Error switching device: {e}")
+                self.device = old_device  # Revert to old device
+                return False
+        return True
+
+    def get_device_info(self):
+        """
+        Get current device information.
+        
+        Returns:
+            dict: Device information including type, name, and memory if available
+        """
+        info = {"current_device": self.device}
+        
+        if self.device == "cuda":
+            try:
+                info.update({
+                    "gpu_name": torch.cuda.get_device_name(0),
+                    "gpu_memory_total": f"{torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f}GB",
+                    "gpu_memory_used": f"{torch.cuda.memory_allocated() / (1024**3):.1f}GB"
+                })
+            except Exception as e:
+                self.logger.error(f"Error getting GPU info: {e}")
+        
+        return info
+
+    def get_fps(self):
+        """Get the current FPS."""
+        return self._fps
+
+    def get_processing_time(self):
+        """Get the current frame processing time in milliseconds."""
+        return self._processing_time
+
+    def get_memory_usage(self):
+        """Get current memory usage percentage."""
+        try:
+            import psutil
+            return psutil.Process().memory_percent()
+        except:
+            return 0.0
+
+    def _download_model(self, model_path):
+        """Download the YOLO model if it doesn't exist."""
+        self.logger.info(f"Model not found at {model_path}, attempting to download...")
+        try:
+            # Create parent directories if they don't exist
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            
+            # Download with progress bar
+            response = requests.get(self.DEFAULT_MODEL_URL, stream=True)
+            total_size = int(response.headers.get('content-length', 0))
+            
+            self.logger.info("Downloading YOLOv8n model...")
+            progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True)
+            
+            with open(model_path, 'wb') as f:
+                for data in response.iter_content(chunk_size=1024):
+                    progress_bar.update(len(data))
+                    f.write(data)
+            
+            progress_bar.close()
+            self.logger.info(f"Model downloaded successfully to {model_path}")
+            return model_path
+            
+        except Exception as e:
+            self.logger.error(f"Error downloading model: {e}")
             raise
+
+    def _initialize_model_with_retry(self, model_path):
+        """Initialize the YOLO model with retry mechanism."""
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                self.logger.info(f"Attempting to initialize model (attempt {attempt + 1}/{self.max_retries})")
+                
+                # Initialize model with optimized settings
+                self.model = YOLO(model_path)
+                self.model.to(self.device)
+                
+                if self.device == "cuda":
+                    self.model.model.half()  # Use FP16 for faster inference
+                
+                # Optimize for inference
+                self.model.conf = 0.3  # Lower confidence threshold for better detection
+                self.model.iou = 0.3   # Lower IoU threshold
+                self.model.max_det = 4  # Limit detections for better performance
+                
+                # Verify model works with a test input
+                test_frame = np.zeros((32, 32, 3), dtype=np.uint8)
+                _ = self.model(test_frame, verbose=False)
+                
+                self.logger.info(f"Model initialized successfully on {self.device}")
+                return
+                
+            except Exception as e:
+                last_error = str(e)
+                self.logger.warning(f"Model initialization attempt {attempt + 1} failed: {e}")
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                time.sleep(1)  # Wait before retrying
+        
+        error_msg = f"Failed to initialize model after {self.max_retries} attempts. Last error: {last_error}"
+        self.logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
     def detect(self, frame):
         """
@@ -73,12 +237,48 @@ class PersonDetector:
         Returns:
             list: YOLO results object containing detections
         """
-        if self.model is None:
+        if frame is None or not isinstance(frame, np.ndarray):
+            self.logger.warning("Invalid frame input")
             return []
 
         try:
-            # Run detection
-            results = self.model(frame, verbose=False)
+            start_time = time.time()
+            
+            # Store original dimensions
+            original_h, original_w = frame.shape[:2]
+            
+            # Scale down frame for faster processing if it's large
+            target_size = (416, 416)  # Smaller size for Raspberry Pi
+            if original_h > 416 or original_w > 416:
+                scale = min(416/original_w, 416/original_h)
+                new_w = int(original_w * scale)
+                new_h = int(original_h * scale)
+                processed_frame = cv2.resize(frame, (new_w, new_h))
+            else:
+                processed_frame = frame
+                scale = 1.0
+
+            # Run detection with optimized settings
+            results = self.model(processed_frame, verbose=False)
+            
+            # Update metrics
+            end_time = time.time()
+            self._processing_time = (end_time - start_time) * 1000  # Convert to ms
+            self._frame_count += 1
+            
+            elapsed = end_time - self._start_time
+            if elapsed >= 1.0:  # Update FPS every second
+                self._fps = self._frame_count / elapsed
+                self._frame_count = 0
+                self._start_time = end_time
+            
+            # If we scaled the image, adjust the detection coordinates
+            if scale != 1.0:
+                for r in results:
+                    if r.boxes is not None:
+                        # Scale coordinates back to original size
+                        r.boxes.xyxy = r.boxes.xyxy / scale
+            
             return results
 
         except Exception as e:
@@ -86,51 +286,56 @@ class PersonDetector:
             return []
 
     def process_frame(self, frame):
-        """
-        Process a frame and draw detections on it.
-
-        Args:
-            frame (numpy.ndarray): Input frame
-
-        Returns:
-            numpy.ndarray: Frame with detections drawn
-        """
-        if self.model is None:
+        """Process a frame and draw detections."""
+        if frame is None or not isinstance(frame, np.ndarray):
             return frame
 
         try:
-            # Run detection
+            # Create copy only if we have detections
             detections = self.detect(frame)
-
-            # Draw detections
+            if not detections or len(detections[0].boxes) == 0:
+                return frame
+            
             frame_copy = frame.copy()
+            
             for r in detections:
                 boxes = r.boxes
                 for box in boxes:
                     if box.cls == 0:  # Person class
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                         conf = box.conf[0].cpu().numpy()
-                        cls = box.cls[0].cpu().numpy()
-                        # Draw bounding box
-                        cv2.rectangle(
-                            frame_copy,
-                            (int(x1), int(y1)),
-                            (int(x2), int(y2)),
-                            (0, 255, 0),  # Green color
-                            2,
-                        )
-
-                        # Draw label
+                        
+                        # Optimize drawing operations
+                        x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+                        
+                        # Draw high-visibility bounding box
+                        # White outer box for maximum contrast
+                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (255, 255, 255), 3)
+                        # Green inner box
+                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        
+                        # Draw efficient label with better visibility
                         label = f"Person {conf:.2f}"
-                        cv2.putText(
-                            frame_copy,
-                            label,
-                            (int(x1), int(y1) - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5,
-                            (0, 255, 0),
-                            2,
-                        )
+                        font_scale = 0.5  # Smaller font for Raspberry Pi
+                        thickness = 1
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        
+                        # Get text size
+                        (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
+                        
+                        # Draw label background (black) for better visibility
+                        cv2.rectangle(frame_copy, 
+                                    (x1, y1 - text_h - 8),
+                                    (x1 + text_w + 4, y1),
+                                    (0, 0, 0), -1)
+                        
+                        # Draw text in white for maximum contrast
+                        cv2.putText(frame_copy, label,
+                                  (x1 + 2, y1 - 5),
+                                  font,
+                                  font_scale,
+                                  (255, 255, 255),
+                                  thickness)
 
             return frame_copy
 
@@ -140,6 +345,7 @@ class PersonDetector:
 
     def __del__(self):
         """Cleanup when object is deleted."""
-        # Restore stdout
-        if hasattr(self, "original_stdout"):
-            sys.stdout = self.original_stdout
+        if hasattr(self, 'model') and self.model is not None:
+            del self.model
+            if hasattr(self, 'device') and self.device == "cuda":
+                torch.cuda.empty_cache()
