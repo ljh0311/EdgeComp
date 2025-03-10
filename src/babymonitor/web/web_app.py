@@ -36,10 +36,20 @@ class BabyMonitorWeb:
         self.frame_lock = Lock()
         self.audio_lock = Lock()
         self.thread_lock = Lock()  # For thread management
+        self.metrics_lock = Lock()  # For performance metrics
         
         # Add frame and audio queues with size limits
-        self.frame_queue = Queue(maxsize=10)  # Increased but limited buffer
+        self.frame_queue = Queue(maxsize=10)
         self.audio_queue = Queue(maxsize=10)
+        
+        # Performance metrics storage
+        self.metrics_history = {
+            'fps': [],
+            'frame_time': [],
+            'cpu_usage': [],
+            'memory_usage': []
+        }
+        self.metrics_max_history = 60  # Store 1 minute of history
         
         # Add client tracking
         self.connected_clients = set()
@@ -72,6 +82,9 @@ class BabyMonitorWeb:
 
     def _process_frames(self):
         """Background task to process and emit frames."""
+        # Pre-allocate reusable buffer for frame processing
+        resized_frame = None
+        
         while self.should_run:
             try:
                 if not self.frame_queue.empty():
@@ -84,25 +97,40 @@ class BabyMonitorWeb:
                                     # Resize frame if needed
                                     if frame.shape[1] > 1280:  # If width > 1280
                                         scale = 1280 / frame.shape[1]
-                                        frame = cv2.resize(frame, None, fx=scale, fy=scale)
+                                        new_width = int(frame.shape[1] * scale)
+                                        new_height = int(frame.shape[0] * scale)
+                                        
+                                        # Reuse or create resized frame buffer
+                                        if (resized_frame is None or 
+                                            resized_frame.shape[0] != new_height or 
+                                            resized_frame.shape[1] != new_width):
+                                            resized_frame = cv2.resize(frame, (new_width, new_height),
+                                                                     interpolation=cv2.INTER_NEAREST)
+                                        else:
+                                            cv2.resize(frame, (new_width, new_height),
+                                                      dst=resized_frame,
+                                                      interpolation=cv2.INTER_NEAREST)
+                                        frame_to_encode = resized_frame
+                                    else:
+                                        frame_to_encode = frame
                                     
                                     # Convert frame to JPEG with quality control
-                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                    _, buffer = cv2.imencode('.jpg', frame_to_encode, 
+                                                           [cv2.IMWRITE_JPEG_QUALITY, 80])
                                     frame_data = base64.b64encode(buffer).decode('utf-8')
                                     
                                     # Emit with error handling
                                     try:
                                         self.socketio.emit('frame', {'data': frame_data})
                                         self.last_frame_time = current_time
-                                        self.logger.debug("Frame processed and emitted")  # Debug log
                                     except Exception as e:
                                         self.logger.error(f"Socket.IO emission error: {str(e)}")
                                 except Exception as e:
                                     self.logger.error(f"Frame processing error: {str(e)}")
                 else:
-                    time.sleep(0.01)  # Short sleep when queue is empty
+                    time.sleep(0.001)  # Short sleep when queue is empty
             except Empty:
-                time.sleep(0.01)
+                time.sleep(0.001)
             except Exception as e:
                 self.logger.error(f"Frame thread error: {str(e)}")
                 time.sleep(0.1)
@@ -150,6 +178,17 @@ class BabyMonitorWeb:
         @self.app.route('/')
         def index():
             return render_template('index.html', dev_mode=self.dev_mode)
+
+        @self.app.route('/metrics')
+        def metrics_page():
+            """Render the metrics page."""
+            return render_template('metrics.html')
+
+        @self.app.route('/api/metrics')
+        def get_metrics():
+            """Get current performance metrics."""
+            with self.metrics_lock:
+                return jsonify(self.metrics_history)
 
         @self.app.route('/cameras')
         def get_cameras():
@@ -254,6 +293,12 @@ class BabyMonitorWeb:
                 self.connected_clients.discard(request.sid)
             self.logger.info(f"Client disconnected: {request.sid}")
 
+        @self.socketio.on('request_metrics')
+        def handle_request_metrics():
+            """Handle client request for current metrics."""
+            with self.metrics_lock:
+                self.socketio.emit('metrics_update', self.metrics_history)
+
         @self.socketio.on('get_cameras')
         def handle_get_cameras(data=None):
             try:
@@ -295,7 +340,8 @@ class BabyMonitorWeb:
                     return {'success': False, 'error': 'No camera name provided'}
                 
                 # Stop current camera if it's running
-                if self.monitor_system.camera_enabled:
+                was_enabled = self.monitor_system.camera_enabled
+                if was_enabled:
                     self.monitor_system.toggle_camera()
                 
                 success = self.monitor_system.camera.select_camera(camera_name)
@@ -305,8 +351,14 @@ class BabyMonitorWeb:
                         while not self.frame_queue.empty():
                             self.frame_queue.get_nowait()
                     
+                    # Reset motion detector
+                    if hasattr(self.monitor_system, 'motion_detector'):
+                        self.monitor_system.motion_detector.reset()
+                    
                     # Restart camera if it was enabled
-                    if self.monitor_system.camera_enabled:
+                    if was_enabled:
+                        # Small delay to ensure camera is properly initialized
+                        time.sleep(0.1)
                         self.monitor_system.toggle_camera()
                     
                     # Get current resolution
@@ -317,6 +369,9 @@ class BabyMonitorWeb:
                         'current_resolution': current_res
                     }
                 else:
+                    # If camera selection failed and camera was enabled, try to re-enable it
+                    if was_enabled:
+                        self.monitor_system.toggle_camera()
                     return {'success': False, 'error': f'Failed to select camera: {camera_name}'}
             except Exception as e:
                 self.logger.error(f"Error selecting camera: {str(e)}")
@@ -335,16 +390,36 @@ class BabyMonitorWeb:
                 try:
                     # Parse resolution string (e.g., "640x480")
                     width, height = map(int, resolution.split('x'))
+                    
+                    # Stop camera if running
+                    was_enabled = self.monitor_system.camera_enabled
+                    if was_enabled:
+                        self.monitor_system.toggle_camera()
+                    
                     success = self.monitor_system.camera.set_resolution(f"{width}x{height}")
                     
                     if success:
-                        # Reset frame processing
+                        # Clear frame queue
                         with self.frame_lock:
                             while not self.frame_queue.empty():
                                 self.frame_queue.get_nowait()
+                        
+                        # Reset motion detector
+                        if hasattr(self.monitor_system, 'motion_detector'):
+                            self.monitor_system.motion_detector.reset()
+                        
+                        # Restart camera if it was enabled
+                        if was_enabled:
+                            # Small delay to ensure camera is properly initialized
+                            time.sleep(0.1)
+                            self.monitor_system.toggle_camera()
+                        
                         current_res = self.monitor_system.camera.get_current_resolution()
                         return {'success': True, 'message': f'Resolution set to {current_res}', 'current_resolution': current_res}
                     else:
+                        # If resolution change failed and camera was enabled, try to re-enable it
+                        if was_enabled:
+                            self.monitor_system.toggle_camera()
                         current_res = self.monitor_system.camera.get_current_resolution()
                         return {'success': False, 'error': 'Failed to set resolution', 'current_resolution': current_res}
                 except (ValueError, AttributeError) as e:
@@ -385,27 +460,20 @@ class BabyMonitorWeb:
                 return
                 
             if len(self.connected_clients) == 0:
-                self.logger.debug("No connected clients to receive frame")
-                return
+                return  # Skip processing if no clients
 
-            # Convert frame to JPEG with quality control
-            try:
-                # Resize frame if needed
-                if frame.shape[1] > 1280:  # If width > 1280
-                    scale = 1280 / frame.shape[1]
-                    frame = cv2.resize(frame, None, fx=scale, fy=scale)
-                    self.logger.debug(f"Resized frame to {frame.shape}")
+            # Only queue frame if we're not too backed up
+            if self.frame_queue.qsize() < self.frame_queue.maxsize - 1:
+                self.frame_queue.put_nowait(frame)
+            else:
+                # Clear queue if backed up
+                try:
+                    while not self.frame_queue.empty():
+                        self.frame_queue.get_nowait()
+                    self.frame_queue.put_nowait(frame)  # Add latest frame
+                except Empty:
+                    pass
                 
-                # Convert frame to JPEG
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                frame_data = base64.b64encode(buffer).decode('utf-8')
-                
-                # Emit directly to all connected clients
-                self.socketio.emit('frame', {'data': frame_data})
-                self.logger.debug(f"Frame emitted successfully to {len(self.connected_clients)} clients")
-            except Exception as e:
-                self.logger.error(f"Error processing frame: {str(e)}")
-                self.emit_alert('warning', 'Error processing camera feed', True)
         except Exception as e:
             self.logger.error(f"Error in emit_frame: {str(e)}")
             self.emit_alert('warning', 'Error with camera feed', True)
@@ -471,10 +539,21 @@ class BabyMonitorWeb:
         """Emit emotion detection results to connected clients."""
         try:
             if len(self.connected_clients) > 0:
-                self.socketio.emit('emotion', {
-                    'emotion': emotion,
-                    'confidence': confidence
-                })
+                # Format emotion data
+                emotion_data = {
+                    'emotion': emotion.lower(),  # Ensure lowercase to match frontend
+                    'confidence': confidence,
+                    'timestamp': datetime.now().strftime('%H:%M:%S')
+                }
+                
+                # Emit emotion update
+                self.socketio.emit('emotion', emotion_data)
+                
+                # Emit alert for concerning emotions
+                if emotion.lower() in ['anger', 'fear', 'sadness'] and confidence > 0.7:
+                    self.emit_alert('warning', f'High confidence {emotion.lower()} emotion detected', True)
+                elif emotion.lower() == 'worried' and confidence > 0.8:
+                    self.emit_alert('warning', 'High distress detected', True)
         except Exception as e:
             self.logger.error(f"Error emitting emotion: {str(e)}")
 
@@ -498,7 +577,8 @@ class BabyMonitorWeb:
                 status_data = {
                     'camera_enabled': self.monitor_system.camera_enabled,
                     'audio_enabled': self.monitor_system.audio_enabled,
-                    'emotion_enabled': True if hasattr(self.monitor_system, 'emotion_recognizer') else False,
+                    'emotion_enabled': True if (hasattr(self.monitor_system, 'emotion_recognizer') and 
+                                             self.monitor_system.emotion_recognizer is not None) else False,
                     'detection_enabled': True if hasattr(self.monitor_system, 'person_detector') else False
                 }
             
@@ -506,13 +586,37 @@ class BabyMonitorWeb:
             if status_data:
                 if status_data.get('camera_enabled') and not hasattr(self.monitor_system, 'camera'):
                     self.emit_alert('warning', 'Camera is enabled but not properly initialized', True)
-                if status_data.get('audio_enabled') and not hasattr(self.monitor_system, 'audio_processor'):
-                    self.emit_alert('warning', 'Audio is enabled but not properly initialized', True)
+                if status_data.get('audio_enabled'):
+                    if not hasattr(self.monitor_system, 'audio_processor'):
+                        self.emit_alert('warning', 'Audio is enabled but not properly initialized', True)
+                    if not hasattr(self.monitor_system, 'emotion_recognizer'):
+                        self.emit_alert('warning', 'Emotion recognition is not available', False)
             
             if len(self.connected_clients) > 0:
                 self.socketio.emit('status', status_data)
         except Exception as e:
             self.logger.error(f"Error emitting status: {str(e)}")
+
+    def emit_metrics(self, metrics_data):
+        """Emit performance metrics to connected clients."""
+        try:
+            with self.metrics_lock:
+                # Update metrics history
+                for key, value in metrics_data.items():
+                    if key in self.metrics_history:
+                        self.metrics_history[key].append(value)
+                        # Keep only recent history
+                        if len(self.metrics_history[key]) > self.metrics_max_history:
+                            self.metrics_history[key].pop(0)
+
+                # Emit to connected clients
+                if len(self.connected_clients) > 0:
+                    self.socketio.emit('metrics_update', {
+                        'current': metrics_data,
+                        'history': self.metrics_history
+                    })
+        except Exception as e:
+            self.logger.error(f"Error emitting metrics: {str(e)}")
 
     def start(self):
         """Start the web interface."""
