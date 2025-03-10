@@ -119,14 +119,13 @@ class BabyMonitorSystem:
             # Initialize person detector
             try:
                 model_path = os.path.join(src_dir, "models", "yolov8n.pt")
-                if os.path.exists(model_path):
-                    self.person_detector = PersonDetector(model_path=model_path)
-                    self.initialized_components.append('person_detector')
-                else:
-                    self.logger.warning(f"Person detector model not found at {model_path}")
-                    self.person_detector = None
+                self.person_detector = PersonDetector(model_path=model_path)
+                self.initialized_components.append('person_detector')
+                self.logger.info("Person detector initialized successfully")
             except Exception as e:
                 self.logger.error(f"Failed to initialize person detector: {str(e)}")
+                if not self.only_web and hasattr(self, 'detection_status'):
+                    self.detection_status.configure(text="👀  Detection: Error")
                 self.person_detector = None
 
             # Initialize motion detector
@@ -479,10 +478,7 @@ class BabyMonitorSystem:
                     continue
 
                 # Process frame with person detector if available
-                processed_frame = frame  # Start with original frame
-                detections = []
-                
-                if hasattr(self, "person_detector"):
+                if hasattr(self, "person_detector") and self.person_detector is not None:
                     try:
                         detections = self.person_detector.detect(frame)
                         if not self.only_web and hasattr(self, 'detection_status'):
@@ -491,9 +487,12 @@ class BabyMonitorSystem:
                         self.logger.error(f"Person detection error: {str(e)}")
                         if not self.only_web and hasattr(self, 'detection_status'):
                             self.detection_status.configure(text="👀  Detection: Error")
+                        detections = []
+                else:
+                    detections = []
 
                 # Process frame with motion detector if available
-                if hasattr(self, "motion_detector"):
+                if hasattr(self, "motion_detector") and self.motion_detector is not None:
                     try:
                         processed_frame, rapid_motion, fall_detected = self.motion_detector.detect(frame, detections)
                         
@@ -506,6 +505,9 @@ class BabyMonitorSystem:
                             })
                     except Exception as e:
                         self.logger.error(f"Motion detection error: {str(e)}")
+                        processed_frame = frame
+                else:
+                    processed_frame = frame
 
                 # Update performance metrics
                 frame_count += 1
@@ -923,7 +925,7 @@ class DevWindow:
         # Draw dB value
         canvas.create_text(width//2, height//2, text=f"{db_level:.1f} dB", 
                          fill="white", font=("Arial", 14, "bold"))
-
+        
     def update_detection_visualization(self, frame, detections):
         """Update detection visualization."""
         if frame is None:
