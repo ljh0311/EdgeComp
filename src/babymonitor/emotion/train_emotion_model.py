@@ -205,8 +205,8 @@ def main():
     model = model.to(device)
     
     # Create datasets
-    tsv_file = 'data/IEMOCAP_4.tsv'
-    audio_dir = 'data/IEMOCAP_full_release_audio'
+    tsv_file = 'src\\babymonitor\\emotion\\data\\IEMOCAP_4.tsv'
+    audio_dir = 'src\\babymonitor\\emotion\\data\\IEMOCAP_full_release_audio'
     
     # Split data
     df = pd.read_csv(tsv_file, sep='\t')

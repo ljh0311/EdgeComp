@@ -38,7 +38,7 @@ from babymonitor.detectors.person_detector import PersonDetector
 from babymonitor.audio.audio_processor import AudioProcessor
 from babymonitor.emotion.emotion import EmotionRecognizer
 from babymonitor.web.web_app import BabyMonitorWeb
-from .config import Config
+from config import Config
 from babymonitor.detectors.motion_detector import MotionDetector
 
 # Configure logging
