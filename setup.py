@@ -155,8 +155,8 @@ def download_file(url, filename):
 
 def setup_models():
     """Setup and download required model files."""
-    models_dir = Path("models")
-    models_dir.mkdir(exist_ok=True)
+models_dir = Path("models")
+models_dir.mkdir(exist_ok=True)
 
     # Model URLs and their local paths
     MODEL_FILES = {
@@ -175,7 +175,7 @@ def setup_models():
     if missing_custom:
         print("\nWarning: The following custom model files need to be downloaded separately:")
         for model in missing_custom:
-            print(f"  - {model}")
+        print(f"  - {model}")
         print("\nPlease follow the instructions in README.md to obtain these models.")
 
 def setup_environment():
@@ -279,12 +279,12 @@ if __name__ == "__main__":
         main()
     else:
         # Run setuptools setup when arguments are provided
-        setup(
-            name="babymonitor",
-            version="1.0.0",
-            packages=find_packages(where="src"),
-            package_dir={"": "src"},
-            install_requires=[
+setup(
+    name="babymonitor",
+    version="1.0.0",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    install_requires=[
                 "opencv-python>=4.5.0",
                 "numpy>=1.19.0",
                 "torch>=1.9.0",
@@ -301,31 +301,31 @@ if __name__ == "__main__":
                 "pytest>=6.0.0",
                 "black>=21.0.0",
                 "flake8>=3.9.0"
-            ],
-            entry_points={
-                "console_scripts": [
-                    "babymonitor=babymonitor.core.main:main",
-                ],
-            },
-            include_package_data=True,
-            package_data={
-                "babymonitor.web": ["templates/*", "static/*"],
-                "edge_comp": ["models/*.pt", "models/*.pth"],
-            },
-            python_requires=">=3.8",
-            author="Your Name",
-            author_email="your.email@example.com",
-            description="A comprehensive baby monitoring system with video, audio, and emotion detection",
-            long_description=open("README.md").read(),
-            long_description_content_type="text/markdown",
-            url="https://github.com/yourusername/babymonitor",
-            classifiers=[
-                "Development Status :: 3 - Alpha",
-                "Intended Audience :: End Users/Desktop",
-                "License :: OSI Approved :: MIT License",
-                "Programming Language :: Python :: 3",
-                "Programming Language :: Python :: 3.8",
-                "Programming Language :: Python :: 3.9",
-                "Programming Language :: Python :: 3.10",
-            ],
-        ) 
+    ],
+    entry_points={
+        "console_scripts": [
+            "babymonitor=babymonitor.core.main:main",
+        ],
+    },
+    include_package_data=True,
+    package_data={
+        "babymonitor.web": ["templates/*", "static/*"],
+        "edge_comp": ["models/*.pt", "models/*.pth"],
+    },
+    python_requires=">=3.8",
+    author="Your Name",
+    author_email="your.email@example.com",
+    description="A comprehensive baby monitoring system with video, audio, and emotion detection",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/yourusername/babymonitor",
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: End Users/Desktop",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+    ],
+) 

@@ -16,7 +16,7 @@ from pathlib import Path
 import requests
 from tqdm import tqdm
 import torch
-from torch.cuda.amp import autocast as nullcontext
+from torch.cuda.amp import autocast
 
 
 class PersonDetector:
@@ -48,6 +48,7 @@ class PersonDetector:
         self._last_frame_time = time.time()
         self._frame_count = 0
         self._start_time = time.time()
+        self._warmup_done = False
 
         self.model = None
         self.max_retries = max_retries
@@ -67,6 +68,9 @@ class PersonDetector:
                 raise FileNotFoundError("Model file not found and download failed")
 
         self._initialize_model_with_retry(model_path)
+        
+        # Warmup the model
+        self._warmup_model()
 
     def _select_device(self):
         """Select the appropriate device (CPU/GPU) based on availability and settings."""
@@ -79,6 +83,8 @@ class PersonDetector:
             if torch.cuda.is_available():
                 self.device = "cuda"
                 torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # Convert to GB
                 self.logger.info(f"Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
@@ -191,6 +197,29 @@ class PersonDetector:
             self.logger.error(f"Error downloading model: {e}")
             raise
 
+    def _warmup_model(self):
+        """Warm up the model with a few inference passes."""
+        if self._warmup_done:
+            return
+            
+        self.logger.info("Warming up model...")
+        dummy_input = torch.zeros((1, 3, 640, 640)).to(self.device)
+        if self.device == "cuda":
+            dummy_input = dummy_input.half()
+            
+        try:
+            with torch.no_grad():
+                for _ in range(3):  # 3 warmup iterations
+                    if self.device == "cuda":
+                        with autocast():
+                            _ = self.model(dummy_input)
+                    else:
+                        _ = self.model(dummy_input)
+            self._warmup_done = True
+            torch.cuda.synchronize() if self.device == "cuda" else None
+        except Exception as e:
+            self.logger.warning(f"Warmup failed: {e}")
+
     def _initialize_model_with_retry(self, model_path):
         """Initialize the YOLO model with retry mechanism."""
         last_error = None
@@ -201,28 +230,18 @@ class PersonDetector:
                 # Initialize model with optimized settings
                 self.model = YOLO(model_path)
                 
-                # Configure model parameters before moving to device
-                self.model.conf = 0.3  # Lower confidence threshold for better detection
-                self.model.iou = 0.3   # Lower IoU threshold
-                self.model.max_det = 4  # Limit detections for better performance
+                # Optimize model parameters
+                self.model.conf = 0.3
+                self.model.iou = 0.3
+                self.model.max_det = 4
+                self.model.agnostic_nms = True  # Class-agnostic NMS
                 
-                # Handle device-specific configurations
+                # Move model to device and optimize
+                self.model.to(self.device)
                 if self.device == "cuda":
-                    # Move model to GPU first
-                    self.model.to(self.device)
-                    
-                    # Enable automatic mixed precision
+                    self.model.model.half()  # FP16 for GPU
                     self.model.amp = True
-                    
-                    # Configure for GPU inference
-                    self.model.model.float()  # Ensure model is in float32 first
                     torch.backends.cudnn.benchmark = True
-                    if torch.cuda.is_available():
-                        torch.backends.cuda.matmul.allow_tf32 = True
-                        torch.backends.cudnn.allow_tf32 = True
-                else:
-                    # CPU configuration
-                    self.model.to(self.device)
                 
                 # Verify model works with a test input
                 test_frame = np.zeros((32, 32, 3), dtype=np.uint8)
@@ -250,7 +269,7 @@ class PersonDetector:
             frame (numpy.ndarray): Input frame
 
         Returns:
-            list: YOLO results object containing detections
+            list: List of detections, each containing [x1, y1, x2, y2, confidence, class_id]
         """
         if frame is None or not isinstance(frame, np.ndarray):
             self.logger.warning("Invalid frame input")
@@ -263,7 +282,7 @@ class PersonDetector:
             original_h, original_w = frame.shape[:2]
             
             # Scale down frame for faster processing if it's large
-            target_size = (416, 416)  # Smaller size for Raspberry Pi
+            target_size = (416, 416)  # Smaller size for better performance
             if original_h > 416 or original_w > 416:
                 scale = min(416/original_w, 416/original_h)
                 new_w = int(original_w * scale)
@@ -277,16 +296,27 @@ class PersonDetector:
             with torch.cuda.amp.autocast() if self.device == "cuda" else nullcontext():
                 results = self.model(processed_frame, verbose=False)
             
-            # If we scaled the image, adjust the detection coordinates
-            if scale != 1.0:
-                # Create new scaled boxes instead of modifying the original
-                for r in results:
-                    if r.boxes is not None and len(r.boxes.xyxy) > 0:
-                        # Scale coordinates back to original size
-                        scaled_boxes = r.boxes.xyxy.clone()
-                        scaled_boxes = scaled_boxes / scale
-                        # Store scaled coordinates in a custom attribute
-                        r.boxes.scaled_xyxy = scaled_boxes
+            # Process results into a standardized format
+            detections = []
+            if len(results) > 0:  # Check if we have any results
+                result = results[0]  # Get first result
+                if hasattr(result, 'boxes') and len(result.boxes) > 0:
+                    boxes = result.boxes
+                    for box in boxes:
+                        # Get box coordinates
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        
+                        # Get confidence and class
+                        conf = float(box.conf[0].cpu().numpy())
+                        cls_id = int(box.cls[0].cpu().numpy())
+                        
+                        # Only include person detections (class 0)
+                        if cls_id == 0 and conf > 0.3:  # Confidence threshold
+                            # Scale coordinates back to original size if needed
+                            if scale != 1.0:
+                                x1, y1, x2, y2 = [coord / scale for coord in [x1, y1, x2, y2]]
+                            
+                            detections.append([x1, y1, x2, y2, conf, cls_id])
             
             # Update metrics
             end_time = time.time()
@@ -299,76 +329,31 @@ class PersonDetector:
                 self._frame_count = 0
                 self._start_time = end_time
             
-            return results
+            return detections
 
         except Exception as e:
             self.logger.error(f"Error during person detection: {str(e)}")
             return []
 
     def process_frame(self, frame):
-        """Process a frame and draw detections efficiently."""
+        """
+        Process a frame and return detections without drawing.
+
+        Args:
+            frame (numpy.ndarray): Input frame
+
+        Returns:
+            tuple: (frame, detections) where detections is a list of [x1, y1, x2, y2, confidence, class_id]
+        """
         if frame is None or not isinstance(frame, np.ndarray):
-            return frame
+            return frame, []
 
         try:
-            # Get detections without modifying frame yet
             detections = self.detect(frame)
-            if not detections or len(detections[0].boxes) == 0:
-                return frame
-
-            # Create copy only once if we have detections
-            frame_copy = frame.copy()
-            h, w = frame.shape[:2]
-            
-            for r in detections:
-                boxes = r.boxes
-                for i in range(len(boxes)):
-                    if boxes.cls[i] == 0:  # Person class
-                        # Get coordinates
-                        box = boxes.xyxy[i].cpu().numpy()
-                        
-                        # Ensure coordinates are within frame boundaries
-                        x1 = max(0, min(int(box[0]), w - 1))
-                        y1 = max(0, min(int(box[1]), h - 1))
-                        x2 = max(0, min(int(box[2]), w - 1))
-                        y2 = max(0, min(int(box[3]), h - 1))
-                        
-                        # Skip if box is too small
-                        if x2 - x1 < 10 or y2 - y1 < 10:
-                            continue
-                        
-                        # Draw bounding box efficiently
-                        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        
-                        # Add label with confidence
-                        conf = float(boxes.conf[i])
-                        label = f"Person {i+1} ({conf:.2f})"
-                        
-                        # Calculate label position
-                        label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                        label_y = max(y1, label_size[1] + 10)
-                        
-                        # Draw label background
-                        cv2.rectangle(frame_copy, 
-                                   (x1, label_y - label_size[1] - 10),
-                                   (x1 + label_size[0], label_y),
-                                   (0, 255, 0), 
-                                   -1)  # Filled rectangle
-                        
-                        # Draw label text
-                        cv2.putText(frame_copy,
-                                  label,
-                                  (x1, label_y - 5),
-                                  cv2.FONT_HERSHEY_SIMPLEX,
-                                  0.5,
-                                  (0, 0, 0),
-                                  1)
-
-            return frame_copy
-
+            return frame, detections
         except Exception as e:
             self.logger.error(f"Error processing frame: {str(e)}")
-            return frame
+            return frame, []
 
     def __del__(self):
         """Cleanup when object is deleted."""
