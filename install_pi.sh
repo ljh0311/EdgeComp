@@ -1,65 +1,231 @@
 #!/bin/bash
 
-echo "🔧 Installing Baby Monitor System for Raspberry Pi 400..."
+# Baby Monitor System - Raspberry Pi Installer
+# ============================================
+# This script installs the Baby Monitor System on Raspberry Pi devices.
 
-# Update system
-echo "📦 Updating system packages..."
-sudo apt-get update
-sudo apt-get upgrade -y
+# Exit on error
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Display banner
+echo -e "${BLUE}"
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║                                                          ║"
+echo "║       BABY MONITOR SYSTEM - RASPBERRY PI INSTALLER       ║"
+echo "║                                                          ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+# Check if running on Raspberry Pi
+if ! grep -q "Raspberry Pi" /proc/cpuinfo; then
+    echo -e "${RED}Error: This script is intended for Raspberry Pi systems only.${NC}"
+    echo -e "Current platform: $(uname -a)"
+    exit 1
+fi
+
+echo -e "${GREEN}Installing Baby Monitor System dependencies for Raspberry Pi...${NC}"
+
+# Function to show progress
+show_progress() {
+    local message=$1
+    echo -e "${CYAN}[SETUP]${NC} $message"
+}
+
+# Update package list and upgrade existing packages
+show_progress "Updating system packages..."
+sudo apt-get update && sudo apt-get upgrade -y
 
 # Install system dependencies
-echo "📦 Installing system dependencies..."
+show_progress "Installing system dependencies..."
 sudo apt-get install -y \
     python3-pip \
+    python3-venv \
+    python3-dev \
     python3-picamera2 \
+    libatlas-base-dev \
+    libjasper-dev \
+    libhdf5-dev \
+    libhdf5-serial-dev \
     libportaudio2 \
     portaudio19-dev \
-    python3-opencv \
-    libopencv-dev \
-    python3-venv \
+    libsndfile1 \
+    libilmbase-dev \
+    libopenexr-dev \
+    libgstreamer1.0-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
     git
 
 # Setup camera module
-echo "📸 Setting up camera..."
+show_progress "Setting up camera module..."
 sudo modprobe bcm2835-v4l2
 # Add module to load at boot
 if ! grep -q "bcm2835-v4l2" /etc/modules; then
     echo "bcm2835-v4l2" | sudo tee -a /etc/modules
 fi
 
-# Create Python virtual environment
-echo "🐍 Creating Python virtual environment..."
+# Create virtual environment
+show_progress "Creating Python virtual environment..."
 python3 -m venv venv
 source venv/bin/activate
 
 # Upgrade pip
-echo "⬆️ Upgrading pip..."
+show_progress "Upgrading pip..."
 pip install --upgrade pip
 
-# Install Python dependencies
-echo "📦 Installing Python dependencies..."
-pip install wheel
-pip install numpy==1.21.0  # Specific version for Pi compatibility
-pip install -r requirements.txt
+# Install Python dependencies optimized for Pi
+show_progress "Installing Python packages..."
+pip install \
+    numpy==1.21.0 \
+    opencv-python-headless==4.5.3.56 \
+    --extra-index-url https://www.piwheels.org/simple \
+    torch==1.10.0 \
+    torchaudio==0.10.0 \
+    librosa==0.8.1 \
+    sounddevice==0.4.3 \
+    soundfile==0.10.3.post1 \
+    flask==2.0.1 \
+    flask-socketio==5.1.1 \
+    psutil==5.8.0 \
+    python-dotenv==0.19.0
 
-# Create models directory if it doesn't exist
-mkdir -p models
+# Install PyQt5 for GUI
+show_progress "Installing PyQt5 for GUI..."
+pip install PyQt5
 
+# Create required directories
+show_progress "Creating required directories..."
+mkdir -p models/emotion
+mkdir -p logs
+mkdir -p data
+mkdir -p config
+
+# Download models
+show_progress "Downloading models..."
 # Download YOLOv8 nano model if not exists
 if [ ! -f "models/yolov8n.pt" ]; then
-    echo "📥 Downloading YOLOv8 nano model..."
+    echo "Downloading YOLOv8 nano model..."
     wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -P models/
 fi
 
+# Download Haar Cascade models
+for model in "haarcascade_frontalface_default.xml" "haarcascade_eye.xml" "haarcascade_upperbody.xml" "haarcascade_fullbody.xml"; do
+    if [ ! -f "models/$model" ]; then
+        echo "Downloading $model..."
+        wget "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/$model" -P models/
+    fi
+done
+
+# Create configuration files
+show_progress "Creating configuration files..."
+
+# Create camera config
+cat > config/camera.json << EOL
+{
+    "default_camera_id": 0,
+    "resolution": {
+        "width": 640,
+        "height": 480
+    },
+    "fps": 30,
+    "flip_horizontal": false,
+    "flip_vertical": false
+}
+EOL
+
+# Create audio config
+cat > config/audio.json << EOL
+{
+    "default_device_id": 0,
+    "sample_rate": 16000,
+    "channels": 1,
+    "chunk_size": 1024,
+    "enable_noise_reduction": true
+}
+EOL
+
+# Create detection config
+cat > config/detection.json << EOL
+{
+    "person_threshold": 0.5,
+    "emotion_threshold": 0.7,
+    "detection_types": ["face", "upper_body", "full_body"],
+    "enable_tracking": true
+}
+EOL
+
+# Create .env file
+show_progress "Creating environment file..."
+cat > .env << EOL
+# Baby Monitor System Environment Configuration
+# Generated by install_pi.sh
+
+# Camera Settings
+CAMERA_INDEX=0
+CAMERA_RESOLUTION=640x480
+CAMERA_FPS=30
+
+# Audio Settings
+AUDIO_DEVICE_INDEX=0
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHANNELS=1
+
+# Detection Settings
+DETECTION_THRESHOLD=0.5
+EMOTION_THRESHOLD=0.7
+
+# System Settings
+GPU_ENABLED=false
+LOG_LEVEL=INFO
+WEB_HOST=0.0.0.0
+WEB_PORT=5000
+
+# Paths
+MODEL_PATH=models/
+LOG_PATH=logs/
+DATA_PATH=data/
+EOL
+
+# Create desktop shortcut
+show_progress "Creating desktop shortcut..."
+DESKTOP_PATH="$HOME/Desktop"
+SHORTCUT_PATH="$DESKTOP_PATH/BabyMonitor.desktop"
+
+mkdir -p "$DESKTOP_PATH"
+
+cat > "$SHORTCUT_PATH" << EOL
+[Desktop Entry]
+Type=Application
+Name=Baby Monitor
+Comment=Baby Monitor System
+Exec=$(pwd)/venv/bin/python $(pwd)/main.py
+Icon=$(pwd)/src/babymonitor/web/static/img/logo.png
+Terminal=false
+Categories=Utility;
+EOL
+
+# Make executable
+chmod +x "$SHORTCUT_PATH"
+
 # Set up environment variables
-echo "⚙️ Setting up environment variables..."
 echo 'export PYTHONPATH=$PYTHONPATH:$(pwd)' >> venv/bin/activate
-echo 'export USE_CUDA=0' >> venv/bin/activate
 
-# Create log directory
-mkdir -p logs
-
-echo "✅ Installation complete!"
-echo "To start the system:"
-echo "1. Activate the virtual environment: source venv/bin/activate"
-echo "2. Run the system: python src/main.py" 
+echo -e "${GREEN}✅ Installation complete!${NC}"
+echo -e "${YELLOW}To start the system:${NC}"
+echo -e "1. Activate the virtual environment: ${CYAN}source venv/bin/activate${NC}"
+echo -e "2. Run the system: ${CYAN}python main.py${NC}"
+echo -e "3. Or use the desktop shortcut created on your desktop"
+echo -e "\n${PURPLE}Thank you for installing the Baby Monitor System!${NC}" 
