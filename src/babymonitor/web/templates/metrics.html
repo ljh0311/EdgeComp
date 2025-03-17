@@ -6,6 +6,8 @@
     <title>Baby Monitor - Performance Metrics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -241,33 +243,88 @@
         background-color: #888;
         cursor: not-allowed;
       }
+      /* Add navbar styles */
+      .navbar {
+        background-color: #2d2d2d;
+        border-bottom: 2px solid #4CAF50;
+        padding: 1rem;
+        margin-bottom: 20px;
+      }
+      
+      .navbar-brand {
+        color: #4CAF50 !important;
+        font-size: 1.5rem;
+        font-weight: bold;
+      }
+      
+      .nav-link {
+        color: #ffffff !important;
+        margin: 0 1rem;
+        transition: color 0.3s;
+      }
+      
+      .nav-link:hover {
+        color: #4CAF50 !important;
+      }
+      
+      .nav-link.active {
+        color: #4CAF50 !important;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg">
+      <div class="container">
+        <a class="navbar-brand" href="/">
+          <i class="fas fa-baby"></i> Baby Monitor
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav">
+            <li class="nav-item">
+              <a class="nav-link" href="/">
+                <i class="fas fa-home"></i> Home
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link active" href="/metrics">
+                <i class="fas fa-chart-line"></i> Metrics
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
     <h1>Performance Metrics</h1>
 
-    <!-- Device Control Section -->
-    <div class="device-control">
-      <h2 class="section-title" style="margin-top: 0;">Device Control</h2>
-      <div class="device-info">
-        <div class="device-stat">
-          <div class="device-stat-label">Current Device</div>
-          <div id="current-device" class="device-stat-value">Loading...</div>
+      <!-- Device Control Section -->
+      <div class="device-control">
+        <h2 class="section-title" style="margin-top: 0;">Device Control</h2>
+        <div class="device-info">
+          <div class="device-stat">
+            <div class="device-stat-label">Current Device</div>
+            <div id="current-device" class="device-stat-value">Loading...</div>
+          </div>
+          <div class="device-stat">
+            <div class="device-stat-label">GPU Name</div>
+            <div id="gpu-name" class="device-stat-value">N/A</div>
+          </div>
+          <div class="device-stat">
+            <div class="device-stat-label">GPU Memory</div>
+            <div id="gpu-memory" class="device-stat-value">N/A</div>
+          </div>
         </div>
-        <div class="device-stat">
-          <div class="device-stat-label">GPU Name</div>
-          <div id="gpu-name" class="device-stat-value">N/A</div>
-        </div>
-        <div class="device-stat">
-          <div class="device-stat-label">GPU Memory</div>
-          <div id="gpu-memory" class="device-stat-value">N/A</div>
+        <div class="device-controls">
+          <button id="switch-cpu" class="switch-button" onclick="switchDevice(true)">Switch to CPU</button>
+          <button id="switch-gpu" class="switch-button" onclick="switchDevice(false)">Switch to GPU</button>
         </div>
       </div>
-      <div class="device-controls">
-        <button id="switch-cpu" class="switch-button" onclick="switchDevice(true)">Switch to CPU</button>
-        <button id="switch-gpu" class="switch-button" onclick="switchDevice(false)">Switch to GPU</button>
-      </div>
-    </div>
 
     <div class="metrics-container">
       <div class="metric-card">
@@ -288,41 +345,54 @@
       </div>
     </div>
 
-    <h2 class="section-title">Performance Charts</h2>
-    <div class="chart-container">
-      <div id="fps-chart" class="chart-box"></div>
-      <div id="frame-time-chart" class="chart-box"></div>
-      <div id="system-resources-chart" class="chart-box"></div>
-    </div>
+      <h2 class="section-title">Performance Charts</h2>
+      <div class="chart-container">
+        <div id="fps-chart" class="chart-box"></div>
+        <div id="frame-time-chart" class="chart-box"></div>
+        <div id="system-resources-chart" class="chart-box"></div>
+      </div>
 
-    <div class="dev-tools-container">
-      <h2 class="section-title">Developer Tools</h2>
-      <div class="dev-tools-grid">
-        <div class="dev-tool-card">
-          <div class="dev-tool-title">Camera Performance Test</div>
-          <div class="dev-tool-description">Test raw camera performance and FPS without processing.</div>
-          <button class="dev-tool-button" onclick="runTest('camera')">Run Test</button>
-        </div>
-
-        <div class="dev-tool-card">
-          <div class="dev-tool-title">Motion Detection Test</div>
-          <div class="dev-tool-description">Test motion detection performance and accuracy.</div>
-          <button class="dev-tool-button" onclick="runTest('motion')">Run Test</button>
-        </div>
-
-        <div class="dev-tool-card">
-          <div class="dev-tool-title">Full Performance Test</div>
-          <div class="dev-tool-description">Run comprehensive performance tests on all components.</div>
-          <button class="dev-tool-button" onclick="runTest('full')">Run Test</button>
-        </div>
-
-        <div class="dev-tool-card">
-          <div class="dev-tool-title">Debug Mode</div>
-          <div class="dev-tool-description">Launch application in debug mode with developer window.</div>
-          <button class="dev-tool-button" onclick="runTest('debug')">Launch Debug</button>
+      <div class="dev-tools-container">
+        <h2 class="section-title">Developer Tools</h2>
+        <div class="dev-tools-grid">
+          <div class="dev-tool-card">
+            <div class="dev-tool-title">Unit Tests</div>
+            <div class="dev-tool-description">Run unit tests for person detection and emotion recognition</div>
+            <a href="/run_test?type=unit" class="dev-tool-button" onclick="runTest('unit'); return false;">Run Unit Tests</a>
+          </div>
+          <div class="dev-tool-card">
+            <div class="dev-tool-title">Performance Tests</div>
+            <div class="dev-tool-description">Run system performance tests including camera and detection</div>
+            <a href="/run_test?type=performance" class="dev-tool-button" onclick="runTest('performance'); return false;">Run Performance Tests</a>
+          </div>
+          <div class="dev-tool-card">
+            <div class="dev-tool-title">Integration Tests</div>
+            <div class="dev-tool-description">Run full system integration tests</div>
+            <a href="/run_test?type=integration" class="dev-tool-button" onclick="runTest('integration'); return false;">Run Integration Tests</a>
+          </div>
         </div>
       </div>
-    </div>
+
+      <!-- Add Person Detection Metrics Section -->
+      <h2 class="section-title">Person Detection Metrics</h2>
+      <div class="metrics-container">
+        <div class="metric-card">
+          <div class="metric-label">People Detected</div>
+          <div id="people-count" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Detection Confidence</div>
+          <div id="detection-confidence" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Motion Status</div>
+          <div id="motion-status" class="metric-value">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Fall Detection</div>
+          <div id="fall-status" class="metric-value">--</div>
+        </div>
+      </div>
 
     <!-- Test Results Modal -->
     <div id="testModal" class="modal" style="display: none;">
@@ -334,16 +404,95 @@
         <div class="modal-body">
           <div id="testStatus" class="test-status"></div>
           <pre id="testOutput" class="test-output"></pre>
+          </div>
         </div>
       </div>
     </div>
 
     <script>
-      // Connect to Socket.IO with the correct path
+      // Connect to Socket.IO with the correct path and configuration
       const socket = io({
         path: '/socket.io',
-        transports: ['websocket', 'polling']
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 60000,
+        autoConnect: true
       });
+      
+      // Connection status indicator
+      let connectionStatus = {
+        connected: false,
+        reconnecting: false
+      };
+      
+      // Socket.IO connection handlers
+      socket.on('connect', () => {
+        console.log('Connected to server');
+        connectionStatus.connected = true;
+        connectionStatus.reconnecting = false;
+        
+        // Request initial data
+        socket.emit('request_device_info');
+        socket.emit('request_metrics');
+        
+        // Show connection status
+        updateConnectionStatus('Connected', 'status-good');
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('Disconnected from server');
+        connectionStatus.connected = false;
+        
+        // Show disconnected status
+        updateConnectionStatus('Disconnected', 'status-critical');
+      });
+      
+      socket.on('reconnecting', (attemptNumber) => {
+        console.log('Attempting to reconnect...', attemptNumber);
+        connectionStatus.reconnecting = true;
+        
+        // Show reconnecting status
+        updateConnectionStatus('Reconnecting...', 'status-warning');
+      });
+      
+      socket.on('reconnect_failed', () => {
+        console.log('Failed to reconnect');
+        connectionStatus.reconnecting = false;
+        
+        // Show connection failed status
+        updateConnectionStatus('Connection Failed', 'status-critical');
+      });
+      
+      function updateConnectionStatus(message, className) {
+        // Add connection status to the page if it doesn't exist
+        let statusElement = document.getElementById('connection-status');
+        if (!statusElement) {
+          const container = document.querySelector('.device-info');
+          const statusDiv = document.createElement('div');
+          statusDiv.className = 'device-stat';
+          statusDiv.innerHTML = `
+            <div class="device-stat-label">Connection Status</div>
+            <div id="connection-status" class="device-stat-value"></div>
+          `;
+          container.appendChild(statusDiv);
+          statusElement = document.getElementById('connection-status');
+        }
+        
+        // Update status
+        statusElement.textContent = message;
+        statusElement.className = `device-stat-value ${className}`;
+      }
+      
+      // Periodic data update with connection check
+      setInterval(() => {
+        if (connectionStatus.connected && !connectionStatus.reconnecting) {
+          socket.emit('request_device_info');
+          socket.emit('request_metrics');
+        }
+      }, 1000);
       
       // Device control functions
       function updateDeviceInfo(info) {
@@ -545,19 +694,19 @@
           });
           
           // Update charts with new data
-          Plotly.update('fps-chart', {
+        Plotly.update('fps-chart', {
             x: [timestamps],
-            y: [history.fps]
+          y: [history.fps]
           });
-        
-          Plotly.update('frame-time-chart', {
+      
+        Plotly.update('frame-time-chart', {
             x: [timestamps],
-            y: [history.frame_time]
+          y: [history.frame_time]
           });
-        
-          Plotly.update('system-resources-chart', {
+      
+        Plotly.update('system-resources-chart', {
             x: [timestamps, timestamps],
-            y: [history.cpu_usage, history.memory_usage]
+          y: [history.cpu_usage, history.memory_usage]
           });
         }
       }
@@ -584,49 +733,66 @@
       }
       
       // Socket.IO event handlers
-      socket.on('connect', () => {
-        console.log('Connected to server');
-        // Request initial device info and metrics
-        socket.emit('request_device_info');
-        socket.emit('request_metrics');
-      });
-      
-      socket.on('disconnect', () => {
-        console.log('Disconnected from server');
-      });
-      
       socket.on('metrics_update', (data) => {
         console.log('Received metrics update:', data);  // Debug log
         updateMetrics(data);
       });
       
-      // Request updates periodically
-      setInterval(() => {
-        if (socket.connected) {
-          socket.emit('request_device_info');
-          socket.emit('request_metrics');
+      // Add socket listeners for person detection metrics
+      socket.on('detection', (data) => {
+        console.log('Received detection data:', data);
+        document.getElementById('people-count').textContent = data.people_count;
+        
+        // Update confidence if available
+        if (data.detections && data.detections.length > 0) {
+          const avgConfidence = data.detections.reduce((sum, det) => sum + det.confidence, 0) / data.detections.length;
+          document.getElementById('detection-confidence').textContent = avgConfidence.toFixed(2);
+        } else {
+          document.getElementById('detection-confidence').textContent = '--';
         }
-      }, 1000);
+        
+        // Update motion status
+        document.getElementById('motion-status').textContent = data.motion_status || '--';
+        
+        // Update fall status
+        const fallStatus = data.fall_detected ? 'FALL DETECTED!' : 'No Falls';
+        document.getElementById('fall-status').textContent = fallStatus;
+        if (data.fall_detected) {
+          document.getElementById('fall-status').classList.add('status-critical');
+        } else {
+          document.getElementById('fall-status').classList.remove('status-critical');
+        }
+      });
       
-      // Test handling functions
+      // Update test handling to include new test types
       function runTest(testType) {
-        // Disable all test buttons
-        document.querySelectorAll('.dev-tool-button').forEach((btn) => {
-          btn.disabled = true
-        })
-      
-        // Show modal with running status
-        const modal = document.getElementById('testModal')
-        const status = document.getElementById('testStatus')
-        const output = document.getElementById('testOutput')
-      
-        modal.style.display = 'block'
-        status.className = 'test-status running'
-        status.textContent = `Running ${testType} test...`
-        output.textContent = ''
-      
-        // Emit test request
-        socket.emit('run_test', { type: testType })
+        const testModal = document.getElementById('testModal');
+        const testStatus = document.getElementById('testStatus');
+        const testOutput = document.getElementById('testOutput');
+        
+        testModal.style.display = 'block';
+        testStatus.className = 'test-status running';
+        testStatus.textContent = 'Running test...';
+        testOutput.textContent = '';
+        
+        const testPaths = {
+          'unit': '/tests/unit/test_person_detection.py',
+          'performance': '/tests/integration/test_system_performance.py',
+          'integration': '/tests/integration/test_system_performance.py --full'
+        };
+        
+        fetch(`/run_test?type=${testType}&path=${testPaths[testType]}`)
+          .then(response => response.json())
+          .then(data => {
+            testStatus.className = `test-status ${data.success ? 'success' : 'error'}`;
+            testStatus.textContent = data.success ? 'Test completed successfully' : 'Test failed';
+            testOutput.textContent = data.output;
+          })
+          .catch(error => {
+            testStatus.className = 'test-status error';
+            testStatus.textContent = 'Error running test';
+            testOutput.textContent = error.toString();
+          });
       }
       
       function closeModal() {

@@ -40,9 +40,8 @@ class AudioProcessor:
         self.format = self.config.get('format', 'paFloat32')
         self.use_callback = self.config.get('use_callback', False)  # Default to blocking mode
         
-        # Initialize audio processing components
+        # Initialize device
         self.device = torch.device(config.get('device', 'cpu'))
-        self.setup_model()
         
         # Sound classification labels and thresholds
         self.emotion_labels = ['cry', 'laugh', 'babble', 'background']
@@ -51,6 +50,9 @@ class AudioProcessor:
             'laugh': 0.5,
             'babble': 0.5
         }
+        
+        # Initialize audio processing components
+        self.setup_model()
         
         self.logger.info("Audio processor initialized")
 

@@ -14,13 +14,14 @@ import logging
 src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 sys.path.insert(0, src_path)
 
-# Import and run the web application
-from web_app import app, socketio, monitor
+# Import the BabyMonitorSystem
+from babymonitor.core.main import BabyMonitorSystem
 
 def signal_handler(signum, frame):
     """Handle shutdown signals."""
     print("\nShutting down Baby Monitor System...")
-    monitor.stop()
+    if 'monitor' in globals():
+        monitor.stop()
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -30,10 +31,21 @@ if __name__ == "__main__":
     
     try:
         print("Starting Baby Monitor System...")
+        # Initialize the system in web-only mode
+        monitor = BabyMonitorSystem(dev_mode=False, only_local=False, only_web=True)
+        
         print("Access the web interface at http://localhost:5000")
         print("Press Ctrl+C to stop")
-        socketio.run(app, debug=False, host='0.0.0.0', port=5000)
+        
+        # Start the monitor system (this will start the web interface)
+        monitor.start()
+        
     except KeyboardInterrupt:
         print("\nShutting down Baby Monitor System...")
         monitor.stop()
-        sys.exit(0) 
+        sys.exit(0)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        if 'monitor' in locals():
+            monitor.stop()
+        sys.exit(1) 

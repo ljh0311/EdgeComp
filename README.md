@@ -97,15 +97,33 @@ edge_comp/
 
 2. **Start the Application**
    ```bash
-   # Web Interface
-   python src/web/web_app.py
+   # Run the Baby Monitor Example (uses lightweight detector by default)
+   python src/examples/baby_monitor_example.py
    
-   # Desktop Application
-   python src/main.py
+   # Use YOLOv8 detector instead
+   python src/examples/baby_monitor_example.py --detector yolov8
    
-   # Development Mode
-   python src/main.py --dev
+   # Adjust camera and resolution
+   python src/examples/baby_monitor_example.py --camera 0 --resolution 640x480 --threads 4
    ```
+
+3. **Access the Web Interface**
+   - Open a browser and navigate to: http://localhost:5000
+   - You can switch between detectors in the web interface
+
+## Detector Options
+
+### Lightweight Detector (Default)
+- Optimized for CPU usage
+- Ideal for resource-constrained devices like Raspberry Pi
+- Lower resource usage but still good accuracy
+- Uses TensorFlow Lite for efficient inference
+
+### YOLOv8 Detector
+- Higher accuracy person detection
+- Requires more computational resources
+- Better for desktop/laptop with decent CPU or GPU
+- Supports GPU acceleration if available
 
 ## Component Testing
 

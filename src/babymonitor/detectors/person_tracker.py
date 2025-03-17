@@ -1,7 +1,8 @@
 """
 Person Tracking Module
-===================
-Wraps PersonDetector with status tracking capabilities.
+---------------------
+Implements person tracking with status tracking capabilities.
+This module wraps PersonDetector with additional tracking functionality.
 """
 
 import logging
@@ -15,54 +16,76 @@ import cv2
 import platform
 import psutil
 from threading import Lock
+from typing import Dict, List, Tuple, Optional, Any
+from .base_detector import BaseDetector
 
-class PersonTracker:
+# Configure logging
+logger = logging.getLogger(__name__)
+
+class PersonTracker(BaseDetector):
     """Tracks person status and history using optimized PersonDetector."""
     
-    def __init__(self, model_path=None, force_cpu=None):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, 
+                 model_path: Optional[str] = None, 
+                 threshold: float = 0.5,
+                 force_cpu: Optional[bool] = None):
+        """Initialize the person tracker.
+        
+        Args:
+            model_path: Path to the detection model
+            threshold: Detection confidence threshold
+            force_cpu: Whether to force CPU usage
+        """
+        super().__init__(threshold=threshold)
         
         # Auto-detect platform and set appropriate defaults
         self.platform = platform.system()
-        self.device = self._detect_platform()
+        self.device_type = self._detect_platform()
         
         # Initialize detector with platform-specific settings
-        self.detector = PersonDetector(model_path=model_path, force_cpu=force_cpu)
+        self.detector = PersonDetector(model_path=model_path, threshold=threshold, force_cpu=force_cpu)
         
         # Status tracking with minimal history
-        self.detection_history = deque(maxlen=10)   # Reduced history size
+        self.detection_history = deque(maxlen=5)   # Minimal history
         self.prev_detections = []
-        self.history_size = 2  # Minimal history size
+        self.history_size = 2
         
         # Status determination thresholds
         self.lying_ratio_threshold = 1.5
         self.movement_threshold = 20
         self.fall_threshold = 0.6
-        self.fall_detection_frames = 3
+        self.fall_detection_frames = 2  # Reduced frames needed for fall detection
         
         # Performance optimization
-        self.frame_skip = 3              # Initial frame skip
-        self.min_frame_skip = 2
-        self.max_frame_skip = 15
-        self.frame_count = 0
-        self.processing_times = deque(maxlen=30)
-        self.last_frame_time = time.time()
-        self.target_fps = 15
+        self.frame_skip = 1
+        self.min_frame_skip = 1
+        self.max_frame_skip = 3          # Further reduced for smoother video
         
         # Thread safety
         self.lock = Lock()
         
         # Performance monitoring
         self.last_performance_check = time.time()
-        self.performance_check_interval = 5.0
+        self.performance_check_interval = 0.5  # More frequent checks
         
         # Frame processing optimization
         self.scale_factor = 1.0
-        self.last_resize = None
-        self.resize_cache = {}
+        self.min_scale_factor = 0.75
+        self.max_scale_factor = 1.0
+        self.resize_cache = None
+        self.last_resize_dims = None
         
-    def _detect_platform(self):
-        """Detect platform and set appropriate configuration."""
+        # Last processed results
+        self.last_motion_status = 'unknown'
+        
+        logger.info(f"Person tracker initialized for {self.device_type} platform")
+        
+    def _detect_platform(self) -> str:
+        """Detect platform and set appropriate configuration.
+        
+        Returns:
+            Platform type string
+        """
         system = platform.system().lower()
         machine = platform.machine().lower()
         
@@ -72,7 +95,32 @@ class PersonTracker:
             return "raspberry_pi"
         return "windows" if system == 'windows' else "generic"
 
-    def _adjust_frame_skip(self, current_fps):
+    def _resize_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Efficiently resize frame using simplified caching.
+        
+        Args:
+            frame: Input frame
+            
+        Returns:
+            Resized frame
+        """
+        if self.scale_factor == 1.0:
+            return frame
+            
+        h, w = frame.shape[:2]
+        new_dims = (w, h, self.scale_factor)
+        
+        # Only resize if dimensions changed
+        if new_dims != self.last_resize_dims:
+            new_w = int(w * self.scale_factor)
+            new_h = int(h * self.scale_factor)
+            interpolation = cv2.INTER_AREA if self.scale_factor < 1.0 else cv2.INTER_LINEAR
+            self.resize_cache = cv2.resize(frame, (new_w, new_h), interpolation=interpolation)
+            self.last_resize_dims = new_dims
+            
+        return self.resize_cache
+
+    def _adjust_frame_skip(self):
         """Dynamically adjust frame skip based on performance metrics."""
         current_time = time.time()
         if current_time - self.last_performance_check < self.performance_check_interval:
@@ -82,232 +130,243 @@ class PersonTracker:
         
         # Get system metrics
         cpu_percent = psutil.cpu_percent()
-        mem_percent = psutil.virtual_memory().percent
+        current_fps = self.fps
+        target_fps = getattr(self, 'target_fps', 25)
         
         # Adjust parameters based on performance
-        if current_fps < self.target_fps * 0.7 or cpu_percent > 70:
-            self.frame_skip = min(self.frame_skip + 2, self.max_frame_skip)
-            if current_fps < self.target_fps * 0.5:
-                self.scale_factor = max(0.5, self.scale_factor - 0.1)
-        elif current_fps > self.target_fps * 1.3 and cpu_percent < 50:
-            self.frame_skip = max(self.frame_skip - 1, self.min_frame_skip)
-            self.scale_factor = min(1.0, self.scale_factor + 0.1)
+        if current_fps < target_fps * 0.7 or cpu_percent > 80:  # More aggressive adjustment
+            self.frame_skip = min(self.frame_skip + 1, self.max_frame_skip)
+            if current_fps < target_fps * 0.4:  # More aggressive scaling
+                self.scale_factor = max(self.min_scale_factor, self.scale_factor - 0.1)
+        elif current_fps > target_fps * 1.3 and cpu_percent < 65:  # More aggressive improvement
+            if self.frame_skip > self.min_frame_skip:
+                self.frame_skip = max(self.frame_skip - 1, self.min_frame_skip)
+            elif self.scale_factor < self.max_scale_factor:
+                self.scale_factor = min(self.max_scale_factor, self.scale_factor + 0.1)
 
-    def _determine_status(self, bbox, prev_bbox=None):
-        """Determine person's status based on position and movement."""
-        x1, y1, x2, y2 = bbox
-        height = y2 - y1
-        width = x2 - x1
-        aspect_ratio = width / height if height > 0 else 0
+    def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
+        """Process a frame and return detection results.
         
-        # Quick status checks
-        if aspect_ratio > self.lying_ratio_threshold:
-            return "lying"
+        Args:
+            frame: Input frame
             
-        if prev_bbox is None:
-            return "seated"
-            
-        prev_x1, prev_y1, prev_x2, prev_y2 = prev_bbox
-        movement = abs(x1 - prev_x1) + abs(y1 - prev_y1)
+        Returns:
+            Dict containing processed frame and detection results
+        """
+        start_time = time.time()
         
-        if movement > self.movement_threshold:
-            if self.frame_count % self.frame_skip == 0:
-                prev_height = prev_y2 - prev_y1
-                height_change = abs(height - prev_height) / max(height, prev_height)
-                position_change = abs(y2 - prev_y2)
-                
-                if height_change > self.fall_threshold and position_change > self.movement_threshold:
-                    return "falling"
-            return "moving"
-            
-        return "seated"
+        if frame is None or not isinstance(frame, np.ndarray):
+            return {
+                'frame': frame, 
+                'detections': [], 
+                'motion_status': 'invalid_frame',
+                'fps': self.fps
+            }
 
-    def _resize_frame(self, frame):
-        """Efficiently resize frame using caching."""
-        if self.scale_factor == 1.0:
-            return frame
-            
-        h, w = frame.shape[:2]
-        cache_key = (w, h, self.scale_factor)
-        
-        if cache_key != self.last_resize:
-            new_w = int(w * self.scale_factor)
-            new_h = int(h * self.scale_factor)
-            self.resize_cache = cv2.resize(frame, (new_w, new_h))
-            self.last_resize = cache_key
-            return self.resize_cache
-        
-        return cv2.resize(frame, (int(w * self.scale_factor), int(h * self.scale_factor)))
-
-    def process_frame(self, frame):
-        """Process a frame and draw detections with status."""
         try:
-            if frame is None or not isinstance(frame, np.ndarray):
-                return {'frame': frame, 'detections': [], 'status_text': "No valid frame"}
-
-            frame_start = time.time()
             self.frame_count += 1
             
+            # Skip frames for performance
+            if self.frame_count % self.frame_skip != 0 and hasattr(self, 'last_frame'):
+                return {
+                    'frame': self.last_frame,
+                    'detections': self.prev_detections,
+                    'motion_status': self.last_motion_status,
+                    'frame_skip': self.frame_skip,
+                    'fps': self.fps
+                }
+            
             # Resize frame if needed
-            frame = self._resize_frame(frame)
+            if self.scale_factor != 1.0:
+                process_frame = self._resize_frame(frame)
+            else:
+                process_frame = frame
             
-            # Step 1: Person Detection
-            detections = self.detector.detect(frame)
+            # Process frame with detector
+            detector_result = self.detector.process_frame(process_frame)
             
-            # Step 2: Process Detections
-            processed_detections = []
-            frame_copy = frame.copy()  # Single copy for drawing
+            # Store last processed frame (only the frame with bounding boxes)
+            self.last_frame = detector_result['frame']
             
-            with self.lock:
-                for det in detections:
-                    try:
-                        x1, y1, x2, y2, conf, cls_id = det
-                        
-                        # Skip low confidence detections
-                        if conf < 0.3:
-                            continue
-                            
-                        # Find matching previous detection
-                        prev_bbox = None
-                        if self.prev_detections:
-                            min_dist = float('inf')
-                            for prev in self.prev_detections:
-                                px1, py1 = prev[:2]
-                                curr_dist = ((x1 - px1) ** 2 + (y1 - py1) ** 2) ** 0.5
-                                if curr_dist < min_dist:
-                                    min_dist = curr_dist
-                                    prev_bbox = prev
-                        
-                        # Step 3: Status Detection
-                        status = self._determine_status([x1, y1, x2, y2], prev_bbox)
-                        
-                        # Add to processed detections
-                        processed_detections.append({
-                            'bbox': [x1, y1, x2, y2],
-                            'confidence': conf,
-                            'class_id': cls_id,
-                            'status': status
-                        })
-                        
-                        # Draw detection
-                        color = {
-                            'falling': (0, 0, 255),
-                            'lying': (255, 0, 0),
-                            'moving': (0, 255, 0),
-                            'seated': (255, 255, 0)
-                        }.get(status, (0, 255, 0))
-                        
-                        cv2.rectangle(frame_copy, 
-                                    (int(x1), int(y1)), 
-                                    (int(x2), int(y2)), 
-                                    color, 2)
-                        
-                        # Only draw labels for important states
-                        if status in ['falling', 'lying']:
-                            cv2.putText(frame_copy,
-                                      f"{status} ({conf:.2f})",
-                                      (int(x1), int(y1 - 5)),
-                                      cv2.FONT_HERSHEY_SIMPLEX,
-                                      0.5,
-                                      color,
-                                      1)
-                    
-                    except Exception as e:
-                        self.logger.warning(f"Error processing detection: {str(e)}")
-                        continue
-                
-                # Update tracking data
-                if len(processed_detections) > 0:
+            # Extract detections
+            detections = detector_result['detections']
+            
+            # Analyze motion and status changes
+            motion_status = self._analyze_motion(detections)
+            self.last_motion_status = motion_status
+            
+            # Update tracking data efficiently
+            if detections:
+                with self.lock:
                     self.detection_history.append({
                         'timestamp': datetime.now(),
-                        'detections': processed_detections
+                        'detections': detections,
+                        'motion_status': motion_status
                     })
-                    self.prev_detections = [d['bbox'] for d in processed_detections][-self.history_size:]
+                    self.prev_detections = detections
             
-            # Calculate FPS and adjust parameters
-            processing_time = time.time() - frame_start
-            current_fps = 1.0 / processing_time if processing_time > 0 else 0
-            self._adjust_frame_skip(current_fps)
+            # Calculate FPS
+            frame_time = time.time() - start_time
+            self.frame_times.append(frame_time)
+            if len(self.frame_times) > self.max_frame_history:
+                self.frame_times.pop(0)
+            self.fps = 1.0 / (sum(self.frame_times) / len(self.frame_times))
             
-            # Create minimal status text
-            status_text = f"{len(processed_detections)} detected"
-            if any(d['status'] == 'falling' for d in processed_detections):
-                status_text += " - FALL DETECTED!"
-            
-            # Add performance overlay
-            cv2.putText(frame_copy,
-                       f"FPS: {current_fps:.1f} Skip: {self.frame_skip} Scale: {self.scale_factor:.1f}",
-                       (10, 20),
-                       cv2.FONT_HERSHEY_SIMPLEX,
-                       0.5,
-                       (255, 255, 255),
-                       1)
+            # Adjust frame skip based on performance
+            self._adjust_frame_skip()
             
             return {
-                'frame': frame_copy,
-                'detections': processed_detections,
-                'status_text': status_text,
+                'frame': self.last_frame,
+                'detections': detections,
+                'motion_status': motion_status,
                 'frame_skip': self.frame_skip,
-                'processing_time': processing_time * 1000,  # Convert to ms
-                'fps': current_fps
+                'fps': self.fps
             }
             
         except Exception as e:
-            self.logger.error(f"Error processing frame: {str(e)}")
+            logger.error(f"Error in process_frame: {str(e)}")
             return {
                 'frame': frame,
                 'detections': [],
-                'status_text': "Error processing frame",
+                'motion_status': 'error',
                 'frame_skip': self.frame_skip,
-                'processing_time': 0,
                 'fps': 0
             }
 
-    def get_status_summary(self, time_range=None):
-        """Get summary of status history within time range."""
+    def _analyze_motion(self, current_detections: List[Dict]) -> str:
+        """Analyze motion and status changes between frames.
+        
+        Args:
+            current_detections: List of current detections
+            
+        Returns:
+            Motion status string
+        """
+        if not self.detection_history or not current_detections:
+            return 'no_motion'
+            
+        try:
+            # Get previous detections
+            prev_entry = self.detection_history[-1]
+            prev_detections = prev_entry['detections']
+            
+            if not prev_detections:
+                return 'new_detection'
+            
+            # Compare current and previous detections
+            max_movement = 0
+            status_changed = False
+            
+            for curr_det in current_detections:
+                if 'bbox' not in curr_det:
+                    continue
+                    
+                curr_bbox = curr_det['bbox']
+                curr_x = (curr_bbox[0] + curr_bbox[2]) / 2  # Current center x
+                curr_y = (curr_bbox[1] + curr_bbox[3]) / 2  # Current center y
+                curr_status = curr_det.get('status', 'detected')
+                
+                # Find closest previous detection
+                min_dist = float('inf')
+                prev_status = None
+                
+                for prev_det in prev_detections:
+                    if 'bbox' not in prev_det:
+                        continue
+                        
+                    prev_bbox = prev_det['bbox']
+                    prev_x = (prev_bbox[0] + prev_bbox[2]) / 2
+                    prev_y = (prev_bbox[1] + prev_bbox[3]) / 2
+                    
+                    # Calculate distance between detections
+                    dist = np.sqrt((curr_x - prev_x)**2 + (curr_y - prev_y)**2)
+                    if dist < min_dist:
+                        min_dist = dist
+                        prev_status = prev_det.get('status', 'detected')
+                
+                # Update maximum movement
+                max_movement = max(max_movement, min_dist)
+                
+                # Check if status changed
+                if prev_status and prev_status != curr_status:
+                    status_changed = True
+            
+            # Determine motion status
+            if max_movement > self.movement_threshold:
+                return 'rapid_motion'
+            elif status_changed:
+                return 'status_changed'
+            else:
+                return 'normal'
+                
+        except Exception as e:
+            logger.error(f"Error analyzing motion: {str(e)}")
+            return 'error'
+
+    def get_status_summary(self, time_range=None) -> Dict[str, float]:
+        """Get summary of status history within time range.
+        
+        Args:
+            time_range: Optional time range to consider
+            
+        Returns:
+            Dict with status summary
+        """
         if not self.detection_history:
             return {'no_detection': 1.0}
             
         if time_range is None:
-            relevant_history = self.detection_history
+            relevant_history = list(self.detection_history)
         else:
             cutoff_time = datetime.now() - time_range
-            relevant_history = [
-                entry for entry in self.detection_history 
-                if entry['timestamp'] > cutoff_time
-            ]
+            relevant_history = [h for h in self.detection_history if h['timestamp'] > cutoff_time]
         
-        # Count occurrences of each status
-        total_count = len(relevant_history)
+        if not relevant_history:
+            return {'no_detection': 1.0}
+        
+        # Count status occurrences
         status_counts = {}
-        
         for entry in relevant_history:
-            statuses = [det['status'] for det in entry['detections']]
-            for status in statuses:
-                status_counts[status] = status_counts.get(status, 0) + 1
+            status = entry['motion_status']
+            status_counts[status] = status_counts.get(status, 0) + 1
         
         # Convert to percentages
-        return {
-            status: count / total_count 
-            for status, count in status_counts.items()
-        }
+        total = len(relevant_history)
+        return {status: count / total for status, count in status_counts.items()}
 
-    def get_activity_timeline(self, time_range=None):
-        """Get timeline of activity within time range."""
+    def get_activity_timeline(self, time_range=None) -> List[Dict]:
+        """Get timeline of activity within time range.
+        
+        Args:
+            time_range: Optional time range to consider
+            
+        Returns:
+            List of activity entries
+        """
         if time_range is None:
             return list(self.detection_history)
-            
+        
         cutoff_time = datetime.now() - time_range
-        return [
-            entry for entry in self.detection_history 
-            if entry['timestamp'] > cutoff_time
-        ]
+        return [h for h in self.detection_history if h['timestamp'] > cutoff_time]
 
-    def __del__(self):
-        """Cleanup resources."""
+    def cleanup(self):
+        """Clean up resources."""
         try:
-            # Clear histories
+            # Clean up detector
+            if hasattr(self, 'detector') and self.detector is not None:
+                self.detector.cleanup()
+            
+            # Clear history
             self.detection_history.clear()
-            self.prev_detections.clear()
+            self.prev_detections = []
+            
+            # Clear cache
+            self.resize_cache = None
+            self.last_resize_dims = None
+            
         except Exception as e:
-            self.logger.error(f"Error cleaning up person tracker: {str(e)}") 
+            logger.error(f"Error cleaning up person tracker: {str(e)}")
+    
+    def __del__(self):
+        """Destructor to clean up resources."""
+        self.cleanup() 

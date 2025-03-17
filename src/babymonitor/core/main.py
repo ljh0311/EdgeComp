@@ -37,7 +37,7 @@ from babymonitor.camera.camera import Camera
 from babymonitor.detectors.person_tracker import PersonDetector
 from babymonitor.audio.audio_processor import AudioProcessor
 from babymonitor.emotion.emotion import EmotionRecognizer
-from babymonitor.web.web_app import BabyMonitorWeb
+from babymonitor.core.web_app import BabyMonitorWeb
 from .config import Config
 
 # Configure logging
@@ -510,7 +510,9 @@ class BabyMonitorSystem:
                     and self.person_detector is not None
                 ):
                     try:
-                        detections = self.person_detector.detect(frame)
+                        result = self.person_detector.process_frame(frame)
+                        processed_frame = result['frame']
+                        detections = result.get('detections', [])
                         if not self.only_web and hasattr(self, "detection_status"):
                             self.detection_status.configure(
                                 text=f"👀  Detection: {len(detections)} people"
@@ -519,8 +521,10 @@ class BabyMonitorSystem:
                         self.logger.error(f"Person detection error: {str(e)}")
                         if not self.only_web and hasattr(self, "detection_status"):
                             self.detection_status.configure(text="👀  Detection: Error")
+                        processed_frame = frame
                         detections = []
                 else:
+                    processed_frame = frame
                     detections = []
 
                 # Process frame with motion detector if available
@@ -529,19 +533,18 @@ class BabyMonitorSystem:
                     and self.motion_detector is not None
                 ):
                     try:
-                        processed_frame, rapid_motion, fall_detected = (
-                            self.motion_detector.detect(frame, detections)
-                        )
+                        motion_result = self.motion_detector.detect(processed_frame, detections)
+                        rapid_motion = motion_result.get('rapid_motion', False)
+                        fall_detected = motion_result.get('fall_detected', False)
 
                         # Update web interface with detection results
                         if self.web_app is not None:
-                            self.web_app.emit_detection(
-                                {
-                                    "people_count": len(detections),
-                                    "rapid_motion": rapid_motion,
-                                    "fall_detected": fall_detected,
-                                }
-                            )
+                            self.web_app.emit_detection({
+                                "people_count": len(detections),
+                                "rapid_motion": rapid_motion,
+                                "fall_detected": fall_detected,
+                                "detections": detections
+                            })
                     except Exception as e:
                         self.logger.error(f"Motion detection error: {str(e)}")
                         processed_frame = frame

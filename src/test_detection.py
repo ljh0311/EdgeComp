@@ -11,21 +11,91 @@ import numpy as np
 from pathlib import Path
 import sys
 import os
-
-# Add the src directory to Python path
-src_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, src_dir)
-
-from flask import Flask, Response, render_template_string
-import threading
+import platform
+from threading import Thread, Lock
 from queue import Queue
 import logging
+from flask import Flask, Response, render_template_string
 from babymonitor.detectors.person_tracker import PersonTracker
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Add the src directory to Python path
+src_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, src_dir)
+
+class VideoStream:
+    """Threaded camera stream optimized for both Raspberry Pi and Windows"""
+    def __init__(self, resolution=(640, 480), framerate=30):
+        self.stream = cv2.VideoCapture(0)
+        self.resolution = resolution
+        self.framerate = framerate
+        
+        # Platform specific optimizations
+        if platform.system() == "Linux":
+            # Raspberry Pi optimizations
+            self.stream.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        
+        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+        self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+        self.stream.set(cv2.CAP_PROP_FPS, framerate)
+        
+        self.frame = None
+        self.grabbed = False
+        self.stopped = False
+        self.lock = Lock()
+        
+        # Motion detection parameters
+        self.prev_frame = None
+        self.motion_threshold = 25
+        self.min_motion_area = 500
+        
+    def start(self):
+        Thread(target=self.update, args=()).start()
+        return self
+        
+    def update(self):
+        while True:
+            if self.stopped:
+                self.stream.release()
+                return
+                
+            grabbed, frame = self.stream.read()
+            if grabbed:
+                with self.lock:
+                    self.frame = frame
+                    self.grabbed = grabbed
+                    
+                    # Update motion detection
+                    if self.prev_frame is None:
+                        self.prev_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        continue
+                        
+                    # Motion detection
+                    current_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    frame_delta = cv2.absdiff(self.prev_frame, current_frame)
+                    thresh = cv2.threshold(frame_delta, self.motion_threshold, 255, cv2.THRESH_BINARY)[1]
+                    thresh = cv2.dilate(thresh, None, iterations=2)
+                    contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    motion_detected = False
+                    for contour in contours:
+                        if cv2.contourArea(contour) > self.min_motion_area:
+                            motion_detected = True
+                            break
+                            
+                    self.motion_detected = motion_detected
+                    self.prev_frame = current_frame
+                    
+    def read(self):
+        with self.lock:
+            return self.grabbed, self.frame, self.motion_detected
+            
+    def stop(self):
+        self.stopped = True
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -136,39 +206,69 @@ DEBUG_TEMPLATE = """
 </html>
 """
 
-def process_frames(cap, person_tracker, debug=False):
-    """Process frames from camera and update debug information."""
-    global stop_signal, debug_info
+def process_frames(video_stream, person_tracker, debug=False):
+    """Process frames from the video stream"""
+    global debug_info, stop_signal
+    fps_start_time = time.time()
+    fps = 0
+    frame_count = 0
     
     while not stop_signal:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        grabbed, frame, motion_detected = video_stream.read()
+        if not grabbed:
+            continue
             
-        try:
-            # Process frame with person tracking (includes motion and fall detection)
-            result = person_tracker.process_frame(frame)
-            processed_frame = result['frame']
+        frame_start_time = time.time()
+        
+        # Only run person detection if motion is detected (optimization)
+        if motion_detected:
+            # Run person detection
+            detections = person_tracker.detect(frame)
             
-            # Update debug information
-            if debug:
-                debug_info.update({
-                    'fps': person_tracker.detector.get_fps(),
-                    'frame_time': person_tracker.detector.get_processing_time(),
-                    'confidence': person_tracker.detector.model.conf if person_tracker.detector.model else 0,
-                    'device': person_tracker.detector.device,
-                    'resolution': f"{frame.shape[1]}x{frame.shape[0]}"
-                })
-            
-            # Put processed frame in queue
-            if not frame_queue.full():
-                frame_queue.put(processed_frame)
+            # Draw detections
+            for detection in detections:
+                bbox = detection['bbox']
+                conf = detection['confidence']
                 
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
-            if not frame_queue.full():
-                frame_queue.put(frame)  # Show original frame on error
-
+                # Draw bounding box
+                cv2.rectangle(frame, 
+                            (int(bbox[0]), int(bbox[1])), 
+                            (int(bbox[2]), int(bbox[3])), 
+                            (0, 255, 0), 2)
+                            
+                # Draw confidence
+                label = f"Person: {conf:.2f}"
+                cv2.putText(frame, label, 
+                          (int(bbox[0]), int(bbox[1] - 10)),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Calculate FPS
+        frame_count += 1
+        if frame_count >= 30:  # Update FPS every 30 frames
+            fps = frame_count / (time.time() - fps_start_time)
+            fps_start_time = time.time()
+            frame_count = 0
+            
+        # Update debug info
+        if debug:
+            frame_time = (time.time() - frame_start_time) * 1000
+            debug_info.update({
+                'fps': f"{fps:.1f}",
+                'frame_time': f"{frame_time:.1f}",
+                'motion_detected': str(motion_detected),
+                'resolution': f"{frame.shape[1]}x{frame.shape[0]}"
+            })
+            
+            # Draw debug info on frame
+            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
+                      cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                      
+        # Put frame in queue for streaming
+        try:
+            frame_queue.put_nowait(frame)
+        except:
+            pass
+            
 @app.route('/')
 def index():
     """Render the main page."""
@@ -193,40 +293,45 @@ def debug_info_route():
     return debug_info
 
 def main():
-    parser = argparse.ArgumentParser(description='Person Detection Debug Interface')
-    parser.add_argument('--dev', action='store_true', help='Enable debug interface')
-    parser.add_argument('--camera', type=int, default=0, help='Camera index')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dev', action='store_true',
+                      help='Enable debug interface')
+    parser.add_argument('--resolution', default='640x480',
+                      help='Camera resolution (WxH)')
+    parser.add_argument('--fps', type=int, default=30,
+                      help='Target FPS')
     args = parser.parse_args()
     
-    # Initialize camera
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
-        logger.error("Error: Could not open camera")
-        return
+    # Parse resolution
+    width, height = map(int, args.resolution.split('x'))
+    
+    # Initialize video stream
+    video_stream = VideoStream(resolution=(width, height),
+                            framerate=args.fps).start()
     
     # Initialize person tracker
     person_tracker = PersonTracker()
     
-    # Set debug mode in Flask app
-    app.config['DEBUG_MODE'] = args.dev
-    
-    # Start frame processing thread
-    process_thread = threading.Thread(target=process_frames, 
-                                    args=(cap, person_tracker, args.dev))
-    process_thread.daemon = True
-    process_thread.start()
-    
     try:
-        # Run Flask app
-        app.run(host='0.0.0.0', port=5000)
+        # Start frame processing thread
+        logger.info("Starting frame processing thread...")
+        process_thread = Thread(target=process_frames,
+                             args=(video_stream, person_tracker, args.dev))
+        process_thread.daemon = True
+        process_thread.start()
+        
+        # Start Flask server
+        logger.info("Starting Flask server...")
+        app.run(host='0.0.0.0', port=8000, threaded=True)
+        
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("Stopping application...")
+        
     finally:
         # Cleanup
-        global stop_signal
         stop_signal = True
-        process_thread.join()
-        cap.release()
+        video_stream.stop()
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main() 
