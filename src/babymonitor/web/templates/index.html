@@ -592,6 +592,51 @@
         .loading-overlay {
             display: none;
         }
+
+        .emotion-bars {
+            margin-top: 15px;
+        }
+        
+        .emotion-bar-container {
+            margin-bottom: 10px;
+        }
+        
+        .emotion-bar-container label {
+            display: block;
+            margin-bottom: 5px;
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .progress {
+            margin-bottom: 8px;
+            border-radius: 5px;
+        }
+        
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        
+        .footer {
+            position: relative;
+            bottom: 0;
+            width: 100%;
+            color: #ffffff;
+        }
+        
+        .footer .credits {
+            font-size: 14px;
+            color: #4CAF50;
+        }
+        
+        .footer .version {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .footer i {
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -659,11 +704,6 @@
                             <div class="monitoring-label">People Detected</div>
                         </div>
                         <div class="monitoring-item">
-                            <i class="fas fa-running monitoring-icon"></i>
-                            <div class="monitoring-value" id="movementStatus">None</div>
-                            <div class="monitoring-label">Movement Status</div>
-                        </div>
-                        <div class="monitoring-item">
                             <i class="fas fa-volume-up monitoring-icon"></i>
                             <div class="monitoring-value" id="decibelValue">0 dB</div>
                             <div class="monitoring-label">Sound Level</div>
@@ -671,6 +711,31 @@
                                 <div class="decibel-bar" id="decibelBar"></div>
                             </div>
                             <div class="decibel-value" id="decibelRange">Quiet</div>
+                        </div>
+                        <div class="monitoring-item">
+                            <i class="fas fa-smile monitoring-icon"></i>
+                            <div class="monitoring-value" id="currentEmotion">Neutral</div>
+                            <div class="monitoring-label">Current Emotion</div>
+                            <div class="emotion-bars">
+                                <div class="emotion-bar-container">
+                                    <label>Happy</label>
+                                    <div class="progress" style="height: 10px; background-color: #333;">
+                                        <div id="happyBar" class="progress-bar bg-success" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                <div class="emotion-bar-container">
+                                    <label>Neutral</label>
+                                    <div class="progress" style="height: 10px; background-color: #333;">
+                                        <div id="neutralBar" class="progress-bar bg-info" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                <div class="emotion-bar-container">
+                                    <label>Sad</label>
+                                    <div class="progress" style="height: 10px; background-color: #333;">
+                                        <div id="sadBar" class="progress-bar bg-warning" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -686,6 +751,22 @@
         </div>
     </div>
 
+    <!-- Footer -->
+    <footer class="footer mt-5" style="background-color: #2d2d2d; padding: 20px 0; border-top: 2px solid #4CAF50;">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="credits">
+                    <i class="fas fa-code"></i> Developed by SIT Edge Computing Team JH
+                </div>
+                <div class="version">
+                    <span>v1.0.0</span>
+                    <span class="mx-2">|</span>
+                    <span>Edge Computing Project 2024</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
     <script>
         const socket = io();
         let cameraEnabled = true;
@@ -693,195 +774,309 @@
         let systemReady = false;
         let peerConnection = null;
         let dataChannel = null;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 2000;
         
-        // WebRTC configuration
-        const iceServers = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
-        
-        // Canvas setup
+        // Canvas setup with performance optimization
         const canvas = document.getElementById('videoCanvas');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for better performance
         const videoElement = document.getElementById('videoElement');
+        let animationFrameId = null;
         
-        // Initialize WebRTC connection
+        // Initialize WebRTC connection with optimized configuration
         function initWebRTC() {
-            // Create peer connection
-            peerConnection = new RTCPeerConnection(iceServers);
-            
-            // Set up event handlers
-            peerConnection.onicecandidate = event => {
-                if (event.candidate) {
-                    socket.emit('ice_candidate', {
-                        candidate: event.candidate
-                    });
-                }
-            };
-            
-            peerConnection.ontrack = event => {
-                if (event.streams && event.streams[0]) {
-                    videoElement.srcObject = event.streams[0];
-                    
-                    // Set up canvas rendering
-                    videoElement.onloadedmetadata = () => {
-                        // Set canvas dimensions to match video
-                        canvas.width = videoElement.videoWidth;
-                        canvas.height = videoElement.videoHeight;
-                        
-                        // Start rendering loop
-                        renderFrame();
-                    };
-                }
-            };
-            
-            // Request offer from server
-            socket.emit('webrtc_request');
-        }
-        
-        // Render video frame to canvas
-        function renderFrame() {
-            if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-                // Draw video frame to canvas
-                ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                
-                // Add any overlay elements here (e.g., detection boxes)
-            }
-            
-            // Request next frame
-            requestAnimationFrame(renderFrame);
-        }
-        
-        // Handle WebRTC signaling
-        socket.on('webrtc_offer', async (data) => {
-            try {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                
-                socket.emit('webrtc_answer', {
-                    answer: peerConnection.localDescription
-                });
-            } catch (error) {
-                console.error('Error handling WebRTC offer:', error);
-            }
-        });
-        
-        socket.on('ice_candidate', async (data) => {
-            try {
-                if (data.candidate) {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                }
-            } catch (error) {
-                console.error('Error adding ICE candidate:', error);
-            }
-        });
-        
-        // System initialization status
-        socket.on('init_status', function(data) {
-            if (data.status === 'ready') {
-                systemReady = true;
-                initWebRTC();
-            }
-        });
-
-        // Connection status
-        socket.on('connect', function() {
-            console.log('Connected to server');
-            if (systemReady) {
-                initWebRTC();
-            }
-        });
-
-        socket.on('disconnect', function() {
-            console.log('Disconnected from server');
-            // Clean up WebRTC connection
             if (peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
             }
-        });
-
-        // Fallback for legacy frame-based streaming
-        socket.on('frame', function(data) {
-            if (!peerConnection || peerConnection.connectionState !== 'connected') {
-                // Only use this if WebRTC is not working
-                const img = new Image();
-                img.onload = () => {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            const rtcConfig = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ],
+                iceTransportPolicy: 'all',
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
+                iceCandidatePoolSize: 0
+            };
+            
+            try {
+                peerConnection = new RTCPeerConnection(rtcConfig);
+                
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate) {
+                        socket.emit('ice_candidate', {
+                            sdpMid: event.candidate.sdpMid,
+                            sdpMLineIndex: event.candidate.sdpMLineIndex,
+                            candidate: event.candidate.candidate
+                        });
+                    }
                 };
-                img.src = 'data:image/jpeg;base64,' + data.data;
+                
+                peerConnection.ontrack = event => {
+                    if (event.streams && event.streams[0]) {
+                        videoElement.srcObject = event.streams[0];
+                        videoElement.onloadedmetadata = () => {
+                            canvas.width = videoElement.videoWidth;
+                            canvas.height = videoElement.videoHeight;
+                            startRendering();
+                        };
+                    }
+                };
+                
+                peerConnection.oniceconnectionstatechange = () => {
+                    console.log('ICE Connection State:', peerConnection.iceConnectionState);
+                    if (peerConnection.iceConnectionState === 'failed' || 
+                        peerConnection.iceConnectionState === 'disconnected') {
+                        handleConnectionFailure();
+                    }
+                };
+                
+                peerConnection.onconnectionstatechange = () => {
+                    console.log('Connection State:', peerConnection.connectionState);
+                    if (peerConnection.connectionState === 'failed') {
+                        handleConnectionFailure();
+                    }
+                };
+                
+                socket.emit('webrtc_request');
+                retryCount = 0;
+            } catch (error) {
+                console.error('Error initializing WebRTC:', error);
+                handleConnectionFailure();
+            }
+        }
+        
+        function handleConnectionFailure() {
+            if (retryCount < MAX_RETRIES) {
+                retryCount++;
+                console.log(`Retrying WebRTC connection (${retryCount}/${MAX_RETRIES})...`);
+                setTimeout(initWebRTC, RETRY_DELAY);
+            } else {
+                console.error('WebRTC connection failed after maximum retries');
+                addAlert('error', 'Failed to establish video connection. Please refresh the page.');
+            }
+        }
+        
+        // Handle WebRTC offer from server
+        socket.on('webrtc_offer', async (data) => {
+            try {
+                if (!peerConnection) {
+                    initWebRTC();
+                }
+                
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                socket.emit('webrtc_answer', {
+                    sdp: answer.sdp,
+                    type: answer.type
+                });
+            } catch (error) {
+                console.error('Error handling WebRTC offer:', error);
+                handleConnectionFailure();
             }
         });
+        
+        // Start WebRTC connection when page loads
+        window.addEventListener('load', () => {
+            initWebRTC();
+        });
+        
+        // Optimized rendering function with error handling
+        function renderFrame() {
+            try {
+                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                }
+                animationFrameId = requestAnimationFrame(renderFrame);
+            } catch (error) {
+                console.error('Error rendering frame:', error);
+                stopRendering();
+                addAlert('error', 'Error displaying video feed');
+            }
+        }
+        
+        function startRendering() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            renderFrame();
+        }
+        
+        function stopRendering() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        }
 
-        // Handle monitoring updates
+        // Handle monitoring updates with optimized detection rendering
         socket.on('monitoring', function(data) {
             // Update people count
-            document.getElementById('peopleCount').textContent = data.people_count || 0;
-            
-            // Update movement status
-            const movementStatus = document.getElementById('movementStatus');
-            if (data.movement_detected) {
-                movementStatus.textContent = data.movement_type || 'Active';
-                movementStatus.classList.add('monitoring-alert');
-            } else {
-                movementStatus.textContent = 'None';
-                movementStatus.classList.remove('monitoring-alert');
+            const peopleCount = document.getElementById('peopleCount');
+            if (peopleCount) {
+                peopleCount.textContent = data.people_count || 0;
             }
             
-            // Update decibel meter
+            // Update sound level
             if (data.decibel_level !== undefined) {
-                const decibelValue = document.getElementById('decibelValue');
-                const decibelBar = document.getElementById('decibelBar');
-                const decibelRange = document.getElementById('decibelRange');
+                updateSoundLevel(data.decibel_level);
+            }
+
+            // Optimized detection rendering
+            if (data.detections && canvas && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                // Create offscreen canvas for double buffering
+                const offscreenCanvas = new OffscreenCanvas(canvas.width, canvas.height);
+                const offscreenCtx = offscreenCanvas.getContext('2d', { alpha: false });
                 
-                // Update value display
-                decibelValue.textContent = `${data.decibel_level.toFixed(1)} dB`;
+                // Draw video frame
+                offscreenCtx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
                 
-                // Update meter bar (normalize between -60 and 0 dB)
-                const normalizedValue = Math.min(Math.max((data.decibel_level + 60) / 60 * 100, 0), 100);
-                decibelBar.style.width = `${normalizedValue}%`;
+                // Draw detections
+                data.detections.forEach(detection => {
+                    try {
+                        // Ensure bbox values are numbers and within canvas bounds
+                        const bbox = detection.bbox.map(Number);
+                        const [x, y, width, height] = bbox;
+                        
+                        if (!isNaN(x) && !isNaN(y) && !isNaN(width) && !isNaN(height)) {
+                            const confidence = Number(detection.confidence) || 0;
+                            
+                            // Draw box
+                            offscreenCtx.strokeStyle = '#4CAF50';
+                            offscreenCtx.lineWidth = 2;
+                            offscreenCtx.strokeRect(
+                                Math.max(0, Math.min(x, canvas.width)),
+                                Math.max(0, Math.min(y, canvas.height)),
+                                Math.min(width, canvas.width - x),
+                                Math.min(height, canvas.height - y)
+                            );
+                            
+                            // Draw label
+                            const label = `Person ${(confidence * 100).toFixed(0)}%`;
+                            offscreenCtx.font = '12px Arial';
+                            const textWidth = offscreenCtx.measureText(label).width;
+                            
+                            const labelX = Math.max(0, Math.min(x, canvas.width - textWidth - 10));
+                            const labelY = Math.max(20, y);
+                            
+                            // Draw label background
+                            offscreenCtx.fillStyle = '#4CAF50';
+                            offscreenCtx.fillRect(labelX - 1, labelY - 20, textWidth + 10, 20);
+                            
+                            // Draw label text
+                            offscreenCtx.fillStyle = '#ffffff';
+                            offscreenCtx.fillText(label, labelX + 4, labelY - 5);
+                        }
+                    } catch (error) {
+                        console.error('Error drawing detection:', error);
+                    }
+                });
                 
-                // Update color based on intensity
-                if (normalizedValue > 80) {
-                    decibelBar.style.backgroundColor = '#dc3545';  // Red
-                    decibelRange.textContent = 'Very Loud';
-                } else if (normalizedValue > 60) {
-                    decibelBar.style.backgroundColor = '#ffc107';  // Yellow
-                    decibelRange.textContent = 'Loud';
-                } else if (normalizedValue > 30) {
-                    decibelBar.style.backgroundColor = '#4CAF50';  // Green
-                    decibelRange.textContent = 'Normal';
-                } else {
-                    decibelBar.style.backgroundColor = '#4CAF50';  // Green
-                    decibelRange.textContent = 'Quiet';
-                }
+                // Copy to main canvas in one operation
+                ctx.drawImage(offscreenCanvas, 0, 0);
             }
         });
 
-        // Handle alerts
-        socket.on('alert', function(data) {
-            const alertsList = document.getElementById('alertsList');
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert-item ${data.level}`;
-            alertDiv.innerHTML = `
-                <div class="alert-time">${data.timestamp}</div>
-                <div class="alert-message">${data.message}</div>
-            `;
-            alertsList.insertBefore(alertDiv, alertsList.firstChild);
+        // Optimized sound level update function
+        function updateSoundLevel(decibelLevel) {
+            const decibelValue = document.getElementById('decibelValue');
+            const decibelBar = document.getElementById('decibelBar');
+            const decibelRange = document.getElementById('decibelRange');
             
-            // Keep only last 10 alerts
-            while (alertsList.children.length > 10) {
-                alertsList.removeChild(alertsList.lastChild);
+            if (!decibelValue || !decibelBar || !decibelRange) return;
+            
+            decibelValue.textContent = `${decibelLevel.toFixed(1)} dB`;
+            
+            // Normalize between -60 and 0 dB
+            const normalizedValue = Math.min(Math.max((decibelLevel + 60) / 60 * 100, 0), 100);
+            decibelBar.style.width = `${normalizedValue}%`;
+            
+            // Update color and text based on level
+            let color, text;
+            if (normalizedValue > 80) {
+                color = '#dc3545';
+                text = 'Very Loud';
+            } else if (normalizedValue > 60) {
+                color = '#ffc107';
+                text = 'Loud';
+            } else if (normalizedValue > 30) {
+                color = '#4CAF50';
+                text = 'Normal';
+            } else {
+                color = '#4CAF50';
+                text = 'Quiet';
             }
             
-            // Play alert sound if specified
+            decibelBar.style.backgroundColor = color;
+            decibelRange.textContent = text;
+        }
+
+        // Optimized alert handling
+        const alertQueue = [];
+        const MAX_ALERTS = 10;
+        
+        socket.on('alert', function(data) {
+            if (!data || !data.message) return;
+            
+            const alertsList = document.getElementById('alertsList');
+            if (!alertsList) return;
+            
+            // Add to queue
+            alertQueue.unshift({
+                level: data.level || 'info',
+                message: data.message,
+                timestamp: data.timestamp || new Date().toLocaleTimeString()
+            });
+            
+            // Trim queue
+            while (alertQueue.length > MAX_ALERTS) {
+                alertQueue.pop();
+            }
+            
+            // Update DOM
+            updateAlertsList();
+            
+            // Play sound if needed
             if (data.should_beep) {
                 playAlertSound();
+            }
+        });
+        
+        function updateAlertsList() {
+            const alertsList = document.getElementById('alertsList');
+            if (!alertsList) return;
+            
+            // Clear current alerts
+            alertsList.innerHTML = '';
+            
+            // Add all alerts from queue
+            alertQueue.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert-item ${alert.level}`;
+                alertDiv.innerHTML = `
+                    <div class="alert-time">${alert.timestamp}</div>
+                    <div class="alert-message">${alert.message}</div>
+                `;
+                alertsList.appendChild(alertDiv);
+            });
+        }
+
+        // Clean up resources on disconnect
+        socket.on('disconnect', function() {
+            console.log('Disconnected from server');
+            stopRendering();
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                videoElement.srcObject = null;
             }
         });
 
@@ -953,6 +1148,29 @@
                 alertsList.removeChild(alertsList.lastChild);
             }
         }
+
+        socket.on('emotion', function(data) {
+            // Update current emotion display
+            const currentEmotion = document.getElementById('currentEmotion');
+            if (currentEmotion) {
+                currentEmotion.textContent = data.emotion.charAt(0).toUpperCase() + data.emotion.slice(1);
+            }
+
+            // Update emotion bars
+            const emotions = ['happy', 'neutral', 'sad'];
+            emotions.forEach(emotion => {
+                const bar = document.getElementById(`${emotion}Bar`);
+                if (bar) {
+                    if (data.emotion === emotion) {
+                        bar.style.width = `${data.confidence * 100}%`;
+                        // Add a data attribute for the tooltip
+                        bar.setAttribute('data-confidence', `${(data.confidence * 100).toFixed(1)}%`);
+                    } else {
+                        bar.style.width = '0%';
+                    }
+                }
+            });
+        });
     </script>
 </body>
 </html> 

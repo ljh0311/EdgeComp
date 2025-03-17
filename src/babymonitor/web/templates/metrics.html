@@ -274,64 +274,101 @@
     </div>
 
     <script>
-      // Connect to Socket.IO
-      const socket = io()
+      // Connect to Socket.IO with proper configuration
+      const socket = io({
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity
+      });
       
-      // Initialize charts
+      // Initialize empty data arrays for charts
+      const chartData = {
+        fps: [],
+        frame_time: [],
+        cpu_usage: [],
+        memory_usage: []
+      };
+      
+      // Initialize charts with better configuration
       const fpsChart = Plotly.newPlot(
         'fps-chart',
-        [
-          {
-            y: [],
-            type: 'scatter',
-            name: 'FPS',
-            line: { color: '#4CAF50' }
-          }
-        ],
+        [{
+          y: chartData.fps,
+          type: 'scatter',
+          name: 'FPS',
+          line: { color: '#4CAF50' },
+          mode: 'lines',
+          showlegend: false
+        }],
         {
           title: 'Frames Per Second',
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: { showgrid: true, gridcolor: '#444' },
-          yaxis: { showgrid: true, gridcolor: '#444' }
-        }
-      )
+          xaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 60]
+          },
+          yaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 60]
+          },
+          margin: { t: 30, l: 40, r: 20, b: 30 },
+          autosize: true
+        },
+        { responsive: true }
+      );
       
       const frameTimeChart = Plotly.newPlot(
         'frame-time-chart',
-        [
-          {
-            y: [],
-            type: 'scatter',
-            name: 'Frame Time (ms)',
-            line: { color: '#2196F3' }
-          }
-        ],
+        [{
+          y: chartData.frame_time,
+          type: 'scatter',
+          name: 'Frame Time (ms)',
+          line: { color: '#2196F3' },
+          mode: 'lines',
+          showlegend: false
+        }],
         {
           title: 'Frame Processing Time',
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: { showgrid: true, gridcolor: '#444' },
-          yaxis: { showgrid: true, gridcolor: '#444' }
-        }
-      )
+          xaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 60]
+          },
+          yaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 100]
+          },
+          margin: { t: 30, l: 40, r: 20, b: 30 },
+          autosize: true
+        },
+        { responsive: true }
+      );
       
       const systemResourcesChart = Plotly.newPlot(
         'system-resources-chart',
         [
           {
-            y: [],
+            y: chartData.cpu_usage,
             type: 'scatter',
             name: 'CPU Usage (%)',
-            line: { color: '#FFC107' }
+            line: { color: '#FFC107' },
+            mode: 'lines'
           },
           {
-            y: [],
+            y: chartData.memory_usage,
             type: 'scatter',
             name: 'Memory Usage (%)',
-            line: { color: '#F44336' }
+            line: { color: '#F44336' },
+            mode: 'lines'
           }
         ],
         {
@@ -339,76 +376,167 @@
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: { showgrid: true, gridcolor: '#444' },
-          yaxis: { showgrid: true, gridcolor: '#444' }
-        }
-      )
+          xaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 60]
+          },
+          yaxis: { 
+            showgrid: true, 
+            gridcolor: '#444',
+            range: [0, 100]
+          },
+          margin: { t: 30, l: 40, r: 20, b: 30 },
+          autosize: true,
+          showlegend: true,
+          legend: {
+            x: 0,
+            y: 1,
+            bgcolor: '#2d2d2d',
+            font: { color: '#ffffff' }
+          }
+        },
+        { responsive: true }
+      );
       
-      // Update metrics display
+      // Update metrics display with better error handling and smoothing
       function updateMetrics(data) {
-        // Update current values
-        const current = data.current
-        document.getElementById('fps-value').textContent = current.fps.toFixed(1)
-        document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1)
-        document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1)
-        document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1)
-      
-        // Update status colors
-        updateStatusColor('fps-value', current.fps, 30, 15)
-        updateStatusColor('frame-time-value', current.frame_time, 20, 33, true)
-        updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true)
-        updateStatusColor('memory-value', current.memory_usage, 70, 90, true)
-      
-        // Update charts
-        const history = data.history
-        Plotly.update('fps-chart', {
-          y: [history.fps]
-        })
-      
-        Plotly.update('frame-time-chart', {
-          y: [history.frame_time]
-        })
-      
-        Plotly.update('system-resources-chart', {
-          y: [history.cpu_usage, history.memory_usage]
-        })
+        try {
+          if (!data) return;
+          
+          // Update current values with validation and smoothing
+          const current = data.current || {};
+          
+          // Helper function to smooth transitions
+          function smoothUpdate(elementId, newValue, formatFunc = (v) => v.toFixed(1)) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            const oldValue = parseFloat(element.textContent) || 0;
+            const smoothedValue = 0.7 * oldValue + 0.3 * newValue; // Exponential smoothing
+            element.textContent = formatFunc(smoothedValue);
+            return smoothedValue;
+          }
+          
+          // Update values with smoothing
+          const fps = smoothUpdate('fps-value', Number(current.fps) || 0);
+          const frameTime = smoothUpdate('frame-time-value', Number(current.frame_time) || 0);
+          const cpuUsage = smoothUpdate('cpu-value', Number(current.cpu_usage) || 0);
+          const memoryUsage = smoothUpdate('memory-value', Number(current.memory_usage) || 0);
+          
+          // Update status colors with hysteresis
+          updateStatusColor('fps-value', fps, 30, 15);
+          updateStatusColor('frame-time-value', frameTime, 20, 33, true);
+          updateStatusColor('cpu-value', cpuUsage, 70, 90, true);
+          updateStatusColor('memory-value', memoryUsage, 70, 90, true);
+          
+          // Update chart data with debouncing
+          if (data.history && !updateMetrics.updating) {
+            updateMetrics.updating = true;
+            
+            // Use requestAnimationFrame for smooth chart updates
+            requestAnimationFrame(() => {
+              try {
+                // Limit data points to last 60 seconds
+                const maxPoints = 60;
+                
+                Object.keys(chartData).forEach(key => {
+                  if (Array.isArray(data.history[key])) {
+                    // Smooth the history data
+                    const newData = data.history[key].slice(-maxPoints).map((value, index, array) => {
+                      if (index === 0) return value;
+                      return 0.7 * array[index - 1] + 0.3 * value; // Exponential smoothing
+                    });
+                    chartData[key] = newData;
+                  }
+                });
+                
+                // Update charts with new data
+                Plotly.update('fps-chart', { y: [chartData.fps] });
+                Plotly.update('frame-time-chart', { y: [chartData.frame_time] });
+                Plotly.update('system-resources-chart', {
+                  y: [chartData.cpu_usage, chartData.memory_usage]
+                });
+                
+                updateMetrics.updating = false;
+              } catch (error) {
+                console.error('Error updating charts:', error);
+                updateMetrics.updating = false;
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error updating metrics:', error);
+        }
       }
       
+      // Initialize update flag
+      updateMetrics.updating = false;
+      
+      // Debounce metrics requests
+      let metricsTimeout = null;
+      function debouncedRequestMetrics() {
+        if (metricsTimeout) clearTimeout(metricsTimeout);
+        metricsTimeout = setTimeout(() => {
+          if (socket.connected) {
+            socket.emit('request_metrics');
+          }
+        }, 500); // Debounce to 500ms
+      }
+      
+      // Socket.IO event handlers with reconnection logic
+      socket.on('connect', () => {
+        console.log('Connected to server');
+        debouncedRequestMetrics();
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('Disconnected from server');
+      });
+      
+      socket.on('metrics_update', (data) => {
+        updateMetrics(data);
+      });
+      
+      // Request metrics update with debouncing
+      const metricsInterval = setInterval(debouncedRequestMetrics, 1000);
+      
+      // Clean up on page unload
+      window.addEventListener('beforeunload', () => {
+        if (metricsTimeout) clearTimeout(metricsTimeout);
+        clearInterval(metricsInterval);
+      });
+      
+      // Resize charts on window resize
+      window.addEventListener('resize', () => {
+        Plotly.Plots.resize('fps-chart');
+        Plotly.Plots.resize('frame-time-chart');
+        Plotly.Plots.resize('system-resources-chart');
+      });
+      
+      // Status color update function
       function updateStatusColor(elementId, value, warningThreshold, criticalThreshold, isInverse = false) {
-        const element = document.getElementById(elementId)
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        
         if (isInverse) {
           if (value >= criticalThreshold) {
-            element.className = 'metric-value status-critical'
+            element.className = 'metric-value status-critical';
           } else if (value >= warningThreshold) {
-            element.className = 'metric-value status-warning'
+            element.className = 'metric-value status-warning';
           } else {
-            element.className = 'metric-value status-good'
+            element.className = 'metric-value status-good';
           }
         } else {
           if (value <= criticalThreshold) {
-            element.className = 'metric-value status-critical'
+            element.className = 'metric-value status-critical';
           } else if (value <= warningThreshold) {
-            element.className = 'metric-value status-warning'
+            element.className = 'metric-value status-warning';
           } else {
-            element.className = 'metric-value status-good'
+            element.className = 'metric-value status-good';
           }
         }
       }
-      
-      // Socket.IO event handlers
-      socket.on('connect', () => {
-        console.log('Connected to server')
-        socket.emit('request_metrics')
-      })
-      
-      socket.on('metrics_update', (data) => {
-        updateMetrics(data)
-      })
-      
-      // Request metrics update every second
-      setInterval(() => {
-        socket.emit('request_metrics')
-      }, 1000)
       
       // Test handling functions
       function runTest(testType) {
