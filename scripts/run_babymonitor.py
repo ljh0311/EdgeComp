@@ -10,6 +10,10 @@ import logging
 import argparse
 from pathlib import Path
 
+# Add the src directory to Python path
+src_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
+sys.path.insert(0, src_path)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -39,11 +43,6 @@ def main():
         "--disable-audio", action="store_true", help="Disable audio processing"
     )
     args = parser.parse_args()
-
-    # Add src directory to path if needed
-    src_dir = Path(__file__).parent
-    if str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
 
     # Set environment variables based on arguments
     if args.force_cpu:

@@ -15,8 +15,8 @@ import cv2
 import numpy as np
 
 # Add the src directory to Python path
-src_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, src_dir)
+src_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
+sys.path.insert(0, src_path)
 
 # Import the lightweight detector
 from babymonitor.detectors.lightweight_detector import VideoStream, LightweightDetector
@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(src_dir, 'baby_monitor.log')),
+        logging.FileHandler(os.path.join(src_path, 'baby_monitor.log')),
         logging.StreamHandler()
     ]
 )
@@ -172,7 +172,7 @@ def main():
     # Check if model file exists
     if not os.path.exists(args.model):
         # Try to find the model in the models directory
-        model_dir = os.path.join(os.path.dirname(src_dir), 'models')
+        model_dir = os.path.join(os.path.dirname(src_path), 'models')
         model_path = os.path.join(model_dir, os.path.basename(args.model))
         if os.path.exists(model_path):
             args.model = model_path
@@ -180,8 +180,8 @@ def main():
         else:
             logger.warning(f"Model file not found: {args.model}")
             logger.warning("Using the pet detection model from BirdRepeller as fallback")
-            args.model = os.path.join(os.path.dirname(src_dir), 'BirdRepeller', 'models', 'pet_detection_model.tflite')
-            args.labels = os.path.join(os.path.dirname(src_dir), 'BirdRepeller', 'models', 'pet_labels.txt')
+            args.model = os.path.join(os.path.dirname(src_path), 'BirdRepeller', 'models', 'pet_detection_model.tflite')
+            args.labels = os.path.join(os.path.dirname(src_path), 'BirdRepeller', 'models', 'pet_labels.txt')
     
     # Initialize and start the detection system
     detection_system = LightweightDetectionSystem(

@@ -1,108 +1,109 @@
 """
-Configuration Module
-==================
-Contains configuration settings for the Baby Monitor System.
+Configuration settings for the Baby Monitor System.
 """
 
 import os
-import logging
 from pathlib import Path
-
-# Visualization settings
-ENABLE_VISUALIZATION = False  # Set to False for Raspberry Pi headless operation
-
+import json
+import logging
+from typing import Dict, Any
 
 class Config:
-    """Configuration settings."""
+    """Configuration class for the Baby Monitor System."""
+    
+    def __init__(self):
+        self.base_dir = Path(__file__).parent.parent.parent
+        self.models_dir = self.base_dir / "models"
+        self.logs_dir = self.base_dir / "logs"
+        self.data_dir = self.base_dir / "data"
+        
+        # Create necessary directories
+        for dir_path in [self.models_dir, self.logs_dir, self.data_dir]:
+            dir_path.mkdir(exist_ok=True)
+            
+        # Default configuration
+        self.config = {
+            "camera": {
+                "index": int(os.getenv("CAMERA_INDEX", "0")),
+                "resolution": (640, 480),
+                "fps": 30
+            },
+            "audio": {
+                "device_index": int(os.getenv("AUDIO_DEVICE_INDEX", "0")),
+                "sample_rate": 16000,
+                "chunk_size": 1024
+            },
+            "detector": {
+                "type": os.getenv("DETECTOR_TYPE", "yolov8"),
+                "confidence_threshold": 0.5,
+                "use_gpu": os.getenv("GPU_ENABLED", "true").lower() == "true"
+            },
+            "web": {
+                "host": "0.0.0.0",
+                "port": 5000,
+                "debug": False
+            },
+            "logging": {
+                "level": os.getenv("LOG_LEVEL", "INFO"),
+                "file": self.logs_dir / "babymonitor.log"
+            }
+        }
+        
+        # Load custom configuration if exists
+        self._load_custom_config()
+        
+    def _load_custom_config(self):
+        """Load custom configuration from config file if it exists."""
+        config_file = self.base_dir / "config" / "system_config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    custom_config = json.load(f)
+                    self._update_config(self.config, custom_config)
+            except Exception as e:
+                logging.error(f"Error loading custom config: {e}")
+                
+    def _update_config(self, base: Dict[str, Any], update: Dict[str, Any]):
+        """Recursively update configuration dictionary."""
+        for key, value in update.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._update_config(base[key], value)
+            else:
+                base[key] = value
+                
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get configuration value by key."""
+        keys = key.split('.')
+        value = self.config
+        
+        for k in keys:
+            if isinstance(value, dict):
+                value = value.get(k, default)
+            else:
+                return default
+                
+        return value
+        
+    def set(self, key: str, value: Any):
+        """Set configuration value by key."""
+        keys = key.split('.')
+        config = self.config
+        
+        for k in keys[:-1]:
+            config = config.setdefault(k, {})
+            
+        config[keys[-1]] = value
+        
+    def save(self):
+        """Save current configuration to file."""
+        config_file = self.base_dir / "config" / "system_config.json"
+        config_file.parent.mkdir(exist_ok=True)
+        
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(self.config, f, indent=4)
+        except Exception as e:
+            logging.error(f"Error saving config: {e}")
 
-    # Base paths
-    BASE_DIR = Path(__file__).parent
-    MODELS_DIR = BASE_DIR / "models"
-
-    # Logging configuration
-    LOGGING = {
-        "level": logging.INFO,
-        "format": "%(asctime)s - %(levelname)s - %(message)s",
-        "handlers": [logging.FileHandler("baby_monitor.log"), logging.StreamHandler()],
-    }
-
-    # Camera settings
-    CAMERA_WIDTH = 640
-    CAMERA_HEIGHT = 480
-
-    # Person detection settings
-    PERSON_DETECTION = {
-        "model_path": str(MODELS_DIR / "yolov8n.pt"),
-        "confidence_threshold": 0.5,
-        "device": "cuda" if os.environ.get("USE_CUDA", "0") == "1" else "cpu",
-    }
-
-    # Motion detection settings
-    MOTION_DETECTION = {
-        "history": 20,
-        "dist2threshold": 400,
-        "detect_shadows": True,
-        "motion_threshold": 0.02,
-        "fall_threshold": 0.1,
-    }
-
-    # Audio processing settings
-    AUDIO_PROCESSING = {
-        "sample_rate": 44100,
-        "channels": 1,
-        "format": "paFloat32",
-        "chunk_size": 1024,
-        "analysis_window": 2.0,  # seconds
-        "alert_cooldown": 5.0,  # seconds between alerts
-        "model_path": str(MODELS_DIR / "audio_model.pt"),
-        "device": "cuda" if os.environ.get("USE_CUDA", "0") == "1" else "cpu",
-        # Sound detection settings
-        "gain": 5.0,  # Amplification factor for waveform visualization
-        "rms_threshold": 0.05,  # Threshold for sound detection
-        "noise_threshold": 0.1,  # Background noise threshold
-        "cry_threshold": 0.6,  # Threshold for cry detection
-        "scream_threshold": 0.7,  # Threshold for scream detection
-        "happy_threshold": 0.5,  # Threshold for happy sounds
-        # Visualization settings
-        "enable_visualization": True,
-        "waveform_points": 1024,  # Number of points in waveform visualization
-        "waveform_update_rate": 30,  # Updates per second
-        # Alert settings
-        "alert_thresholds": {
-            "cry": 0.6,
-            "scream": 0.7,
-            "happy": 0.5
-        },
-        "critical_emotions": ["cry", "scream"],
-        "info_emotions": ["happy"]
-    }
-
-    # Alert settings
-    ALERT_SETTINGS = {
-        "duration": 5000,  # Alert display duration in ms
-        "max_history": 50,  # Maximum number of alerts to keep in history
-        "flash_interval": 500,  # Flash interval for critical alerts in ms
-        # Sound settings
-        "critical_frequency": 2000,
-        "critical_duration": 1000,
-        "warning_frequency": 1000,
-        "warning_duration": 500,
-        # Theme colors
-        "critical_color": "#e74c3c",
-        "warning_color": "#f1c40f",
-        "dark_theme": {
-            "background": "#1a1a1a",
-            "text": "#ffffff",
-            "accent_text": "#3498db",
-        },
-    }
-
-    # Feature extraction settings
-    FEATURE_EXTRACTION = {
-        "frame_length": 2048,
-        "hop_length": 512,
-        "n_mels": 128,
-        "n_mfcc": 20,
-        "fmin": 20,
-        "fmax": 8000,
-    }
+# Create global configuration instance
+config = Config()
