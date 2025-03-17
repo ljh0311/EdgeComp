@@ -1,147 +1,42 @@
 """
-System Setup and Package Installation
-=================================
-Handles both package installation and system configuration.
+Baby Monitor System - Unified Setup
+==================================
+Handles package installation, system configuration, and provides a GUI installer.
 """
 
 from setuptools import setup, find_packages
 import os
 import sys
 import logging
-from pathlib import Path
-import urllib.request
-import subprocess
 import platform
 import json
-import psutil
-import torch
-from transformers import AutoModelForCTC, AutoProcessor
-try:
-    import cv2
-except ImportError:
-    cv2 = None
+import shutil
+import tarfile
+import urllib.request
+import subprocess
+from pathlib import Path
+import argparse
 
-class SystemSetup:
-    """Handles system configuration and checks."""
-    
-    REQUIRED_PACKAGES = [
-        'opencv-python',
-        'numpy',
-        'torch',
-        'transformers',
-        'sounddevice',
-        'librosa'
-    ]
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('BabyMonitorSetup')
 
-    def __init__(self):
-        self.logger = self._setup_logging()
-        self.config = {
-            'use_gpu': False,
-            'batch_size': 1,
-            'audio_chunk_size': 1024,
-            'feature_cache_size': 1000,
-            'use_quantization': False
-        }
+# Constants
+MODELS_DIR = Path("models")
+LOGS_DIR = Path("logs")
+CONFIG_DIR = Path("config")
+DATA_DIR = Path("data")
 
-    def _setup_logging(self):
-        """Setup logging configuration."""
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
-        
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        
-        # File handler
-        fh = logging.FileHandler(log_dir / "setup.log")
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-        
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-        
-        return logger
-
-    def check_python_version(self):
-        """Check Python version."""
-        if sys.version_info < (3, 8):
-            return False, "Python 3.8 or higher is required"
-        return True, "Python version OK"
-
-    def check_camera(self):
-        """Check camera availability."""
-        if cv2 is None:
-            return False, "OpenCV not installed"
-        
-        try:
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                return False, "No camera found"
-            cap.release()
-            return True, "Camera OK"
-        except Exception as e:
-            return False, f"Camera error: {str(e)}"
-
-    def check_audio_devices(self):
-        """Check audio devices."""
-        try:
-            import sounddevice as sd
-            devices = sd.query_devices()
-            inputs = [d for d in devices if d['max_input_channels'] > 0]
-            outputs = [d for d in devices if d['max_output_channels'] > 0]
-            
-            if not inputs:
-                return False, "No input audio devices found"
-            if not outputs:
-                return False, "No output audio devices found"
-            
-            return True, "Audio devices OK"
-        except Exception as e:
-            return False, f"Audio device error: {str(e)}"
-
-    def check_gpu(self):
-        """Check GPU availability."""
-        try:
-            if torch.cuda.is_available():
-                gpu_name = torch.cuda.get_device_name(0)
-                self.config['use_gpu'] = True
-                return True, f"GPU available: {gpu_name}"
-            return False, "No GPU found"
-        except Exception:
-            return False, "Error checking GPU"
-
-    def get_system_info(self):
-        """Get system information."""
-        return {
-            'cpu_count': psutil.cpu_count(),
-            'total_memory': psutil.virtual_memory().total / (1024 * 1024 * 1024),  # GB
-            'free_disk': psutil.disk_usage('/').free / (1024 * 1024 * 1024),  # GB
-            'gpu_name': self.check_gpu()[1] if self.check_gpu()[0] else "No GPU"
-        }
-
-    def optimize_config(self):
-        """Optimize configuration based on system capabilities."""
-        info = self.get_system_info()
-        
-        # Adjust batch size based on memory
-        if info['total_memory'] > 16:  # More than 16GB RAM
-            self.config['batch_size'] = 4
-        elif info['total_memory'] > 8:  # More than 8GB RAM
-            self.config['batch_size'] = 2
-            
-        # Enable quantization for lower-end systems
-        if info['total_memory'] < 8:
-            self.config['use_quantization'] = True
-            
-        # Adjust audio settings
-        if info['cpu_count'] > 4:
-            self.config['audio_chunk_size'] = 2048
-            self.config['feature_cache_size'] = 2000
-
-        return self.config
+def is_raspberry_pi():
+    """Check if the system is a Raspberry Pi."""
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            return any("Raspberry Pi" in line for line in f)
+    except:
+        return False
 
 def download_file(url, filename, desc=None):
     """Download a file with progress indicator."""
@@ -158,58 +53,64 @@ def download_file(url, filename, desc=None):
 
 def setup_models():
     """Setup and download required model files."""
-    models_dir = Path("models")
-    models_dir.mkdir(exist_ok=True)
-
-    # Model URLs and their local paths
-    MODEL_FILES = {
-        "yolov8n.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt",
-        "MobileNetSSD_deploy.prototxt": "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/ssd/caffe/ssd_mobilenet_v1.prototxt",
-        "MobileNetSSD_deploy.caffemodel": "https://drive.google.com/uc?id=0B3gersZ2cHIxRm5PMWRoTkdHdHc"
-    }
-
-    # Download available models
-    for model_name, url in MODEL_FILES.items():
-        model_path = models_dir / model_name
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Download YOLOv8 nano model if not exists
+    yolo_model_path = MODELS_DIR / "yolov8n.pt"
+    if not yolo_model_path.exists():
+        yolo_url = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"
+        download_file(yolo_url, yolo_model_path, "YOLOv8 nano model")
+    
+    # Download Haar Cascade models
+    haar_models = [
+        "haarcascade_frontalface_default.xml",
+        "haarcascade_eye.xml",
+        "haarcascade_upperbody.xml",
+        "haarcascade_fullbody.xml"
+    ]
+    
+    for model in haar_models:
+        model_path = MODELS_DIR / model
         if not model_path.exists():
-            download_file(url, model_path)
+            model_url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{model}"
+            download_file(model_url, model_path, f"Haar Cascade model: {model}")
+    
+    # Create emotion models directory
+    emotion_dir = MODELS_DIR / "emotion"
+    emotion_dir.mkdir(exist_ok=True)
+    
+    # Create a placeholder for emotion model
+    emotion_model_info = emotion_dir / "README.txt"
+    if not emotion_model_info.exists():
+        with open(emotion_model_info, 'w') as f:
+            f.write("""
+Emotion Recognition Models
+=========================
+Place your emotion recognition models in this directory.
 
-    # Download and setup wav2vec2 model
-    print("\nSetting up wav2vec2 model...")
-    try:
-        model = AutoModelForCTC.from_pretrained("facebook/wav2vec2-base")
-        processor = AutoProcessor.from_pretrained("facebook/wav2vec2-base")
-        
-        # Save model and processor
-        model_dir = models_dir / "wav2vec2"
-        model_dir.mkdir(exist_ok=True)
-        model.save_pretrained(model_dir)
-        processor.save_pretrained(model_dir)
-        print("Successfully downloaded and saved wav2vec2 model")
-    except Exception as e:
-        print(f"Error setting up wav2vec2 model: {e}")
-        print("Please download the model manually from https://huggingface.co/facebook/wav2vec2-base")
+Supported formats:
+- PyTorch (.pt, .pth)
+- TensorFlow (.pb, .tflite)
+- ONNX (.onnx)
 
-    # Check for missing custom models
-    custom_models = ["emotion_model.pt"]
-    missing_custom = [model for model in custom_models if not (models_dir / model).exists()]
-    if missing_custom:
-        print("\nWarning: The following custom model files need to be downloaded separately:")
-        for model in missing_custom:
-            print(f"  - {model}")
-        print("\nPlease follow the instructions in README.md to obtain these models.")
+The system will automatically detect and use the appropriate model.
+            """)
 
 def setup_environment():
     """Setup virtual environment and install dependencies."""
-    if not Path("venv").exists():
+    venv_path = Path("venv")
+    
+    if not venv_path.exists():
         print("Creating virtual environment...")
         subprocess.run([sys.executable, "-m", "venv", "venv"])
 
     # Determine the correct pip path
     if platform.system() == "Windows":
         pip_path = "venv\\Scripts\\pip"
+        python_path = "venv\\Scripts\\python"
     else:
         pip_path = "venv/bin/pip"
+        python_path = "venv/bin/python"
 
     # Install/upgrade pip
     subprocess.run([pip_path, "install", "--upgrade", "pip"])
@@ -217,89 +118,533 @@ def setup_environment():
     # Install dependencies
     print("Installing dependencies...")
     subprocess.run([pip_path, "install", "-r", "requirements.txt"])
+    
+    # Install PyQt5 for GUI
+    subprocess.run([pip_path, "install", "PyQt5"])
+    
+    return python_path
 
-def create_env_template():
-    """Create .env template file."""
-    env_template = """# Environment Configuration
+def setup_raspberry_pi():
+    """Setup Raspberry Pi specific configurations."""
+    print("Setting up Raspberry Pi specific configurations...")
+    
+    # Install system dependencies
+    subprocess.run([
+        "sudo", "apt-get", "update"
+    ])
+    
+    subprocess.run([
+        "sudo", "apt-get", "install", "-y",
+        "python3-pip", "python3-picamera2", "libportaudio2", 
+        "portaudio19-dev", "python3-opencv", "libopencv-dev",
+        "python3-venv", "git"
+    ])
+    
+    # Setup camera module
+    subprocess.run(["sudo", "modprobe", "bcm2835-v4l2"])
+    
+    # Add module to load at boot
+    modules_file = Path("/etc/modules")
+    if modules_file.exists():
+        with open(modules_file, 'r') as f:
+            content = f.read()
+        
+        if "bcm2835-v4l2" not in content:
+            with open("/tmp/modules", 'w') as f:
+                f.write(content + "\nbcm2835-v4l2\n")
+            
+            subprocess.run(["sudo", "mv", "/tmp/modules", "/etc/modules"])
+    
+    print("Raspberry Pi setup completed.")
+
+def create_env_file():
+    """Create .env file with default configuration."""
+    env_content = """# Baby Monitor System Environment Configuration
+# Generated by setup.py
+
+# Camera Settings
 CAMERA_INDEX=0
+CAMERA_RESOLUTION=640x480
+CAMERA_FPS=30
+
+# Audio Settings
 AUDIO_DEVICE_INDEX=0
-GPU_ENABLED=true
-MODEL_PATH=models/
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHANNELS=1
+
+# Detection Settings
+DETECTION_THRESHOLD=0.5
+EMOTION_THRESHOLD=0.7
+
+# System Settings
+GPU_ENABLED=false
 LOG_LEVEL=INFO
+WEB_HOST=0.0.0.0
+WEB_PORT=5000
+
+# Paths
+MODEL_PATH=models/
+LOG_PATH=logs/
+DATA_PATH=data/
 """
-    with open(".env.template", "w") as f:
-        f.write(env_template)
-    print("Created .env.template file")
+    
+    with open(".env", "w") as f:
+        f.write(env_content)
+    
+    print("Created .env file with default configuration")
 
-def main():
-    """Main setup function."""
-    print("Starting Baby Monitor System setup...")
+def create_config_files():
+    """Create configuration files."""
+    CONFIG_DIR.mkdir(exist_ok=True)
     
-    # Initialize system setup
-    system = SystemSetup()
-    logger = system.logger
-    
-    # Create necessary directories
-    for dir_name in ["models", "logs", "data", "config"]:
-        Path(dir_name).mkdir(exist_ok=True)
-        logger.info(f"Created directory: {dir_name}")
-
-    # Setup environment
-    setup_environment()
-    
-    # Download and setup models
-    setup_models()
-    
-    # Create .env template
-    create_env_template()
-    
-    # Run system checks
-    checks = {
-        'python_version': system.check_python_version(),
-        'camera': system.check_camera(),
-        'audio': system.check_audio_devices(),
-        'gpu': system.check_gpu()
+    # Create camera config
+    camera_config = {
+        "default_camera_id": 0,
+        "resolution": {
+            "width": 640,
+            "height": 480
+        },
+        "fps": 30,
+        "flip_horizontal": False,
+        "flip_vertical": False
     }
     
-    # Optimize configuration
-    config = system.optimize_config()
+    with open(CONFIG_DIR / "camera.json", "w") as f:
+        json.dump(camera_config, f, indent=4)
     
-    # Save configuration
-    config_path = Path('config/system_config.json')
-    config_path.parent.mkdir(exist_ok=True)
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=4)
+    # Create audio config
+    audio_config = {
+        "default_device_id": 0,
+        "sample_rate": 16000,
+        "channels": 1,
+        "chunk_size": 1024,
+        "enable_noise_reduction": True
+    }
     
-    # Print setup results
-    print("\nSystem Setup Complete!")
-    print("=====================")
+    with open(CONFIG_DIR / "audio.json", "w") as f:
+        json.dump(audio_config, f, indent=4)
     
-    # System Requirements
-    print("\nSystem Requirements Check:")
-    for check_name, (status, message) in checks.items():
-        print(f"{check_name}: {'✓' if status else '✗'} - {message}")
+    # Create detection config
+    detection_config = {
+        "person_threshold": 0.5,
+        "emotion_threshold": 0.7,
+        "detection_types": ["face", "upper_body", "full_body"],
+        "enable_tracking": True
+    }
     
-    # System Information
-    info = system.get_system_info()
-    print(f"\nSystem Information:")
-    print(f"CPU Cores: {info['cpu_count']}")
-    print(f"Total RAM: {info['total_memory']:.1f}GB")
-    print(f"Free Disk Space: {info['free_disk']:.1f}GB")
-    print(f"GPU: {info['gpu_name']}")
+    with open(CONFIG_DIR / "detection.json", "w") as f:
+        json.dump(detection_config, f, indent=4)
     
-    # Configuration
-    print("\nSystem Configuration:")
-    print(f"Using GPU: {config['use_gpu']}")
-    print(f"Batch Size: {config['batch_size']}")
-    print(f"Audio Chunk Size: {config['audio_chunk_size']}")
-    print(f"Quantization Enabled: {config['use_quantization']}")
+    print("Created configuration files")
+
+def create_desktop_shortcut():
+    """Create desktop shortcut for the application."""
+    if platform.system() == "Windows":
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        shortcut_path = os.path.join(desktop_path, "Baby Monitor.bat")
+        
+        with open(shortcut_path, "w") as f:
+            f.write(f'@echo off\ncd "{os.getcwd()}"\n"{os.getcwd()}\\venv\\Scripts\\python" main.py\n')
+        
+        print(f"Created desktop shortcut at {shortcut_path}")
+    
+    elif platform.system() == "Linux":
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        shortcut_path = os.path.join(desktop_path, "BabyMonitor.desktop")
+        
+        with open(shortcut_path, "w") as f:
+            f.write(f"""[Desktop Entry]
+Type=Application
+Name=Baby Monitor
+Comment=Baby Monitor System
+Exec={os.getcwd()}/venv/bin/python {os.getcwd()}/main.py
+Icon={os.getcwd()}/src/babymonitor/web/static/img/logo.png
+Terminal=false
+Categories=Utility;
+""")
+        
+        # Make executable
+        os.chmod(shortcut_path, 0o755)
+        print(f"Created desktop shortcut at {shortcut_path}")
+
+def run_gui_installer():
+    """Run the graphical installer."""
+    try:
+        from PyQt5.QtWidgets import QApplication, QWizard, QWizardPage, QLabel, QVBoxLayout, QCheckBox, QProgressBar, QComboBox, QPushButton, QLineEdit, QFileDialog, QHBoxLayout, QRadioButton, QButtonGroup, QGroupBox
+        from PyQt5.QtCore import Qt, QThread, pyqtSignal
+        from PyQt5.QtGui import QFont, QPixmap, QIcon
+    except ImportError:
+        print("PyQt5 not found. Installing...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "PyQt5"])
+        from PyQt5.QtWidgets import QApplication, QWizard, QWizardPage, QLabel, QVBoxLayout, QCheckBox, QProgressBar, QComboBox, QPushButton, QLineEdit, QFileDialog, QHBoxLayout, QRadioButton, QButtonGroup, QGroupBox
+        from PyQt5.QtCore import Qt, QThread, pyqtSignal
+        from PyQt5.QtGui import QFont, QPixmap, QIcon
+    
+    class SetupThread(QThread):
+        progress_update = pyqtSignal(int, str)
+        finished_signal = pyqtSignal()
+        
+        def __init__(self, options):
+            super().__init__()
+            self.options = options
+        
+        def run(self):
+            total_steps = 7
+            current_step = 0
+            
+            # Create directories
+            self.progress_update.emit(int(current_step / total_steps * 100), "Creating directories...")
+            for directory in [MODELS_DIR, LOGS_DIR, CONFIG_DIR, DATA_DIR]:
+                directory.mkdir(exist_ok=True)
+            current_step += 1
+            
+            # Setup environment
+            self.progress_update.emit(int(current_step / total_steps * 100), "Setting up environment...")
+            python_path = setup_environment()
+            current_step += 1
+            
+            # Setup models
+            if self.options.get('download_models', True):
+                self.progress_update.emit(int(current_step / total_steps * 100), "Downloading models...")
+                setup_models()
+            current_step += 1
+            
+            # Raspberry Pi specific setup
+            if is_raspberry_pi() and self.options.get('setup_raspberry_pi', True):
+                self.progress_update.emit(int(current_step / total_steps * 100), "Setting up Raspberry Pi...")
+                setup_raspberry_pi()
+            current_step += 1
+            
+            # Create configuration files
+            self.progress_update.emit(int(current_step / total_steps * 100), "Creating configuration files...")
+            create_config_files()
+            current_step += 1
+            
+            # Create .env file
+            self.progress_update.emit(int(current_step / total_steps * 100), "Creating environment file...")
+            create_env_file()
+            current_step += 1
+            
+            # Create desktop shortcut
+            if self.options.get('create_shortcut', True):
+                self.progress_update.emit(int(current_step / total_steps * 100), "Creating desktop shortcut...")
+                create_desktop_shortcut()
+            
+            self.progress_update.emit(100, "Setup completed!")
+            self.finished_signal.emit()
+    
+    class WelcomePage(QWizardPage):
+        def __init__(self):
+            super().__init__()
+            self.setTitle("Welcome to Baby Monitor System Setup")
+            
+            layout = QVBoxLayout()
+            
+            # Add logo
+            logo_label = QLabel()
+            logo_path = Path("src/babymonitor/web/static/img/logo.png")
+            if logo_path.exists():
+                pixmap = QPixmap(str(logo_path))
+                logo_label.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio))
+                logo_label.setAlignment(Qt.AlignCenter)
+                layout.addWidget(logo_label)
+            
+            # Welcome text
+            welcome_text = QLabel(
+                "This wizard will guide you through the installation and setup of the Baby Monitor System.\n\n"
+                "The setup will:\n"
+                "• Install required dependencies\n"
+                "• Download necessary models\n"
+                "• Configure the system\n"
+                "• Create desktop shortcuts\n\n"
+                "Click Next to continue."
+            )
+            welcome_text.setWordWrap(True)
+            layout.addWidget(welcome_text)
+            
+            self.setLayout(layout)
+    
+    class ComponentsPage(QWizardPage):
+        def __init__(self):
+            super().__init__()
+            self.setTitle("Select Components to Install")
+            
+            layout = QVBoxLayout()
+            
+            # Components selection
+            components_label = QLabel("Select the components you want to install:")
+            layout.addWidget(components_label)
+            
+            self.download_models_cb = QCheckBox("Download detection models")
+            self.download_models_cb.setChecked(True)
+            layout.addWidget(self.download_models_cb)
+            
+            self.create_shortcut_cb = QCheckBox("Create desktop shortcut")
+            self.create_shortcut_cb.setChecked(True)
+            layout.addWidget(self.create_shortcut_cb)
+            
+            if is_raspberry_pi():
+                self.setup_raspberry_pi_cb = QCheckBox("Configure Raspberry Pi (camera, audio)")
+                self.setup_raspberry_pi_cb.setChecked(True)
+                layout.addWidget(self.setup_raspberry_pi_cb)
+            
+            self.registerField("download_models", self.download_models_cb)
+            self.registerField("create_shortcut", self.create_shortcut_cb)
+            if is_raspberry_pi():
+                self.registerField("setup_raspberry_pi", self.setup_raspberry_pi_cb)
+            
+            self.setLayout(layout)
+    
+    class ConfigurationPage(QWizardPage):
+        def __init__(self):
+            super().__init__()
+            self.setTitle("System Configuration")
+            
+            layout = QVBoxLayout()
+            
+            # Camera configuration
+            camera_group = QGroupBox("Camera Configuration")
+            camera_layout = QVBoxLayout()
+            
+            camera_id_layout = QHBoxLayout()
+            camera_id_label = QLabel("Camera ID:")
+            self.camera_id_combo = QComboBox()
+            self.camera_id_combo.addItems(["0", "1", "2", "3"])
+            camera_id_layout.addWidget(camera_id_label)
+            camera_id_layout.addWidget(self.camera_id_combo)
+            camera_layout.addLayout(camera_id_layout)
+            
+            resolution_layout = QHBoxLayout()
+            resolution_label = QLabel("Resolution:")
+            self.resolution_combo = QComboBox()
+            self.resolution_combo.addItems(["640x480", "1280x720", "1920x1080"])
+            resolution_layout.addWidget(resolution_label)
+            resolution_layout.addWidget(self.resolution_combo)
+            camera_layout.addLayout(resolution_layout)
+            
+            camera_group.setLayout(camera_layout)
+            layout.addWidget(camera_group)
+            
+            # Web interface configuration
+            web_group = QGroupBox("Web Interface Configuration")
+            web_layout = QVBoxLayout()
+            
+            port_layout = QHBoxLayout()
+            port_label = QLabel("Web Port:")
+            self.port_edit = QLineEdit("5000")
+            port_layout.addWidget(port_label)
+            port_layout.addWidget(self.port_edit)
+            web_layout.addLayout(port_layout)
+            
+            web_group.setLayout(web_layout)
+            layout.addWidget(web_group)
+            
+            # Detection configuration
+            detection_group = QGroupBox("Detection Configuration")
+            detection_layout = QVBoxLayout()
+            
+            threshold_layout = QHBoxLayout()
+            threshold_label = QLabel("Detection Threshold:")
+            self.threshold_combo = QComboBox()
+            self.threshold_combo.addItems(["0.3 (More sensitive)", "0.5 (Balanced)", "0.7 (Less sensitive)"])
+            self.threshold_combo.setCurrentIndex(1)
+            threshold_layout.addWidget(threshold_label)
+            threshold_layout.addWidget(self.threshold_combo)
+            detection_layout.addLayout(threshold_layout)
+            
+            detection_group.setLayout(detection_layout)
+            layout.addWidget(detection_group)
+            
+            self.registerField("camera_id", self.camera_id_combo, "currentText")
+            self.registerField("resolution", self.resolution_combo, "currentText")
+            self.registerField("web_port", self.port_edit)
+            self.registerField("detection_threshold", self.threshold_combo, "currentText")
+            
+            self.setLayout(layout)
+    
+    class InstallationPage(QWizardPage):
+        def __init__(self):
+            super().__init__()
+            self.setTitle("Installing Baby Monitor System")
+            
+            layout = QVBoxLayout()
+            
+            self.status_label = QLabel("Preparing installation...")
+            layout.addWidget(self.status_label)
+            
+            self.progress_bar = QProgressBar()
+            layout.addWidget(self.progress_bar)
+            
+            self.details_label = QLabel("")
+            self.details_label.setWordWrap(True)
+            layout.addWidget(self.details_label)
+            
+            self.setLayout(layout)
+            
+            # Flag to track if installation is complete
+            self.installation_complete = False
+        
+        def isComplete(self):
+            # Only allow proceeding to the next page when installation is complete
+            return self.installation_complete
+        
+        def initializePage(self):
+            # Reset the completion flag
+            self.installation_complete = False
+            
+            # Emit the completeChanged signal to update the Next button state
+            self.completeChanged.emit()
+            
+            # Get options from previous pages
+            options = {
+                'download_models': self.field("download_models"),
+                'create_shortcut': self.field("create_shortcut"),
+                'camera_id': self.field("camera_id"),
+                'resolution': self.field("resolution"),
+                'web_port': self.field("web_port"),
+                'detection_threshold': self.field("detection_threshold")
+            }
+            
+            if is_raspberry_pi():
+                options['setup_raspberry_pi'] = self.field("setup_raspberry_pi")
+            
+            # Update .env file with selected options
+            threshold_map = {
+                "0.3 (More sensitive)": "0.3",
+                "0.5 (Balanced)": "0.5",
+                "0.7 (Less sensitive)": "0.7"
+            }
+            
+            # Start installation thread
+            self.thread = SetupThread(options)
+            self.thread.progress_update.connect(self.update_progress)
+            self.thread.finished_signal.connect(self.installation_finished)
+            self.thread.start()
+        
+        def update_progress(self, progress, message):
+            self.progress_bar.setValue(progress)
+            self.status_label.setText(message)
+            self.details_label.setText(f"Current task: {message}")
+        
+        def installation_finished(self):
+            self.progress_bar.setValue(100)
+            self.status_label.setText("Installation completed successfully!")
+            self.details_label.setText("You can now start the Baby Monitor System.")
+            
+            # Set the completion flag and update the Next button
+            self.installation_complete = True
+            self.completeChanged.emit()
+    
+    class CompletionPage(QWizardPage):
+        def __init__(self):
+            super().__init__()
+            self.setTitle("Installation Complete")
+            
+            layout = QVBoxLayout()
+            
+            completion_text = QLabel(
+                "The Baby Monitor System has been successfully installed!\n\n"
+                "You can now start the system using one of the following methods:\n\n"
+                "• Desktop shortcut (if created)\n"
+                "• Command line: python main.py\n\n"
+                "For more information, please refer to the README.md file."
+            )
+            completion_text.setWordWrap(True)
+            layout.addWidget(completion_text)
+            
+            self.start_now_cb = QCheckBox("Start Baby Monitor System now")
+            self.start_now_cb.setChecked(True)
+            layout.addWidget(self.start_now_cb)
+            
+            self.registerField("start_now", self.start_now_cb)
+            
+            self.setLayout(layout)
+    
+    class InstallerWizard(QWizard):
+        def __init__(self):
+            super().__init__()
+            
+            self.setWindowTitle("Baby Monitor System Setup")
+            self.setWizardStyle(QWizard.ModernStyle)
+            
+            # Set window size
+            self.setMinimumSize(600, 500)
+            
+            # Add pages
+            self.addPage(WelcomePage())
+            self.addPage(ComponentsPage())
+            self.addPage(ConfigurationPage())
+            self.addPage(InstallationPage())
+            self.addPage(CompletionPage())
+            
+            # Connect signals
+            self.finished.connect(self.on_finished)
+        
+        def on_finished(self, result):
+            if result == QWizard.Accepted and self.field("start_now"):
+                # Start the Baby Monitor System
+                if platform.system() == "Windows":
+                    python_path = "venv\\Scripts\\python"
+                else:
+                    python_path = "venv/bin/python"
+                
+                subprocess.Popen([python_path, "main.py"])
+    
+    app = QApplication(sys.argv)
+    wizard = InstallerWizard()
+    wizard.show()
+    sys.exit(app.exec_())
+
+def main():
+    """Main entry point for setup."""
+    parser = argparse.ArgumentParser(description="Baby Monitor System Setup")
+    parser.add_argument("--no-gui", action="store_true", help="Run setup without GUI")
+    parser.add_argument("--skip-models", action="store_true", help="Skip downloading models")
+    parser.add_argument("--skip-shortcut", action="store_true", help="Skip creating desktop shortcut")
+    
+    args = parser.parse_args()
+    
+    # Create necessary directories
+    for directory in [MODELS_DIR, LOGS_DIR, CONFIG_DIR, DATA_DIR]:
+        directory.mkdir(exist_ok=True)
+        logger.info(f"Created directory: {directory}")
+    
+    if args.no_gui:
+        # Run command-line setup
+        logger.info("Starting command-line setup...")
+        
+        # Setup environment
+        setup_environment()
+        
+        # Setup models
+        if not args.skip_models:
+            setup_models()
+        
+        # Raspberry Pi specific setup
+        if is_raspberry_pi():
+            setup_raspberry_pi()
+        
+        # Create configuration files
+        create_config_files()
+        
+        # Create .env file
+        create_env_file()
+        
+        # Create desktop shortcut
+        if not args.skip_shortcut:
+            create_desktop_shortcut()
+        
+        logger.info("Setup completed successfully!")
+    else:
+        # Run GUI setup
+        run_gui_installer()
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        # Run the configuration setup when no arguments are provided
+    if len(sys.argv) == 1 or sys.argv[1] != "install":
+        # Run the setup script
         main()
     else:
-        # Run setuptools setup when arguments are provided
+        # Run setuptools setup when 'install' argument is provided
         setup(
             name="babymonitor",
             version="1.0.0",
@@ -308,20 +653,15 @@ if __name__ == "__main__":
             install_requires=[
                 "opencv-python>=4.5.0",
                 "numpy>=1.19.0",
-                "torch>=1.9.0",
-                "matplotlib>=3.3.0",
-                "pillow>=8.0.0",
-                "flask>=2.0.0",
-                "flask-socketio>=5.0.0",
-                "transformers>=4.5.0",
-                "sounddevice>=0.4.0",
-                "scipy>=1.7.0",
+                "torch>=1.10.0",
+                "torchaudio>=0.10.0",
                 "librosa>=0.8.0",
-                "ultralytics>=8.0.0",
+                "sounddevice>=0.4.0",
+                "soundfile>=0.10.0",
+                "flask>=2.0.0",
+                "flask-socketio>=5.1.1",
                 "python-dotenv>=0.19.0",
-                "pytest>=6.0.0",
-                "black>=21.0.0",
-                "flake8>=3.9.0"
+                "psutil>=5.8.0"
             ],
             entry_points={
                 "console_scripts": [
@@ -330,20 +670,23 @@ if __name__ == "__main__":
             },
             include_package_data=True,
             package_data={
-                "babymonitor.web": ["templates/*", "static/*"],
-                "edge_comp": ["models/*.pt", "models/*.pth"],
+                "babymonitor": [
+                    "detectors/models/*.pb",
+                    "detectors/models/*.pbtxt",
+                    "detectors/models/emotion/*.pt",
+                    "web/templates/*",
+                    "web/static/*"
+                ]
             },
             python_requires=">=3.8",
             author="Your Name",
             author_email="your.email@example.com",
-            description="A comprehensive baby monitoring system with video, audio, and emotion detection",
-            long_description=open("README.md").read(),
+            description="A baby monitoring system with person detection and emotion recognition",
+            long_description=open("README.md").read() if os.path.exists("README.md") else "",
             long_description_content_type="text/markdown",
-            url="https://github.com/yourusername/babymonitor",
             classifiers=[
                 "Development Status :: 3 - Alpha",
                 "Intended Audience :: End Users/Desktop",
-                "License :: OSI Approved :: MIT License",
                 "Programming Language :: Python :: 3",
                 "Programming Language :: Python :: 3.8",
                 "Programming Language :: Python :: 3.9",
