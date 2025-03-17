@@ -7,16 +7,32 @@ A simplified web server for the Baby Monitor System that works reliably on Windo
 import os
 import json
 import time
+import signal
+import socket
 import threading
 import logging
+import eventlet
+eventlet.monkey_patch()  # Patch standard library for eventlet compatibility
 from datetime import datetime
 from flask import Flask, render_template, Response, jsonify, redirect, url_for, request
+from flask_socketio import SocketIO
 import numpy as np
 import psutil
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('SimpleBabyMonitorWeb')
+
+def find_free_port(start_port=5000, max_port=5100):
+    """Find a free port to use"""
+    for port in range(start_port, max_port):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    raise OSError("No free ports available")
 
 class SimpleBabyMonitorWeb:
     """
@@ -36,17 +52,18 @@ class SimpleBabyMonitorWeb:
             mode: Web interface mode ('normal' or 'dev')
         """
         self.host = host
-        self.port = port
+        self.port = find_free_port(port)  # Find an available port
         self.debug = debug
         self.mode = mode
         self.camera = camera
         self.person_detector = person_detector
         self.emotion_detector = emotion_detector
         
-        # Create Flask app
+        # Create Flask app and Socket.IO
         self.app = Flask(__name__, 
                         template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
                         static_folder=os.path.join(os.path.dirname(__file__), 'static'))
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='eventlet')
         
         # Frame buffer
         self.frame_buffer = None
@@ -140,6 +157,40 @@ class SimpleBabyMonitorWeb:
             """Repair tools page"""
             return render_template('repair_tools.html', mode=self.mode)
         
+        @self.app.route('/repair/run', methods=['POST'])
+        def repair_run():
+            """API endpoint for repair tools"""
+            try:
+                tool = request.form.get('tool')
+                if tool == 'restart_camera':
+                    if self.camera:
+                        self.camera.release()
+                        time.sleep(1)
+                        self.camera.open(0)
+                        return jsonify({'status': 'success', 'message': 'Camera restarted successfully'})
+                    return jsonify({'status': 'error', 'message': 'Camera not initialized'})
+                
+                elif tool == 'restart_audio':
+                    if self.emotion_detector:
+                        self.emotion_detector.reset()
+                        return jsonify({'status': 'success', 'message': 'Audio system restarted successfully'})
+                    return jsonify({'status': 'error', 'message': 'Audio system not initialized'})
+                
+                elif tool == 'restart_system':
+                    if self.camera:
+                        self.camera.release()
+                        time.sleep(1)
+                        self.camera.open(0)
+                    if self.emotion_detector:
+                        self.emotion_detector.reset()
+                    if self.person_detector:
+                        self.person_detector.reset()
+                    return jsonify({'status': 'success', 'message': 'System restarted successfully'})
+                
+                return jsonify({'status': 'error', 'message': 'Invalid repair tool'})
+            except Exception as e:
+                return jsonify({'status': 'error', 'message': str(e)})
+        
         if self.mode == "dev":
             @self.app.route('/dev/tools')
             def dev_tools():
@@ -189,6 +240,8 @@ class SimpleBabyMonitorWeb:
         # Initialize detection history for smoothing
         detection_history = []
         max_history = 5
+        last_fps_time = time.time()
+        frame_count = 0
         
         while self.running:
             try:
@@ -199,14 +252,47 @@ class SimpleBabyMonitorWeb:
                     time.sleep(0.1)
                     continue
                 
+                # Calculate FPS
+                frame_count += 1
+                current_time = time.time()
+                if current_time - last_fps_time >= 1.0:
+                    self.metrics['current']['fps'] = frame_count
+                    frame_count = 0
+                    last_fps_time = current_time
+                
                 # Process frame with person detector
                 results = self.person_detector.process_frame(frame)
                 
-                # Store detection results in history for smoothing
+                # Get emotion detection results
+                if self.emotion_detector:
+                    try:
+                        emotion_results = self.emotion_detector.get_current_state()
+                        if emotion_results:
+                            # Update current emotion metrics
+                            self.metrics['current']['emotion'] = emotion_results['emotion']
+                            self.metrics['current']['emotion_confidence'] = emotion_results['confidence']
+                            
+                            # Update emotion history
+                            emotion = emotion_results['emotion']
+                            if emotion in self.metrics['history']['emotions']:
+                                self.metrics['history']['emotions'][emotion] += 1
+                            
+                            # Emit emotion update via Socket.IO
+                            self.socketio.emit('emotion_update', {
+                                'emotion': emotion_results['emotion'],
+                                'confidence': emotion_results['confidence'],
+                                'confidences': emotion_results['confidences']
+                            })
+                    except Exception as e:
+                        logger.error(f"Error getting emotion state: {e}")
+                
+                # Update detection metrics and emit update
                 if 'detections' in results:
-                    detection_history.append(results['detections'])
-                    if len(detection_history) > max_history:
-                        detection_history.pop(0)
+                    detection_count = len(results['detections'])
+                    self.socketio.emit('detection_update', {
+                        'count': detection_count,
+                        'fps': self.metrics['current']['fps']
+                    })
                 
                 # Create a copy of the frame for drawing
                 display_frame = frame.copy()
@@ -323,6 +409,20 @@ class SimpleBabyMonitorWeb:
                     cv2.LINE_AA
                 )
                 
+                # Add current emotion to the frame
+                if self.emotion_detector:
+                    emotion_text = f"Emotion: {self.metrics['current']['emotion']} ({self.metrics['current']['emotion_confidence']:.2f})"
+                    cv2.putText(
+                        display_frame,
+                        emotion_text,
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA
+                    )
+                
                 # Encode frame to JPEG
                 _, buffer = cv2.imencode('.jpg', display_frame)
                 
@@ -348,16 +448,34 @@ class SimpleBabyMonitorWeb:
                 hours, remainder = divmod(uptime, 3600)
                 minutes, seconds = divmod(remainder, 60)
                 
+                # Get emotion state
+                current_emotion = "Unknown"
+                if self.emotion_detector and hasattr(self.emotion_detector, 'current_emotion'):
+                    current_emotion = self.emotion_detector.current_emotion
+                
                 # Update system status
-                self.system_status = {
+                self.system_status.update({
                     'uptime': f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}",
                     'cpu_usage': psutil.cpu_percent(),
                     'memory_usage': psutil.virtual_memory().percent,
-                    'camera_status': 'connected' if self.camera else 'disconnected',
+                    'camera_status': 'connected' if self.camera and self.camera.is_opened() else 'disconnected',
                     'person_detector_status': 'running' if self.person_detector else 'stopped',
                     'emotion_detector_status': 'running' if self.emotion_detector else 'stopped',
-                    'fps': self.metrics['current']['fps']
-                }
+                    'fps': self.metrics['current']['fps'],
+                    'current_emotion': current_emotion
+                })
+                
+                # Emit system status via Socket.IO
+                self.socketio.emit('system_info', self.system_status)
+                
+                # Emit metrics update
+                self.socketio.emit('metrics_update', {
+                    'current': {
+                        'cpu_usage': self.system_status['cpu_usage'],
+                        'memory_usage': self.system_status['memory_usage'],
+                        'fps': self.system_status['fps']
+                    }
+                })
                 
                 # Sleep for 1 second
                 time.sleep(1)
@@ -396,11 +514,63 @@ class SimpleBabyMonitorWeb:
         # Start system status thread if not already running
         if not self.status_thread.is_alive():
             self.status_thread.start()
-            
-        # Run the Flask app
-        self.app.run(host=self.host, port=self.port, debug=self.debug, threaded=True)
+        
+        # Set up signal handlers
+        def signal_handler(signum, frame):
+            logger.info("Received shutdown signal")
+            self.stop()
+            os._exit(0)  # Force exit if normal shutdown fails
+        
+        # Register signal handlers
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        try:
+            # Run the Flask app with Socket.IO
+            self.socketio.run(
+                self.app,
+                host=self.host,
+                port=self.port,
+                debug=self.debug,
+                use_reloader=False  # Disable reloader to prevent duplicate processes
+            )
+        except Exception as e:
+            logger.error(f"Error running web server: {e}")
+            self.stop()
     
     def stop(self):
         """Stop the web server"""
+        if not self.running:
+            return
+            
         self.running = False
-        logger.info("Stopping Baby Monitor Web Server") 
+        logger.info("Stopping Baby Monitor Web Server")
+        
+        try:
+            # Stop Socket.IO
+            self.socketio.stop()
+            
+            # Stop camera if it's running
+            if self.camera and hasattr(self.camera, 'release'):
+                self.camera.release()
+            
+            # Stop emotion detector if it's running
+            if self.emotion_detector and hasattr(self.emotion_detector, 'stop'):
+                self.emotion_detector.stop()
+            
+            # Stop person detector if it's running
+            if self.person_detector and hasattr(self.person_detector, 'stop'):
+                self.person_detector.stop()
+            
+            # Wait for threads to finish
+            if self.processing_thread.is_alive():
+                self.processing_thread.join(timeout=1.0)
+            
+            if self.status_thread.is_alive():
+                self.status_thread.join(timeout=1.0)
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            
+        finally:
+            logger.info("Web server stopped") 

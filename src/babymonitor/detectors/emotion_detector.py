@@ -47,6 +47,8 @@ class EmotionDetector(BaseDetector):
         self.state_duration = 0
         self.state_change_probability = 0.1
         self.last_update_time = time.time()
+        self.confidence = 0.0
+        self.confidences = {emotion: 0.0 for emotion in self.EMOTIONS}
         
         # Initialize model
         model_dir = self._get_model_dir(model_path)
@@ -248,4 +250,44 @@ class EmotionDetector(BaseDetector):
             "frame": frame,
             "detections": [],
             "fps": float(self.fps)  # Ensure it's a float for JSON serialization
+        }
+
+    def get_current_state(self) -> Dict[str, Any]:
+        """Get the current emotion state.
+        
+        Returns:
+            Dict containing:
+                - emotion: Current emotion state
+                - confidence: Confidence in current emotion
+                - confidences: Dict of confidences for all emotions
+        """
+        current_time = time.time()
+        time_elapsed = current_time - self.last_update_time
+        
+        # Update state if enough time has passed
+        if time_elapsed >= 1.0:  # Update every second
+            self.state_duration += time_elapsed
+            
+            # Randomly change state with increasing probability over time
+            change_prob = self.state_change_probability * (1 + self.state_duration)
+            if random.random() < change_prob:
+                # Choose a new emotion
+                new_emotion = random.choice(self.EMOTIONS)
+                while new_emotion == self.emotion_state:  # Ensure it's different
+                    new_emotion = random.choice(self.EMOTIONS)
+                    
+                self.emotion_state = new_emotion
+                self.state_duration = 0
+                self.confidence = random.uniform(0.6, 0.95)
+                
+                # Update confidences for all emotions
+                self.confidences = {emotion: random.uniform(0.1, 0.4) for emotion in self.EMOTIONS}
+                self.confidences[self.emotion_state] = self.confidence
+            
+            self.last_update_time = current_time
+        
+        return {
+            'emotion': self.emotion_state,
+            'confidence': self.confidence,
+            'confidences': self.confidences
         } 
