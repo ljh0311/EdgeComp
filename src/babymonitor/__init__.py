@@ -5,14 +5,10 @@ A comprehensive baby monitoring system with emotion recognition,
 camera monitoring, and other features.
 """
 
-from .core.main import BabyMonitorSystem
-from .camera.camera import Camera
-from .audio.audio_processor import AudioProcessor
-from .emotion.emotion import EmotionRecognizer
-from .detectors.person_detector import PersonDetector
-from .core.web_app import BabyMonitorWeb
-
+# Version information
 __version__ = "1.0.0"
+
+# Define what should be imported with "from babymonitor import *"
 __all__ = [
     "BabyMonitorSystem",
     "Camera",
@@ -21,3 +17,6 @@ __all__ = [
     "PersonDetector",
     "BabyMonitorWeb",
 ]
+
+# Note: We're not importing modules directly here to avoid circular imports
+# Users should import specific modules as needed

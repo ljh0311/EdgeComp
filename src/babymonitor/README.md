@@ -32,17 +32,20 @@ The Baby Monitor System is a Python-based application that provides real-time mo
 ## Installation
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/yourusername/babymonitor.git
    cd babymonitor
    ```
 
 2. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. Download models:
+
    ```bash
    python -m src.babymonitor.utils.setup_models
    ```
@@ -92,4 +95,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.

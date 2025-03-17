@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Baby Monitor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/metrics.css') }}">
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-camera-video"></i> Baby Monitor
+                <span class="badge bg-danger">DEV MODE</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/metrics">Metrics</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/repair">Repair Tools</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dev/tools">Dev Tools</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dev/logs">Logs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/dev/settings">Settings</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h1 class="mb-3">System Settings</h1>
+                <p class="text-muted">Configure and customize the Baby Monitor System.</p>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Camera Settings -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-camera"></i> Camera Settings
+                    </div>
+                    <div class="card-body">
+                        <form id="cameraSettingsForm">
+                            <div class="mb-3">
+                                <label for="cameraId" class="form-label">Camera Device</label>
+                                <select class="form-select" id="cameraId">
+                                    <option value="0">Default Camera (0)</option>
+                                    <option value="1">Camera 1</option>
+                                    <option value="2">Camera 2</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="cameraResolution" class="form-label">Resolution</label>
+                                <select class="form-select" id="cameraResolution">
+                                    <option value="640x480">640x480 (VGA)</option>
+                                    <option value="1280x720">1280x720 (HD)</option>
+                                    <option value="1920x1080">1920x1080 (Full HD)</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="frameRate" class="form-label">Frame Rate</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="frameRate" min="1" max="60" value="30">
+                                    <span class="input-group-text">FPS</span>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="mirrorCamera" checked>
+                                    <label class="form-check-label" for="mirrorCamera">Mirror Camera</label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Camera Settings</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detection Settings -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-person-bounding-box"></i> Detection Settings
+                    </div>
+                    <div class="card-body">
+                        <form id="detectionSettingsForm">
+                            <div class="mb-3">
+                                <label for="detectionThreshold" class="form-label">Detection Threshold</label>
+                                <div class="input-group">
+                                    <input type="range" class="form-range" id="detectionThreshold" min="0.1" max="0.9" step="0.05" value="0.5">
+                                    <span class="input-group-text" id="thresholdValue">0.5</span>
+                                </div>
+                                <div class="form-text">Higher values increase precision but may miss detections.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Detection Types</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="detectFace" checked>
+                                    <label class="form-check-label" for="detectFace">Face Detection</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="detectUpperBody" checked>
+                                    <label class="form-check-label" for="detectUpperBody">Upper Body Detection</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="detectFullBody" checked>
+                                    <label class="form-check-label" for="detectFullBody">Full Body Detection</label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="enableTracking" checked>
+                                    <label class="form-check-label" for="enableTracking">Enable Object Tracking</label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Detection Settings</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audio Settings -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-mic"></i> Audio Settings
+                    </div>
+                    <div class="card-body">
+                        <form id="audioSettingsForm">
+                            <div class="mb-3">
+                                <label for="audioDevice" class="form-label">Audio Input Device</label>
+                                <select class="form-select" id="audioDevice">
+                                    <option value="default">Default Microphone</option>
+                                    <option value="1">Microphone 1</option>
+                                    <option value="2">Microphone 2</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="sampleRate" class="form-label">Sample Rate</label>
+                                <select class="form-select" id="sampleRate">
+                                    <option value="8000">8000 Hz</option>
+                                    <option value="16000" selected>16000 Hz</option>
+                                    <option value="44100">44100 Hz</option>
+                                    <option value="48000">48000 Hz</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="audioSensitivity" class="form-label">Sensitivity</label>
+                                <div class="input-group">
+                                    <input type="range" class="form-range" id="audioSensitivity" min="0.1" max="2.0" step="0.1" value="1.0">
+                                    <span class="input-group-text" id="sensitivityValue">1.0</span>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="noiseReduction" checked>
+                                    <label class="form-check-label" for="noiseReduction">Noise Reduction</label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Audio Settings</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Settings -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-gear"></i> System Settings
+                    </div>
+                    <div class="card-body">
+                        <form id="systemSettingsForm">
+                            <div class="mb-3">
+                                <label for="logLevel" class="form-label">Log Level</label>
+                                <select class="form-select" id="logLevel">
+                                    <option value="error">Error</option>
+                                    <option value="warning">Warning</option>
+                                    <option value="info" selected>Info</option>
+                                    <option value="debug">Debug</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="webHost" class="form-label">Web Interface Host</label>
+                                <input type="text" class="form-control" id="webHost" value="0.0.0.0">
+                            </div>
+                            <div class="mb-3">
+                                <label for="webPort" class="form-label">Web Interface Port</label>
+                                <input type="number" class="form-control" id="webPort" min="1024" max="65535" value="5000">
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="enableNotifications" checked>
+                                    <label class="form-check-label" for="enableNotifications">Enable Notifications</label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save System Settings</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Settings -->
+        <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-sliders"></i> Advanced Settings
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> Warning: Changing these settings may affect system stability.
+                        </div>
+                        <form id="advancedSettingsForm">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="modelPath" class="form-label">Person Detection Model Path</label>
+                                    <input type="text" class="form-control" id="modelPath" value="models/haarcascade_frontalface_default.xml">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="emotionModelPath" class="form-label">Emotion Detection Model Path</label>
+                                    <input type="text" class="form-control" id="emotionModelPath" value="models/emotion_model.pth">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="processingThreads" class="form-label">Processing Threads</label>
+                                    <input type="number" class="form-control" id="processingThreads" min="1" max="16" value="4">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="bufferSize" class="form-label">Frame Buffer Size</label>
+                                    <input type="number" class="form-control" id="bufferSize" min="1" max="100" value="10">
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="enableGPU">
+                                    <label class="form-check-label" for="enableGPU">Enable GPU Acceleration</label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-warning">Save Advanced Settings</button>
+                            <button type="button" class="btn btn-danger ms-2" id="resetToDefaults">Reset to Defaults</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Messages -->
+    <div class="container mb-4">
+        <div class="status-messages" id="statusMessages" style="display: none;">
+            <div class="status-message status-info">Settings loaded successfully.</div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io@4.5.4/client-dist/socket.io.min.js"></script>
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        
+        // DOM Elements
+        const statusMessages = document.getElementById('statusMessages');
+        const detectionThreshold = document.getElementById('detectionThreshold');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const audioSensitivity = document.getElementById('audioSensitivity');
+        const sensitivityValue = document.getElementById('sensitivityValue');
+        const resetToDefaults = document.getElementById('resetToDefaults');
+        
+        // Forms
+        const cameraSettingsForm = document.getElementById('cameraSettingsForm');
+        const detectionSettingsForm = document.getElementById('detectionSettingsForm');
+        const audioSettingsForm = document.getElementById('audioSettingsForm');
+        const systemSettingsForm = document.getElementById('systemSettingsForm');
+        const advancedSettingsForm = document.getElementById('advancedSettingsForm');
+        
+        // Update threshold value display
+        detectionThreshold.addEventListener('input', () => {
+            thresholdValue.textContent = detectionThreshold.value;
+        });
+        
+        // Update sensitivity value display
+        audioSensitivity.addEventListener('input', () => {
+            sensitivityValue.textContent = audioSensitivity.value;
+        });
+        
+        // Form submission handlers
+        cameraSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            showStatusMessage('Camera settings saved successfully.', 'success');
+            
+            // Send settings to server
+            socket.emit('dev_command', {
+                command: 'update_settings',
+                params: {
+                    category: 'camera',
+                    settings: {
+                        camera_id: document.getElementById('cameraId').value,
+                        resolution: document.getElementById('cameraResolution').value,
+                        frame_rate: document.getElementById('frameRate').value,
+                        mirror: document.getElementById('mirrorCamera').checked
+                    }
+                }
+            });
+        });
+        
+        detectionSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            showStatusMessage('Detection settings saved successfully.', 'success');
+            
+            // Send settings to server
+            socket.emit('dev_command', {
+                command: 'update_settings',
+                params: {
+                    category: 'detection',
+                    settings: {
+                        threshold: document.getElementById('detectionThreshold').value,
+                        detect_face: document.getElementById('detectFace').checked,
+                        detect_upper_body: document.getElementById('detectUpperBody').checked,
+                        detect_full_body: document.getElementById('detectFullBody').checked,
+                        enable_tracking: document.getElementById('enableTracking').checked
+                    }
+                }
+            });
+        });
+        
+        audioSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            showStatusMessage('Audio settings saved successfully.', 'success');
+            
+            // Send settings to server
+            socket.emit('dev_command', {
+                command: 'update_settings',
+                params: {
+                    category: 'audio',
+                    settings: {
+                        device: document.getElementById('audioDevice').value,
+                        sample_rate: document.getElementById('sampleRate').value,
+                        sensitivity: document.getElementById('audioSensitivity').value,
+                        noise_reduction: document.getElementById('noiseReduction').checked
+                    }
+                }
+            });
+        });
+        
+        systemSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            showStatusMessage('System settings saved successfully.', 'success');
+            
+            // Send settings to server
+            socket.emit('dev_command', {
+                command: 'update_settings',
+                params: {
+                    category: 'system',
+                    settings: {
+                        log_level: document.getElementById('logLevel').value,
+                        web_host: document.getElementById('webHost').value,
+                        web_port: document.getElementById('webPort').value,
+                        enable_notifications: document.getElementById('enableNotifications').checked
+                    }
+                }
+            });
+        });
+        
+        advancedSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            showStatusMessage('Advanced settings saved successfully.', 'success');
+            
+            // Send settings to server
+            socket.emit('dev_command', {
+                command: 'update_settings',
+                params: {
+                    category: 'advanced',
+                    settings: {
+                        model_path: document.getElementById('modelPath').value,
+                        emotion_model_path: document.getElementById('emotionModelPath').value,
+                        processing_threads: document.getElementById('processingThreads').value,
+                        buffer_size: document.getElementById('bufferSize').value,
+                        enable_gpu: document.getElementById('enableGPU').checked
+                    }
+                }
+            });
+        });
+        
+        // Reset to defaults
+        resetToDefaults.addEventListener('click', () => {
+            if (confirm('Are you sure you want to reset all settings to their default values?')) {
+                showStatusMessage('All settings have been reset to defaults.', 'info');
+                
+                // Send reset command to server
+                socket.emit('dev_command', {
+                    command: 'reset_settings'
+                });
+                
+                // Reload the page after a short delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            }
+        });
+        
+        // Show status message
+        function showStatusMessage(message, type = 'info') {
+            statusMessages.style.display = 'block';
+            
+            const messageElement = document.createElement('div');
+            messageElement.className = `status-message status-${type}`;
+            messageElement.textContent = message;
+            
+            statusMessages.innerHTML = '';
+            statusMessages.appendChild(messageElement);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                messageElement.style.opacity = '0';
+                setTimeout(() => {
+                    statusMessages.style.display = 'none';
+                }, 500);
+            }, 5000);
+        }
+        
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            
+            // Request current settings
+            socket.emit('dev_command', {
+                command: 'get_settings'
+            });
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            showStatusMessage('Disconnected from server. Settings cannot be saved.', 'error');
+        });
+        
+        socket.on('command_response', (data) => {
+            if (data.command === 'get_settings' && data.success) {
+                // Populate form fields with current settings
+                const settings = data.settings;
+                
+                // TODO: Populate form fields when server implements this feature
+                console.log('Received settings:', settings);
+            }
+        });
+    </script>
+</body>
+</html> 

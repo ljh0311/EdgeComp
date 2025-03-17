@@ -1,8 +1,7 @@
 """
 Base Detector Module
-------------------
-Provides a base class for all detector implementations.
-This ensures a consistent interface across different detector types.
+==================
+Base class for detector implementations.
 """
 
 import time
@@ -25,6 +24,7 @@ class BaseDetector(ABC):
         Args:
             threshold: Detection confidence threshold
         """
+        self.logger = logging.getLogger(__name__)
         self.threshold = threshold
         self.frame_count = 0
         self.fps = 0.0
@@ -35,7 +35,7 @@ class BaseDetector(ABC):
         self.last_detections = None
         
     @abstractmethod
-    def process_frame(self, frame: np.ndarray) -> Dict:
+    def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         """Process a single frame.
         
         Args:
@@ -47,12 +47,27 @@ class BaseDetector(ABC):
         pass
     
     def get_fps(self) -> float:
-        """Get the current FPS.
+        """Get the current FPS."""
+        if not self.frame_times:
+            return 0.0
         
-        Returns:
-            Current FPS
-        """
-        return self.fps
+        # Avoid division by zero
+        total_time = sum(self.frame_times)
+        if total_time <= 0:
+            return 0.0
+            
+        return len(self.frame_times) / total_time
+    
+    def update_fps(self, frame_time: float):
+        """Update FPS calculation with new frame time."""
+        # Ensure frame_time is positive to avoid division by zero
+        if frame_time <= 0:
+            frame_time = 0.001  # Use a small positive value instead
+            
+        self.frame_times.append(frame_time)
+        if len(self.frame_times) > self.max_frame_history:
+            self.frame_times.pop(0)
+        self.fps = self.get_fps()
     
     def get_processing_time(self) -> float:
         """Get the average processing time per frame.

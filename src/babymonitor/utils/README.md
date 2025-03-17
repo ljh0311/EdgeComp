@@ -118,4 +118,4 @@ python -m src.babymonitor.utils.test_detectors --detector lightweight --model pe
 
 # Test motion detector
 python -m src.babymonitor.utils.test_detectors --detector motion
-``` 
+```

@@ -36,40 +36,56 @@ logger = logging.getLogger(__name__)
 class EmotionRecognizer:
     """Real-time emotion recognition system using HuBERT"""
 
-    EMOTIONS = ["natural", "anger", "worried", "happy", "fear", "sadness"]
+    # Map our model's emotions to UI emotions
+    EMOTION_MAPPING = {
+        "natural": "neutral",
+        "anger": "angry",
+        "worried": "fear",
+        "happy": "happy",
+        "fear": "fear",
+        "sadness": "sad"
+    }
+
+    # Default emotions for UI
+    UI_EMOTIONS = ['happy', 'neutral', 'sad']
 
     def __init__(self, model_path=None):
         """Initialize the emotion recognition system"""
         self.logger = logging.getLogger(__name__)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.web_app = None
+        self.monitor_system = None
         
         # Audio settings
         self.sample_rate = 16000
         self.channels = 1
-        self.block_size = 4000  # 250ms at 16kHz
+        self.block_size = 4000
         
         # Initialize state
         self.running = False
         self.audio_queue = queue.Queue()
         self.stream = None
         
-        # Initialize model
-        if model_path is None:
-            # Look for the model in the models directory
-            model_paths = [
-                Path(__file__).resolve().parent.parent.parent / "models" / "hubert-base-ls960_emotion.pt",
-                Path(__file__).resolve().parent.parent.parent / "models" / "best_emotion_model.pt"
-            ]
-            for path in model_paths:
-                if path.exists():
-                    model_path = str(path)
-                    break
-            else:
-                self.logger.warning("No model found in standard locations")
-                model_path = str(model_paths[0])  # Use first path as default
-                
-        self._load_model(model_path)
+        try:
+            # Initialize model
+            if model_path is None:
+                model_paths = [
+                    Path(__file__).resolve().parent.parent.parent / "models" / "hubert-base-ls960_emotion.pt",
+                    Path(__file__).resolve().parent.parent.parent / "models" / "best_emotion_model.pt"
+                ]
+                for path in model_paths:
+                    if path.exists():
+                        model_path = str(path)
+                        break
+                else:
+                    self.logger.warning("No model found in standard locations, using base model")
+                    model_path = None
+            
+            self._load_model(model_path)
+            self.logger.info("Emotion recognizer initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Error initializing emotion recognizer: {str(e)}")
+            raise
 
     def _load_model(self, model_path):
         """Load the HuBERT-based emotion recognition model"""
@@ -80,16 +96,14 @@ class EmotionRecognizer:
             self.model = HubertModel.from_pretrained(model_name)
             
             # Add classification head
-            self.classifier = torch.nn.Linear(768, len(self.EMOTIONS))
+            self.classifier = torch.nn.Linear(768, len(self.EMOTION_MAPPING))
             
-            # Load trained weights
-            if os.path.exists(model_path):
+            # Load trained weights if available
+            if model_path and os.path.exists(model_path):
                 state_dict = torch.load(model_path, map_location=self.device)
                 self.model.load_state_dict(state_dict['hubert'])
                 self.classifier.load_state_dict(state_dict['classifier'])
                 self.logger.info(f"Loaded HuBERT model from {model_path}")
-            else:
-                self.logger.warning(f"No model found at {model_path}, using base model")
             
             self.model = self.model.to(self.device)
             self.classifier = self.classifier.to(self.device)
@@ -99,6 +113,10 @@ class EmotionRecognizer:
         except Exception as e:
             self.logger.error(f"Error loading emotion model: {str(e)}")
             raise
+
+    def set_monitor_system(self, system):
+        """Set reference to the main monitor system"""
+        self.monitor_system = system
 
     def audio_callback(self, indata, frames, time, status):
         """Callback for audio stream processing"""
@@ -136,17 +154,29 @@ class EmotionRecognizer:
                     logits = self.classifier(pooled)
                     probs = F.softmax(logits, dim=1)[0]
                 
-                # Get most likely emotion
-                emotion_idx = torch.argmax(probs).item()
-                emotion = self.EMOTIONS[emotion_idx]
-                confidence = probs[emotion_idx].item()
+                # Create emotion dictionary for UI
+                emotions = {emotion: 0.0 for emotion in self.UI_EMOTIONS}
                 
-                # Log result
-                self.logger.debug(f"Detected emotion: {emotion} ({confidence:.2f})")
+                # Map model emotions to UI emotions
+                for model_emotion, ui_emotion in self.EMOTION_MAPPING.items():
+                    if ui_emotion in self.UI_EMOTIONS:  # Only process emotions we show in UI
+                        emotion_idx = list(self.EMOTION_MAPPING.keys()).index(model_emotion)
+                        confidence = probs[emotion_idx].item()
+                        emotions[ui_emotion] = max(emotions.get(ui_emotion, 0), confidence)
                 
-                # Emit result if callback is set
+                # Get the most confident emotion
+                max_emotion = max(emotions.items(), key=lambda x: x[1])
+                
+                # Update UI if available
+                if self.monitor_system is not None:
+                    self.monitor_system.update_emotion_ui(emotions)
+                
+                # Emit result if web app is available
                 if self.web_app is not None:
-                    self.web_app.emit_emotion(emotion, confidence)
+                    try:
+                        self.web_app.emit_emotion(max_emotion[0], max_emotion[1])
+                    except Exception as e:
+                        self.logger.error(f"Error emitting emotion: {str(e)}")
                 
             except queue.Empty:
                 continue

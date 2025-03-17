@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Logs - Baby Monitor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/metrics.css') }}">
+    <style>
+        .log-container {
+            background-color: #1a1a1a;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 70vh;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        
+        .log-entry:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-info {
+            color: #a0a0a0;
+        }
+        
+        .log-warning {
+            color: #ffaa00;
+        }
+        
+        .log-error {
+            color: #e63946;
+        }
+        
+        .log-debug {
+            color: #3a86ff;
+        }
+        
+        .log-controls {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-camera-video"></i> Baby Monitor
+                <span class="badge bg-danger">DEV MODE</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/metrics">Metrics</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/repair">Repair Tools</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dev/tools">Dev Tools</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/dev/logs">Logs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dev/settings">Settings</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h1 class="mb-3">System Logs</h1>
+                <p class="text-muted">View and filter system logs for debugging and troubleshooting.</p>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-list-ul"></i> Log Controls
+                    </div>
+                    <div class="card-body">
+                        <div class="log-controls">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                        <input type="text" id="logFilter" class="form-control" placeholder="Filter logs...">
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <div class="btn-group" role="group">
+                                        <button type="button" class="btn btn-outline-primary" id="refreshLogs">
+                                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary" id="downloadLogs">
+                                            <i class="bi bi-download"></i> Download
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" id="clearLogs">
+                                            <i class="bi bi-trash"></i> Clear
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="showInfo" checked>
+                                        <label class="form-check-label" for="showInfo">Info</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="showWarning" checked>
+                                        <label class="form-check-label" for="showWarning">Warning</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="showError" checked>
+                                        <label class="form-check-label" for="showError">Error</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="showDebug" checked>
+                                        <label class="form-check-label" for="showDebug">Debug</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-journal-text"></i> System Logs
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="log-container" id="logContainer">
+                            {% for log in logs %}
+                                {% if 'ERROR' in log %}
+                                    <div class="log-entry log-error">{{ log }}</div>
+                                {% elif 'WARNING' in log %}
+                                    <div class="log-entry log-warning">{{ log }}</div>
+                                {% elif 'DEBUG' in log %}
+                                    <div class="log-entry log-debug">{{ log }}</div>
+                                {% else %}
+                                    <div class="log-entry log-info">{{ log }}</div>
+                                {% endif %}
+                            {% else %}
+                                <div class="log-entry log-info">No logs available.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io@4.5.4/client-dist/socket.io.min.js"></script>
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        
+        // DOM Elements
+        const logContainer = document.getElementById('logContainer');
+        const logFilter = document.getElementById('logFilter');
+        const refreshLogsBtn = document.getElementById('refreshLogs');
+        const downloadLogsBtn = document.getElementById('downloadLogs');
+        const clearLogsBtn = document.getElementById('clearLogs');
+        const showInfo = document.getElementById('showInfo');
+        const showWarning = document.getElementById('showWarning');
+        const showError = document.getElementById('showError');
+        const showDebug = document.getElementById('showDebug');
+        
+        // Filter logs based on text and log level
+        function filterLogs() {
+            const filterText = logFilter.value.toLowerCase();
+            const logEntries = logContainer.querySelectorAll('.log-entry');
+            
+            logEntries.forEach(entry => {
+                const text = entry.textContent.toLowerCase();
+                const isInfo = entry.classList.contains('log-info');
+                const isWarning = entry.classList.contains('log-warning');
+                const isError = entry.classList.contains('log-error');
+                const isDebug = entry.classList.contains('log-debug');
+                
+                const matchesFilter = filterText === '' || text.includes(filterText);
+                const matchesLevel = (isInfo && showInfo.checked) || 
+                                    (isWarning && showWarning.checked) || 
+                                    (isError && showError.checked) || 
+                                    (isDebug && showDebug.checked);
+                
+                entry.style.display = matchesFilter && matchesLevel ? 'block' : 'none';
+            });
+        }
+        
+        // Event listeners
+        logFilter.addEventListener('input', filterLogs);
+        showInfo.addEventListener('change', filterLogs);
+        showWarning.addEventListener('change', filterLogs);
+        showError.addEventListener('change', filterLogs);
+        showDebug.addEventListener('change', filterLogs);
+        
+        refreshLogsBtn.addEventListener('click', () => {
+            window.location.reload();
+        });
+        
+        downloadLogsBtn.addEventListener('click', () => {
+            // Create a text file with all log entries
+            const logEntries = logContainer.querySelectorAll('.log-entry');
+            let logText = '';
+            
+            logEntries.forEach(entry => {
+                logText += entry.textContent + '\n';
+            });
+            
+            // Create a download link
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `baby_monitor_logs_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        clearLogsBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear the logs? This will only clear the display, not the actual log files.')) {
+                logContainer.innerHTML = '<div class="log-entry log-info">Logs cleared.</div>';
+            }
+        });
+        
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+        
+        // Auto-scroll to bottom on load
+        window.onload = () => {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        };
+    </script>
+</body>
+</html> 

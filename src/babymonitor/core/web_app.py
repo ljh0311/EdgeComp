@@ -4,7 +4,7 @@ Baby Monitor Web Application
 Web interface for the Baby Monitor System using Flask and Flask-SocketIO.
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO
 import cv2
 import numpy as np
@@ -22,6 +22,7 @@ from ..alerts.alert_manager import AlertManager, AlertLevel, AlertType
 from .webrtc_streamer import WebRTCStreamer
 from aiortc import RTCSessionDescription, RTCIceCandidate
 import asyncio
+from .metrics import MetricsCollector
 
 
 class BabyMonitorWeb:
@@ -106,6 +107,10 @@ class BabyMonitorWeb:
         self.loop = asyncio.new_event_loop()
         self.webrtc_thread = None
 
+        self.metrics = MetricsCollector()
+        self._metrics_thread = None
+        self._stop_metrics = False
+
         self.setup_routes()
         self.setup_socketio()
 
@@ -119,6 +124,37 @@ class BabyMonitorWeb:
         @self.app.route('/')
         def index():
             return render_template('index.html', dev_mode=self.dev_mode)
+
+        @self.app.route('/direct-feed')
+        def direct_feed():
+            """Render the direct feed page."""
+            return render_template('direct_feed.html')
+
+        @self.app.route('/video-feed')
+        def video_feed():
+            """Direct video feed endpoint."""
+            if not self.monitor_system or not self.monitor_system.camera_enabled:
+                return "No video feed available", 404
+            
+            def generate_frames():
+                while True:
+                    if not self.monitor_system.camera_enabled:
+                        break
+                    try:
+                        frame = self.frame_queue.get(timeout=1.0)
+                        if frame is not None:
+                            _, buffer = cv2.imencode('.jpg', frame)
+                            frame_bytes = buffer.tobytes()
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    except Empty:
+                        continue
+                    except Exception as e:
+                        self.logger.error(f"Error in video feed: {str(e)}")
+                        break
+            
+            return Response(generate_frames(),
+                          mimetype='multipart/x-mixed-replace; boundary=frame')
 
         @self.app.route('/metrics')
         def metrics_page():
@@ -228,6 +264,24 @@ class BabyMonitorWeb:
                 self.connected_clients.add(client_id)
             self.emit_status()
             
+            # Initialize WebRTC for new client
+            if not hasattr(self, 'webrtc_streamer') or self.webrtc_streamer is None:
+                self.webrtc_streamer = WebRTCStreamer()
+            
+            # Create WebRTC offer
+            async def create_and_send_offer():
+                try:
+                    offer = await self.webrtc_streamer.create_offer(client_id)
+                    self.socketio.emit('webrtc_offer', {
+                        'sdp': offer.sdp,
+                        'type': offer.type
+                    }, room=client_id)
+                except Exception as e:
+                    self.logger.error(f"Error creating WebRTC offer: {str(e)}")
+                    self.emit_alert('error', f"Failed to create WebRTC connection: {str(e)}")
+            
+            asyncio.run_coroutine_threadsafe(create_and_send_offer(), self.loop)
+            
         @self.socketio.on('disconnect')
         def handle_disconnect():
             client_id = request.sid
@@ -237,10 +291,14 @@ class BabyMonitorWeb:
                     self.connected_clients.remove(client_id)
             
             # Close WebRTC connection
-            asyncio.run_coroutine_threadsafe(
-                self.webrtc_streamer.close_peer_connection(client_id),
-                self.loop
-            )
+            if hasattr(self, 'webrtc_streamer') and self.webrtc_streamer is not None:
+                async def close_connection():
+                    try:
+                        await self.webrtc_streamer.close_peer_connection(client_id)
+                    except Exception as e:
+                        self.logger.error(f"Error closing WebRTC connection: {str(e)}")
+                
+                asyncio.run_coroutine_threadsafe(close_connection(), self.loop)
             
         @self.socketio.on('webrtc_request')
         def handle_webrtc_request():
@@ -250,8 +308,13 @@ class BabyMonitorWeb:
             # Create WebRTC offer
             async def create_and_send_offer():
                 try:
+                    if not hasattr(self, 'webrtc_streamer') or self.webrtc_streamer is None:
+                        self.webrtc_streamer = WebRTCStreamer()
                     offer = await self.webrtc_streamer.create_offer(client_id)
-                    self.socketio.emit('webrtc_offer', {'offer': offer.sdp}, room=client_id)
+                    self.socketio.emit('webrtc_offer', {
+                        'sdp': offer.sdp,
+                        'type': offer.type
+                    }, room=client_id)
                 except Exception as e:
                     self.logger.error(f"Error creating WebRTC offer: {str(e)}")
                     self.emit_alert('error', f"Failed to create WebRTC connection: {str(e)}")
@@ -266,7 +329,10 @@ class BabyMonitorWeb:
             # Process WebRTC answer
             async def process_answer():
                 try:
-                    answer = RTCSessionDescription(sdp=data['answer']['sdp'], type=data['answer']['type'])
+                    if not hasattr(self, 'webrtc_streamer') or self.webrtc_streamer is None:
+                        self.logger.error("WebRTC streamer not initialized")
+                        return
+                    answer = RTCSessionDescription(sdp=data['sdp'], type=data['type'])
                     await self.webrtc_streamer.process_answer(client_id, answer)
                 except Exception as e:
                     self.logger.error(f"Error processing WebRTC answer: {str(e)}")
@@ -281,10 +347,18 @@ class BabyMonitorWeb:
             # Process ICE candidate
             async def process_ice_candidate():
                 try:
+                    if not hasattr(self, 'webrtc_streamer') or self.webrtc_streamer is None:
+                        self.logger.error("WebRTC streamer not initialized")
+                        return
+                        
+                    if not all(key in data for key in ['sdpMid', 'sdpMLineIndex', 'candidate']):
+                        self.logger.error("Invalid ICE candidate data")
+                        return
+                        
                     candidate = RTCIceCandidate(
-                        sdpMid=data['candidate'].get('sdpMid'),
-                        sdpMLineIndex=data['candidate'].get('sdpMLineIndex'),
-                        candidate=data['candidate'].get('candidate')
+                        sdpMid=data['sdpMid'],
+                        sdpMLineIndex=data['sdpMLineIndex'],
+                        candidate=data['candidate']
                     )
                     await self.webrtc_streamer.add_ice_candidate(client_id, candidate)
                 except Exception as e:
@@ -340,10 +414,17 @@ class BabyMonitorWeb:
                 if not self.frame_queue.empty():
                     with self.frame_lock:
                         frame = self.frame_queue.get_nowait()
+                        if frame is None:
+                            continue
+                            
                         current_time = time.time()
                         
                         # Add frame to WebRTC streamer
-                        self.webrtc_streamer.add_frame(frame)
+                        if hasattr(self, 'webrtc_streamer') and self.webrtc_streamer is not None:
+                            try:
+                                self.webrtc_streamer.add_frame(frame)
+                            except Exception as e:
+                                self.logger.error(f"Error adding frame to WebRTC: {str(e)}")
                         
                         # Also send via Socket.IO as fallback (at a lower rate)
                         if current_time - self.last_frame_time >= self.frame_interval * 3:  # 3x slower for Socket.IO
@@ -368,22 +449,70 @@ class BabyMonitorWeb:
                                     else:
                                         frame_to_encode = frame
                                     
-                                    # Convert frame to JPEG with lower quality for Socket.IO
-                                    _, buffer = cv2.imencode('.jpg', frame_to_encode, 
-                                                           [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    # Encode frame to JPEG
+                                    _, buffer = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 70])
                                     frame_data = base64.b64encode(buffer).decode('utf-8')
                                     
-                                    self.socketio.emit('frame', {'data': frame_data})
+                                    # Emit frame to clients
+                                    self.socketio.emit('frame', {
+                                        'data': f'data:image/jpeg;base64,{frame_data}',
+                                        'timestamp': current_time
+                                    })
+                                    
                                     self.last_frame_time = current_time
                                 except Exception as e:
-                                    self.logger.error(f"Frame processing error: {str(e)}")
-                else:
-                    time.sleep(0.001)
+                                    self.logger.error(f"Error encoding frame: {str(e)}")
+                
+                # Extract detection data from monitor system if available
+                if self.monitor_system and hasattr(self.monitor_system, 'person_detector'):
+                    try:
+                        # Get detection data from the last processed frame
+                        if hasattr(self.monitor_system.person_detector, 'last_result'):
+                            detection_data = self.monitor_system.person_detector.last_result
+                            if detection_data and 'detections' in detection_data:
+                                # Extract detection information
+                                detections = detection_data['detections']
+                                
+                                # Update metrics with detection data
+                                if hasattr(self, 'metrics'):
+                                    self.metrics.update_frame_metrics(
+                                        frame_time=1.0/max(1, self.metrics.current_fps),  # Estimate frame time from FPS
+                                        detection_results=detection_data
+                                    )
+                                
+                                # Emit monitoring data to clients
+                                if len(self.connected_clients) > 0:
+                                    # Prepare detection data for the web interface
+                                    detection_info = []
+                                    for det in detections:
+                                        # Format detection for web interface
+                                        detection_info.append({
+                                            'bbox': det.get('bbox', [0, 0, 0, 0]),
+                                            'confidence': det.get('confidence', 0.0),
+                                            'class': det.get('class', 'unknown')
+                                        })
+                                    
+                                    # Emit monitoring data
+                                    self.socketio.emit('monitoring', {
+                                        'people_count': len(detections),
+                                        'detections': detection_info,
+                                        'detection_types': {
+                                            det_type: sum(1 for d in detections if d.get('class') == det_type)
+                                            for det_type in set(d.get('class', 'unknown') for d in detections)
+                                        },
+                                        'timestamp': current_time
+                                    })
+                    except Exception as e:
+                        self.logger.error(f"Error processing detection data: {str(e)}")
+                
+                # Sleep to reduce CPU usage
+                time.sleep(0.01)
             except Empty:
-                time.sleep(0.001)
+                # No frames in queue, sleep to reduce CPU usage
+                time.sleep(0.05)
             except Exception as e:
-                self.logger.error(f"Frame thread error: {str(e)}")
-                time.sleep(0.1)
+                self.logger.error(f"Error in frame processing thread: {str(e)}")
+                time.sleep(0.1)  # Sleep longer on error
 
     def _process_audio(self):
         """Background task to process and emit audio data."""
@@ -532,51 +661,124 @@ class BabyMonitorWeb:
         self.loop.run_forever()
 
     def start(self):
-        """Start the web server."""
-        self.should_run = True
-        
-        # Start WebRTC event loop
-        self.webrtc_thread = threading.Thread(target=self._run_webrtc_loop, daemon=True)
-        self.webrtc_thread.start()
-        
-        # Start background tasks
-        self.start_background_tasks()
-        
-        # Start the server
-        self.server_thread = threading.Thread(
-            target=self.socketio.run,
-            args=(self.app,),
-            kwargs={
-                "host": self.host,
-                "port": self.port,
-                "debug": self.dev_mode,
-                "use_reloader": False,
-                "allow_unsafe_werkzeug": True,
-            },
-            daemon=True,
-        )
-        self.server_thread.start()
-        self.logger.info(f"Web server started on http://{self.host}:{self.port}")
-        
-        return self.server_thread
+        """Start the web server and all background tasks."""
+        try:
+            # Set flags before starting threads
+            self.should_run = True
+            self._stop_metrics = False
+            
+            # Start WebRTC event loop first
+            self.webrtc_thread = threading.Thread(target=self._run_webrtc_loop, daemon=True)
+            self.webrtc_thread.start()
+            
+            # Wait for WebRTC loop to be ready
+            time.sleep(0.5)
+            
+            # Start background tasks
+            self.start_background_tasks()
+            
+            # Start metrics collection
+            self._start_metrics_collection()
+            
+            # Start the server last
+            self.server_thread = threading.Thread(
+                target=self.socketio.run,
+                args=(self.app,),
+                kwargs={
+                    "host": self.host,
+                    "port": self.port,
+                    "debug": self.dev_mode,
+                    "use_reloader": False,
+                    "allow_unsafe_werkzeug": True,
+                },
+                daemon=True,
+            )
+            self.server_thread.start()
+            self.logger.info(f"Web server started on http://{self.host}:{self.port}")
+            
+            return self.server_thread
+            
+        except Exception as e:
+            self.logger.error(f"Error starting web server: {e}")
+            self.stop()
+            raise
 
     def stop(self):
-        """Stop the web server."""
-        self.should_run = False
-        
-        # Stop WebRTC connections
-        asyncio.run_coroutine_threadsafe(self.webrtc_streamer.close_all(), self.loop)
-        
-        # Stop the event loop
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        
-        if self.server_thread and self.server_thread.is_alive():
-            self.server_thread.join(timeout=5)
+        """Stop the web server and all background tasks in the correct order."""
+        try:
+            # Set stop flags first
+            self.should_run = False
+            self._stop_metrics = True
             
-        if self.webrtc_thread and self.webrtc_thread.is_alive():
-            self.webrtc_thread.join(timeout=5)
+            # Stop metrics collection
+            if self._metrics_thread and self._metrics_thread.is_alive():
+                self._metrics_thread.join(timeout=5)
+                self.logger.info("Metrics collection stopped")
             
-        self.logger.info("Web server stopped")
+            # Stop WebRTC connections
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self.webrtc_streamer.close_all(), self.loop)
+                self.loop.call_soon_threadsafe(self.loop.stop)
+            
+            # Stop WebRTC thread
+            if self.webrtc_thread and self.webrtc_thread.is_alive():
+                self.webrtc_thread.join(timeout=5)
+                self.logger.info("WebRTC service stopped")
+            
+            # Stop server thread last
+            if self.server_thread and self.server_thread.is_alive():
+                # Send SIGTERM to the server thread
+                if hasattr(signal, 'SIGTERM'):
+                    os.kill(os.getpid(), signal.SIGTERM)
+                self.server_thread.join(timeout=5)
+                self.logger.info("Web server stopped")
+            
+            # Clear all queues
+            while not self.frame_queue.empty():
+                try:
+                    self.frame_queue.get_nowait()
+                except Empty:
+                    break
+                    
+            while not self.audio_queue.empty():
+                try:
+                    self.audio_queue.get_nowait()
+                except Empty:
+                    break
+            
+            # Clear connected clients
+            with self.client_lock:
+                self.connected_clients.clear()
+                
+        except Exception as e:
+            self.logger.error(f"Error during shutdown: {e}")
+            raise
+        finally:
+            self.logger.info("Baby monitor system stopped successfully")
+
+    def emit_emotion(self, emotion, confidence):
+        """Emit emotion detection results to connected clients."""
+        try:
+            self.socketio.emit('emotion', {
+                'emotion': emotion,
+                'confidence': confidence
+            })
+        except Exception as e:
+            self.logger.error(f"Error emitting emotion: {str(e)}")
+
+    def _start_metrics_collection(self):
+        def metrics_loop():
+            while not self._stop_metrics:
+                try:
+                    self.metrics.update_system_metrics()
+                    metrics_data = self.metrics.get_metrics()
+                    self.socketio.emit('metrics_update', metrics_data)
+                except Exception as e:
+                    self.logger.error(f"Error in metrics loop: {e}")
+                time.sleep(1)  # Update every second
+                
+        self._metrics_thread = threading.Thread(target=metrics_loop, daemon=True)
+        self._metrics_thread.start()
 
 
 # Create instances for the application

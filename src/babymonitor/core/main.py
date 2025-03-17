@@ -28,9 +28,8 @@ from PIL import Image, ImageTk
 import argparse
 
 # Add the src directory to Python path
-src_dir = str(Path(__file__).resolve().parent.parent.parent)
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
+src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'src')
+sys.path.insert(0, src_dir)
 
 # Local imports
 from babymonitor.camera.camera import Camera
@@ -38,11 +37,145 @@ from babymonitor.detectors.person_tracker import PersonDetector
 from babymonitor.audio.audio_processor import AudioProcessor
 from babymonitor.emotion.emotion import EmotionRecognizer
 from babymonitor.core.web_app import BabyMonitorWeb
-from .config import Config
+from babymonitor.core.config import config
 
 # Configure logging
-logging.basicConfig(**Config.LOGGING)
+logging.basicConfig(
+    level=config.get('logging.level', 'INFO'),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config.get('logging.file')),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
+
+
+class EmotionUI:
+    def __init__(self, parent):
+        """Initialize emotion recognition UI."""
+        self.window = tk.Toplevel(parent)
+        self.window.title("Emotion Recognition")
+        self.window.geometry("800x600")
+
+        # Configure dark theme colors
+        bg_dark = "#2b2b2b"
+        bg_darker = "#1e1e1e"
+        text_color = "#ffffff"
+
+        self.window.configure(bg=bg_dark)
+
+        # Create main container
+        main_container = ttk.Frame(self.window)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Title
+        title_label = ttk.Label(
+            main_container,
+            text="Real-time Emotion Detection",
+            font=("Arial", 16, "bold")
+        )
+        title_label.pack(pady=(0, 20))
+
+        # Current emotion display
+        self.emotion_label = ttk.Label(
+            main_container,
+            text="Current Emotion: None",
+            font=("Arial", 14)
+        )
+        self.emotion_label.pack(pady=(0, 20))
+
+        # Create progress bars for each emotion
+        self.emotions = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+        self.emotion_colors = {
+            'angry': '#FF0000',     # Red
+            'disgust': '#804000',   # Brown
+            'fear': '#800080',      # Purple
+            'happy': '#00FF00',     # Green
+            'neutral': '#0000FF',   # Blue
+            'sad': '#808080',       # Gray
+            'surprise': '#FFA500'   # Orange
+        }
+        
+        self.progress_bars = {}
+        for emotion in self.emotions:
+            emotion_frame = ttk.Frame(main_container)
+            emotion_frame.pack(fill=tk.X, pady=5)
+            
+            # Emotion label
+            label = ttk.Label(
+                emotion_frame,
+                text=emotion.capitalize(),
+                width=10,
+                foreground=self.emotion_colors[emotion]
+            )
+            label.pack(side=tk.LEFT, padx=5)
+            
+            # Progress bar
+            progress = ttk.Progressbar(
+                emotion_frame,
+                length=400,
+                mode='determinate'
+            )
+            progress.pack(side=tk.LEFT, padx=5)
+            
+            # Percentage label
+            value_label = ttk.Label(
+                emotion_frame,
+                text="0%",
+                width=5
+            )
+            value_label.pack(side=tk.LEFT, padx=5)
+            
+            self.progress_bars[emotion] = (progress, value_label)
+
+        # Status section
+        status_frame = ttk.LabelFrame(main_container, text="Status")
+        status_frame.pack(fill=tk.X, pady=20)
+        
+        self.status_label = ttk.Label(
+            status_frame,
+            text="Status: Initializing...",
+            foreground="white"
+        )
+        self.status_label.pack(pady=5)
+
+    def update_emotion(self, emotions):
+        """Update emotion visualization."""
+        try:
+            # Update progress bars
+            for emotion, (progress, label) in self.progress_bars.items():
+                confidence = emotions.get(emotion, 0.0)
+                percentage = int(confidence * 100)
+                progress['value'] = percentage
+                label['text'] = f"{percentage}%"
+                
+                # Update progress bar color
+                progress['style'] = f"{emotion}.Horizontal.TProgressbar"
+                style = ttk.Style()
+                style.configure(
+                    f"{emotion}.Horizontal.TProgressbar",
+                    troughcolor=self.emotion_colors[emotion],
+                    background=self.emotion_colors[emotion]
+                )
+
+            # Update current emotion (highest confidence)
+            max_emotion = max(emotions.items(), key=lambda x: x[1])[0]
+            self.emotion_label['text'] = f"Current Emotion: {max_emotion.capitalize()}"
+            self.emotion_label['foreground'] = self.emotion_colors[max_emotion]
+            
+            # Update status
+            self.status_label['text'] = "Status: Active"
+            self.status_label['foreground'] = "green"
+
+        except Exception as e:
+            logger.error(f"Error updating emotion UI: {str(e)}")
+            self.status_label['text'] = "Status: Error"
+            self.status_label['foreground'] = "red"
+
+    def close(self):
+        """Close the emotion UI window."""
+        self.window.destroy()
 
 
 class BabyMonitorSystem:
@@ -60,6 +193,7 @@ class BabyMonitorSystem:
         self.initialized_components = []  # Track initialized components for cleanup
         self.web_app = None  # Initialize web_app reference as None
         self.dev_window = None  # Initialize dev window reference as None
+        self.emotion_ui = None  # Initialize emotion UI reference as None
 
         # Performance metrics
         self.metrics_lock = threading.Lock()
@@ -72,7 +206,11 @@ class BabyMonitorSystem:
 
         try:
             # Initialize camera first
-            self.camera = Camera(Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT)
+            camera_config = config.get('camera', {})
+            self.camera = Camera(
+                width=camera_config.get('width', 640),
+                height=camera_config.get('height', 480)
+            )
             if not self.camera.initialize():
                 self.logger.error("Failed to initialize camera")
                 self.camera_error = True
@@ -87,6 +225,10 @@ class BabyMonitorSystem:
                     self.root = tk.Tk()
                     self.setup_ui()
                     self.initialized_components.append("ui")
+
+                    # Create emotion UI
+                    self.emotion_ui = EmotionUI(self.root)
+                    self.initialized_components.append("emotion_ui")
 
                     # Update camera UI status and selections
                     if hasattr(self, "camera_status"):
@@ -147,8 +289,10 @@ class BabyMonitorSystem:
             # Initialize audio components if enabled
             if self.audio_enabled:
                 try:
+                    audio_config = config.get('audio', {})
                     self.audio_processor = AudioProcessor(
-                        Config.AUDIO_PROCESSING, self.handle_alert
+                        audio_config,
+                        self.handle_alert
                     )
                     if not only_web:
                         self.audio_processor.set_visualization_callback(
@@ -161,6 +305,8 @@ class BabyMonitorSystem:
                         self.emotion_recognizer = EmotionRecognizer()
                         if self.web_app:
                             self.emotion_recognizer.web_app = self.web_app
+                        # Set monitor system reference
+                        self.emotion_recognizer.set_monitor_system(self)
                         self.initialized_components.append("emotion_recognizer")
                         self.logger.info("Emotion recognizer initialized successfully")
                     except Exception as e:
@@ -279,6 +425,12 @@ class BabyMonitorSystem:
             controls_frame, text="Audio Monitor", command=self.toggle_audio
         )
         self.audio_btn.pack(fill=tk.X, padx=5, pady=5)
+
+        # Emotion UI toggle button
+        self.emotion_btn = ttk.Button(
+            controls_frame, text="Emotion Recognition", command=self.toggle_emotion_ui
+        )
+        self.emotion_btn.pack(fill=tk.X, padx=5, pady=5)
 
         # Status section
         status_frame = ttk.LabelFrame(
@@ -851,6 +1003,21 @@ class BabyMonitorSystem:
             self.logger.error(f"Error setting resolution: {str(e)}")
             self.camera_status.configure(text="📷  Camera: Resolution Error")
 
+    def toggle_emotion_ui(self):
+        """Toggle emotion recognition UI window."""
+        if self.emotion_ui is None or not self.emotion_ui.window.winfo_exists():
+            self.emotion_ui = EmotionUI(self.root)
+            self.emotion_btn.configure(text="Close Emotion UI")
+        else:
+            self.emotion_ui.close()
+            self.emotion_ui = None
+            self.emotion_btn.configure(text="Emotion Recognition")
+
+    def update_emotion_ui(self, emotions):
+        """Update emotion recognition UI with new emotions."""
+        if self.emotion_ui is not None and self.emotion_ui.window.winfo_exists():
+            self.emotion_ui.update_emotion(emotions)
+
     def cleanup(self):
         """Clean up initialized components in reverse order."""
         self.is_running = False
@@ -875,6 +1042,9 @@ class BabyMonitorSystem:
                         and self.emotion_recognizer is not None
                     ):
                         self.emotion_recognizer.stop()
+                elif component == "emotion_ui":
+                    if hasattr(self, "emotion_ui") and self.emotion_ui is not None:
+                        self.emotion_ui.close()
                 elif component == "dev_window":
                     if hasattr(self, "dev_window") and self.dev_window is not None:
                         self.dev_window.window.destroy()
