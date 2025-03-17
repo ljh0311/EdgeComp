@@ -14,6 +14,8 @@ import subprocess
 import platform
 import json
 import psutil
+import torch
+from transformers import AutoModelForCTC, AutoProcessor
 try:
     import cv2
 except ImportError:
@@ -103,7 +105,6 @@ class SystemSetup:
     def check_gpu(self):
         """Check GPU availability."""
         try:
-            import torch
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 self.config['use_gpu'] = True
@@ -142,25 +143,29 @@ class SystemSetup:
 
         return self.config
 
-def download_file(url, filename):
+def download_file(url, filename, desc=None):
     """Download a file with progress indicator."""
-    print(f"Downloading {filename}...")
+    if desc is None:
+        desc = filename
+    print(f"Downloading {desc}...")
     try:
         urllib.request.urlretrieve(url, filename)
-        print(f"Successfully downloaded {filename}")
+        print(f"Successfully downloaded {desc}")
         return True
     except Exception as e:
-        print(f"Error downloading {filename}: {e}")
+        print(f"Error downloading {desc}: {e}")
         return False
 
 def setup_models():
     """Setup and download required model files."""
-models_dir = Path("models")
-models_dir.mkdir(exist_ok=True)
+    models_dir = Path("models")
+    models_dir.mkdir(exist_ok=True)
 
     # Model URLs and their local paths
     MODEL_FILES = {
         "yolov8n.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt",
+        "MobileNetSSD_deploy.prototxt": "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/ssd/caffe/ssd_mobilenet_v1.prototxt",
+        "MobileNetSSD_deploy.caffemodel": "https://drive.google.com/uc?id=0B3gersZ2cHIxRm5PMWRoTkdHdHc"
     }
 
     # Download available models
@@ -169,13 +174,29 @@ models_dir.mkdir(exist_ok=True)
         if not model_path.exists():
             download_file(url, model_path)
 
+    # Download and setup wav2vec2 model
+    print("\nSetting up wav2vec2 model...")
+    try:
+        model = AutoModelForCTC.from_pretrained("facebook/wav2vec2-base")
+        processor = AutoProcessor.from_pretrained("facebook/wav2vec2-base")
+        
+        # Save model and processor
+        model_dir = models_dir / "wav2vec2"
+        model_dir.mkdir(exist_ok=True)
+        model.save_pretrained(model_dir)
+        processor.save_pretrained(model_dir)
+        print("Successfully downloaded and saved wav2vec2 model")
+    except Exception as e:
+        print(f"Error setting up wav2vec2 model: {e}")
+        print("Please download the model manually from https://huggingface.co/facebook/wav2vec2-base")
+
     # Check for missing custom models
     custom_models = ["emotion_model.pt"]
     missing_custom = [model for model in custom_models if not (models_dir / model).exists()]
     if missing_custom:
         print("\nWarning: The following custom model files need to be downloaded separately:")
         for model in missing_custom:
-        print(f"  - {model}")
+            print(f"  - {model}")
         print("\nPlease follow the instructions in README.md to obtain these models.")
 
 def setup_environment():
@@ -279,12 +300,12 @@ if __name__ == "__main__":
         main()
     else:
         # Run setuptools setup when arguments are provided
-setup(
-    name="babymonitor",
-    version="1.0.0",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
-    install_requires=[
+        setup(
+            name="babymonitor",
+            version="1.0.0",
+            packages=find_packages(where="src"),
+            package_dir={"": "src"},
+            install_requires=[
                 "opencv-python>=4.5.0",
                 "numpy>=1.19.0",
                 "torch>=1.9.0",
@@ -301,31 +322,31 @@ setup(
                 "pytest>=6.0.0",
                 "black>=21.0.0",
                 "flake8>=3.9.0"
-    ],
-    entry_points={
-        "console_scripts": [
-            "babymonitor=babymonitor.core.main:main",
-        ],
-    },
-    include_package_data=True,
-    package_data={
-        "babymonitor.web": ["templates/*", "static/*"],
-        "edge_comp": ["models/*.pt", "models/*.pth"],
-    },
-    python_requires=">=3.8",
-    author="Your Name",
-    author_email="your.email@example.com",
-    description="A comprehensive baby monitoring system with video, audio, and emotion detection",
-    long_description=open("README.md").read(),
-    long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/babymonitor",
-    classifiers=[
-        "Development Status :: 3 - Alpha",
-        "Intended Audience :: End Users/Desktop",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-    ],
-) 
+            ],
+            entry_points={
+                "console_scripts": [
+                    "babymonitor=babymonitor.core.main:main",
+                ],
+            },
+            include_package_data=True,
+            package_data={
+                "babymonitor.web": ["templates/*", "static/*"],
+                "edge_comp": ["models/*.pt", "models/*.pth"],
+            },
+            python_requires=">=3.8",
+            author="Your Name",
+            author_email="your.email@example.com",
+            description="A comprehensive baby monitoring system with video, audio, and emotion detection",
+            long_description=open("README.md").read(),
+            long_description_content_type="text/markdown",
+            url="https://github.com/yourusername/babymonitor",
+            classifiers=[
+                "Development Status :: 3 - Alpha",
+                "Intended Audience :: End Users/Desktop",
+                "License :: OSI Approved :: MIT License",
+                "Programming Language :: Python :: 3",
+                "Programming Language :: Python :: 3.8",
+                "Programming Language :: Python :: 3.9",
+                "Programming Language :: Python :: 3.10",
+            ],
+        ) 
