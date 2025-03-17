@@ -67,9 +67,6 @@ class PersonDetector:
                 self.model = YOLO(model_path)
                 self.model.to(self.device)
                 
-                if self.device == "cuda":
-                    self.model.model.half()  # Use FP16 for faster inference
-                
                 # Set model parameters for faster inference
                 self.model.conf = 0.3
                 self.model.iou = 0.3

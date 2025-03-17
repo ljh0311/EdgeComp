@@ -94,6 +94,10 @@ class BabyMonitorWeb:
                         if current_time - self.last_frame_time >= self.frame_interval:
                             if len(self.connected_clients) > 0:
                                 try:
+                                    # Validate frame
+                                    if not isinstance(frame, np.ndarray):
+                                        continue
+
                                     # Resize frame if needed
                                     if frame.shape[1] > 1280:  # If width > 1280
                                         scale = 1280 / frame.shape[1]
@@ -113,6 +117,12 @@ class BabyMonitorWeb:
                                         frame_to_encode = resized_frame
                                     else:
                                         frame_to_encode = frame
+
+                                    # Ensure frame is in correct format (BGR)
+                                    if len(frame_to_encode.shape) == 2:
+                                        frame_to_encode = cv2.cvtColor(frame_to_encode, cv2.COLOR_GRAY2BGR)
+                                    elif frame_to_encode.shape[2] == 4:
+                                        frame_to_encode = cv2.cvtColor(frame_to_encode, cv2.COLOR_RGBA2BGR)
                                     
                                     # Convert frame to JPEG with quality control
                                     _, buffer = cv2.imencode('.jpg', frame_to_encode, 
@@ -222,6 +232,18 @@ class BabyMonitorWeb:
                 'detection_enabled': True if hasattr(self.monitor_system, 'person_detector') else False,
                 'dev_mode': self.dev_mode
             })
+
+        @self.app.route('/direct-feed')
+        def direct_feed():
+            """Render the direct camera feed page."""
+            return render_template('direct_feed.html')
+
+        @self.app.route('/video-feed')
+        def video_feed():
+            """Direct MJPEG camera feed."""
+            if not self.monitor_system or not self.monitor_system.camera_enabled:
+                return "Camera not available", 404
+            return self._stream_camera()
 
         @self.app.route('/control/<action>', methods=['POST'])
         def control(action):
@@ -518,6 +540,17 @@ class BabyMonitorWeb:
             if len(self.connected_clients) == 0:
                 return  # Skip processing if no clients
 
+            # Validate frame format
+            if not isinstance(frame, np.ndarray):
+                self.logger.error("Invalid frame format")
+                return
+
+            # Ensure frame is in correct format (BGR)
+            if len(frame.shape) == 2:  # If grayscale, convert to BGR
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            elif frame.shape[2] == 4:  # If RGBA, convert to BGR
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+
             # Only queue frame if we're not too backed up
             if self.frame_queue.qsize() < self.frame_queue.maxsize - 1:
                 self.frame_queue.put_nowait(frame)
@@ -729,3 +762,44 @@ class BabyMonitorWeb:
         except Exception as e:
             self.logger.error(f"Error stopping web interface: {str(e)}")
             raise
+
+    def _stream_camera(self):
+        """Generate MJPEG stream from camera."""
+        def generate():
+            while self.monitor_system and self.monitor_system.camera_enabled:
+                try:
+                    frame = self.monitor_system.camera.get_frame()
+                    if frame is not None and isinstance(frame, np.ndarray):
+                        # Process frame with person detector if available
+                        if hasattr(self.monitor_system, 'person_detector'):
+                            processed_frame = self.monitor_system.person_detector.process_frame(frame)
+                            if processed_frame is not None and isinstance(processed_frame, np.ndarray):
+                                frame = processed_frame
+                        
+                        # Ensure frame is in correct format (BGR)
+                        if len(frame.shape) == 2:  # If grayscale, convert to BGR
+                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                        elif frame.shape[2] == 4:  # If RGBA, convert to BGR
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                        
+                        # Encode frame to JPEG with quality control and error handling
+                        try:
+                            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                            if jpeg is not None:
+                                frame_bytes = jpeg.tobytes()
+                                yield (b'--frame\r\n'
+                                      b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                        except cv2.error as e:
+                            self.logger.error(f"Error encoding frame: {str(e)}")
+                            continue
+                            
+                    time.sleep(0.016)  # ~60 FPS max
+                except Exception as e:
+                    self.logger.error(f"Error in video feed: {str(e)}")
+                    time.sleep(0.1)
+                    continue
+        
+        return self.app.response_class(
+            generate(),
+            mimetype='multipart/x-mixed-replace; boundary=frame'
+        )
