@@ -6,8 +6,6 @@
     <title>Baby Monitor - Performance Metrics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -42,13 +40,15 @@
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 20px;
-        display: flex;
-        flex-direction: column;
+      }
+      .charts-grid {
+        display: grid;
+        grid-template-columns: 1fr;
         gap: 20px;
       }
-      .chart-box {
+      .chart-wrapper {
         height: 300px;
-        width: 100%;
+        margin-bottom: 20px;
       }
       h1 {
         margin-bottom: 20px;
@@ -195,136 +195,10 @@
         opacity: 0.6;
         cursor: not-allowed;
       }
-      .device-control {
-        background-color: #2d2d2d;
-        border-radius: 8px;
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-      .device-info {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-        margin-bottom: 15px;
-      }
-      .device-stat {
-        background-color: #383838;
-        padding: 12px;
-        border-radius: 6px;
-      }
-      .device-stat-label {
-        font-size: 12px;
-        color: #888;
-        margin-bottom: 5px;
-      }
-      .device-stat-value {
-        font-size: 16px;
-        font-weight: bold;
-        color: #4caf50;
-      }
-      .device-controls {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-      }
-      .switch-button {
-        background-color: #4caf50;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: background-color 0.2s;
-      }
-      .switch-button:hover {
-        background-color: #45a049;
-      }
-      .switch-button:disabled {
-        background-color: #888;
-        cursor: not-allowed;
-      }
-      /* Add navbar styles */
-      .navbar {
-        background-color: #2d2d2d;
-        border-bottom: 2px solid #4CAF50;
-        padding: 1rem;
-        margin-bottom: 20px;
-      }
-      
-      .navbar-brand {
-        color: #4CAF50 !important;
-        font-size: 1.5rem;
-        font-weight: bold;
-      }
-      
-      .nav-link {
-        color: #ffffff !important;
-        margin: 0 1rem;
-        transition: color 0.3s;
-      }
-      
-      .nav-link:hover {
-        color: #4CAF50 !important;
-      }
-      
-      .nav-link.active {
-        color: #4CAF50 !important;
-        font-weight: bold;
-      }
     </style>
   </head>
   <body>
-    <!-- Navigation Bar -->
-    <nav class="navbar navbar-expand-lg">
-      <div class="container">
-        <a class="navbar-brand" href="/">
-          <i class="fas fa-baby"></i> Baby Monitor
-        </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav">
-            <li class="nav-item">
-              <a class="nav-link" href="/">
-                <i class="fas fa-home"></i> Home
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link active" href="/metrics">
-                <i class="fas fa-chart-line"></i> Metrics
-              </a>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </nav>
-
-    <div class="container">
     <h1>Performance Metrics</h1>
-
-      <!-- Device Control Section -->
-      <div class="device-control">
-        <h2 class="section-title" style="margin-top: 0;">Device Control</h2>
-        <div class="device-info">
-          <div class="device-stat">
-            <div class="device-stat-label">Current Device</div>
-            <div id="current-device" class="device-stat-value">Loading...</div>
-          </div>
-          <div class="device-stat">
-            <div class="device-stat-label">GPU Name</div>
-            <div id="gpu-name" class="device-stat-value">N/A</div>
-          </div>
-          <div class="device-stat">
-            <div class="device-stat-label">GPU Memory</div>
-            <div id="gpu-memory" class="device-stat-value">N/A</div>
-          </div>
-        </div>
-        <div class="device-controls">
-          <button id="switch-cpu" class="switch-button" onclick="switchDevice(true)">Switch to CPU</button>
-          <button id="switch-gpu" class="switch-button" onclick="switchDevice(false)">Switch to GPU</button>
-        </div>
-      </div>
 
     <div class="metrics-container">
       <div class="metric-card">
@@ -344,55 +218,46 @@
         <div id="memory-value" class="metric-value">--</div>
       </div>
     </div>
-
-      <h2 class="section-title">Performance Charts</h2>
-      <div class="chart-container">
-        <div id="fps-chart" class="chart-box"></div>
-        <div id="frame-time-chart" class="chart-box"></div>
-        <div id="system-resources-chart" class="chart-box"></div>
+    <div class="charts-grid">
+      <div class="chart-wrapper">
+        <div id="fps-chart" style="height: 100%;"></div>
       </div>
-
-      <div class="dev-tools-container">
-        <h2 class="section-title">Developer Tools</h2>
-        <div class="dev-tools-grid">
-          <div class="dev-tool-card">
-            <div class="dev-tool-title">Unit Tests</div>
-            <div class="dev-tool-description">Run unit tests for person detection and emotion recognition</div>
-            <a href="/run_test?type=unit" class="dev-tool-button" onclick="runTest('unit'); return false;">Run Unit Tests</a>
-          </div>
-          <div class="dev-tool-card">
-            <div class="dev-tool-title">Performance Tests</div>
-            <div class="dev-tool-description">Run system performance tests including camera and detection</div>
-            <a href="/run_test?type=performance" class="dev-tool-button" onclick="runTest('performance'); return false;">Run Performance Tests</a>
-          </div>
-          <div class="dev-tool-card">
-            <div class="dev-tool-title">Integration Tests</div>
-            <div class="dev-tool-description">Run full system integration tests</div>
-            <a href="/run_test?type=integration" class="dev-tool-button" onclick="runTest('integration'); return false;">Run Integration Tests</a>
-          </div>
-        </div>
+      <div class="chart-wrapper">
+        <div id="frame-time-chart" style="height: 100%;"></div>
       </div>
+      <div class="chart-wrapper">
+        <div id="system-resources-chart" style="height: 100%;"></div>
+      </div>
+    </div>
 
-      <!-- Add Person Detection Metrics Section -->
-      <h2 class="section-title">Person Detection Metrics</h2>
-      <div class="metrics-container">
-        <div class="metric-card">
-          <div class="metric-label">People Detected</div>
-          <div id="people-count" class="metric-value">--</div>
+    <h2 class="section-title">Developer Tools</h2>
+    <div class="dev-tools-container">
+      <div class="dev-tools-grid">
+        <div class="dev-tool-card">
+          <div class="dev-tool-title">Camera Performance Test</div>
+          <div class="dev-tool-description">Test raw camera performance and FPS without processing.</div>
+          <button class="dev-tool-button" onclick="runTest('camera')">Run Test</button>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Detection Confidence</div>
-          <div id="detection-confidence" class="metric-value">--</div>
+
+        <div class="dev-tool-card">
+          <div class="dev-tool-title">Motion Detection Test</div>
+          <div class="dev-tool-description">Test motion detection performance and accuracy.</div>
+          <button class="dev-tool-button" onclick="runTest('motion')">Run Test</button>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Motion Status</div>
-          <div id="motion-status" class="metric-value">--</div>
+
+        <div class="dev-tool-card">
+          <div class="dev-tool-title">Full Performance Test</div>
+          <div class="dev-tool-description">Run comprehensive performance tests on all components.</div>
+          <button class="dev-tool-button" onclick="runTest('full')">Run Test</button>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Fall Detection</div>
-          <div id="fall-status" class="metric-value">--</div>
+
+        <div class="dev-tool-card">
+          <div class="dev-tool-title">Debug Mode</div>
+          <div class="dev-tool-description">Launch application in debug mode with developer window.</div>
+          <button class="dev-tool-button" onclick="runTest('debug')">Launch Debug</button>
         </div>
       </div>
+    </div>
 
     <!-- Test Results Modal -->
     <div id="testModal" class="modal" style="display: none;">
@@ -404,168 +269,19 @@
         <div class="modal-body">
           <div id="testStatus" class="test-status"></div>
           <pre id="testOutput" class="test-output"></pre>
-          </div>
         </div>
       </div>
     </div>
 
     <script>
-      // Connect to Socket.IO with the correct path and configuration
-      const socket = io({
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 60000,
-        autoConnect: true
-      });
-      
-      // Connection status indicator
-      let connectionStatus = {
-        connected: false,
-        reconnecting: false
-      };
-      
-      // Socket.IO connection handlers
-      socket.on('connect', () => {
-        console.log('Connected to server');
-        connectionStatus.connected = true;
-        connectionStatus.reconnecting = false;
-        
-        // Request initial data
-        socket.emit('request_device_info');
-        socket.emit('request_metrics');
-        
-        // Show connection status
-        updateConnectionStatus('Connected', 'status-good');
-      });
-      
-      socket.on('disconnect', () => {
-        console.log('Disconnected from server');
-        connectionStatus.connected = false;
-        
-        // Show disconnected status
-        updateConnectionStatus('Disconnected', 'status-critical');
-      });
-      
-      socket.on('reconnecting', (attemptNumber) => {
-        console.log('Attempting to reconnect...', attemptNumber);
-        connectionStatus.reconnecting = true;
-        
-        // Show reconnecting status
-        updateConnectionStatus('Reconnecting...', 'status-warning');
-      });
-      
-      socket.on('reconnect_failed', () => {
-        console.log('Failed to reconnect');
-        connectionStatus.reconnecting = false;
-        
-        // Show connection failed status
-        updateConnectionStatus('Connection Failed', 'status-critical');
-      });
-      
-      function updateConnectionStatus(message, className) {
-        // Add connection status to the page if it doesn't exist
-        let statusElement = document.getElementById('connection-status');
-        if (!statusElement) {
-          const container = document.querySelector('.device-info');
-          const statusDiv = document.createElement('div');
-          statusDiv.className = 'device-stat';
-          statusDiv.innerHTML = `
-            <div class="device-stat-label">Connection Status</div>
-            <div id="connection-status" class="device-stat-value"></div>
-          `;
-          container.appendChild(statusDiv);
-          statusElement = document.getElementById('connection-status');
-        }
-        
-        // Update status
-        statusElement.textContent = message;
-        statusElement.className = `device-stat-value ${className}`;
-      }
-      
-      // Periodic data update with connection check
-      setInterval(() => {
-        if (connectionStatus.connected && !connectionStatus.reconnecting) {
-          socket.emit('request_device_info');
-          socket.emit('request_metrics');
-        }
-      }, 1000);
-      
-      // Device control functions
-      function updateDeviceInfo(info) {
-        console.log('Received device info:', info);  // Debug log
-        
-        // Update current device display
-        const currentDevice = info.current_device ? info.current_device.toUpperCase() : 'UNKNOWN';
-        document.getElementById('current-device').textContent = currentDevice;
-        
-        // Update GPU information
-        const gpuName = document.getElementById('gpu-name');
-        const gpuMemory = document.getElementById('gpu-memory');
-        const switchCpuBtn = document.getElementById('switch-cpu');
-        const switchGpuBtn = document.getElementById('switch-gpu');
-        
-        if (info.gpu_name) {
-          // GPU is available in the system
-          gpuName.textContent = info.gpu_name;
-          gpuMemory.textContent = info.gpu_memory_total || 'N/A';
-          
-          if (currentDevice === 'CUDA') {
-            // Currently using GPU
-            switchCpuBtn.disabled = false;
-            switchGpuBtn.disabled = true;
-          } else {
-            // Currently using CPU but GPU is available
-            switchCpuBtn.disabled = true;
-            switchGpuBtn.disabled = false;
-          }
-        } else {
-          // No GPU available
-          gpuName.textContent = 'Not Available';
-          gpuMemory.textContent = 'N/A';
-          switchCpuBtn.disabled = true;
-          switchGpuBtn.disabled = true;
-        }
-      }
-      
-      function switchDevice(forceCPU) {
-        console.log('Switching device, force CPU:', forceCPU);  // Debug log
-        
-        // Disable both buttons during switch
-        document.getElementById('switch-cpu').disabled = true;
-        document.getElementById('switch-gpu').disabled = true;
-        
-        // Show switching status
-        const currentDevice = document.getElementById('current-device');
-        currentDevice.textContent = 'Switching...';
-        
-        socket.emit('switch_device', { force_cpu: forceCPU });
-      }
-      
-      // Add socket listeners for device control
-      socket.on('device_info', (data) => {
-        console.log('Received device info event:', data);  // Debug log
-        updateDeviceInfo(data);
-      });
-      
-      socket.on('switch_result', (data) => {
-        console.log('Received switch result:', data);  // Debug log
-        if (data.success) {
-          updateDeviceInfo(data.device_info);
-        } else {
-          alert('Failed to switch device: ' + data.error);
-        }
-      });
+      // Connect to Socket.IO
+      const socket = io()
       
       // Initialize charts
       const fpsChart = Plotly.newPlot(
         'fps-chart',
         [
           {
-            x: [],
             y: [],
             type: 'scatter',
             name: 'FPS',
@@ -577,18 +293,8 @@
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: {
-            showgrid: true,
-            gridcolor: '#444',
-            type: 'date',
-            tickformat: '%H:%M:%S',
-            title: 'Time'
-          },
-          yaxis: { 
-            showgrid: true, 
-            gridcolor: '#444',
-            title: 'FPS'
-          }
+          xaxis: { showgrid: true, gridcolor: '#444' },
+          yaxis: { showgrid: true, gridcolor: '#444' }
         }
       )
       
@@ -596,7 +302,6 @@
         'frame-time-chart',
         [
           {
-            x: [],
             y: [],
             type: 'scatter',
             name: 'Frame Time (ms)',
@@ -608,18 +313,8 @@
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: {
-            showgrid: true,
-            gridcolor: '#444',
-            type: 'date',
-            tickformat: '%H:%M:%S',
-            title: 'Time'
-          },
-          yaxis: { 
-            showgrid: true, 
-            gridcolor: '#444',
-            title: 'Processing Time (ms)'
-          }
+          xaxis: { showgrid: true, gridcolor: '#444' },
+          yaxis: { showgrid: true, gridcolor: '#444' }
         }
       )
       
@@ -627,14 +322,12 @@
         'system-resources-chart',
         [
           {
-            x: [],
             y: [],
             type: 'scatter',
             name: 'CPU Usage (%)',
             line: { color: '#FFC107' }
           },
           {
-            x: [],
             y: [],
             type: 'scatter',
             name: 'Memory Usage (%)',
@@ -646,69 +339,39 @@
           paper_bgcolor: '#2d2d2d',
           plot_bgcolor: '#2d2d2d',
           font: { color: '#ffffff' },
-          xaxis: {
-            showgrid: true,
-            gridcolor: '#444',
-            type: 'date',
-            tickformat: '%H:%M:%S',
-            title: 'Time'
-          },
-          yaxis: { 
-            showgrid: true, 
-            gridcolor: '#444',
-            title: 'Usage (%)'
-          }
+          xaxis: { showgrid: true, gridcolor: '#444' },
+          yaxis: { showgrid: true, gridcolor: '#444' }
         }
       )
       
       // Update metrics display
       function updateMetrics(data) {
-        console.log('Updating metrics:', data);  // Debug log
-        
-        if (!data || !data.current) {
-          console.error('Invalid metrics data received');
-          return;
-        }
-        
         // Update current values
-        const current = data.current;
-        document.getElementById('fps-value').textContent = current.fps.toFixed(1);
-        document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1);
-        document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1);
-        document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1);
+        const current = data.current
+        document.getElementById('fps-value').textContent = current.fps.toFixed(1)
+        document.getElementById('frame-time-value').textContent = current.frame_time.toFixed(1)
+        document.getElementById('cpu-value').textContent = current.cpu_usage.toFixed(1)
+        document.getElementById('memory-value').textContent = current.memory_usage.toFixed(1)
       
         // Update status colors
-        updateStatusColor('fps-value', current.fps, 30, 15);
-        updateStatusColor('frame-time-value', current.frame_time, 20, 33, true);
-        updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true);
-        updateStatusColor('memory-value', current.memory_usage, 70, 90, true);
+        updateStatusColor('fps-value', current.fps, 30, 15)
+        updateStatusColor('frame-time-value', current.frame_time, 20, 33, true)
+        updateStatusColor('cpu-value', current.cpu_usage, 70, 90, true)
+        updateStatusColor('memory-value', current.memory_usage, 70, 90, true)
       
         // Update charts
-        if (data.history) {
-          const history = data.history;
-          const now = new Date();
-          
-          // Create timestamp array
-          const timestamps = Array(history.fps.length).fill().map((_, i) => {
-            return new Date(now - (history.fps.length - i - 1) * 1000).toISOString();
-          });
-          
-          // Update charts with new data
+        const history = data.history
         Plotly.update('fps-chart', {
-            x: [timestamps],
           y: [history.fps]
-          });
+        })
       
         Plotly.update('frame-time-chart', {
-            x: [timestamps],
           y: [history.frame_time]
-          });
+        })
       
         Plotly.update('system-resources-chart', {
-            x: [timestamps, timestamps],
           y: [history.cpu_usage, history.memory_usage]
-          });
-        }
+        })
       }
       
       function updateStatusColor(elementId, value, warningThreshold, criticalThreshold, isInverse = false) {
@@ -733,66 +396,39 @@
       }
       
       // Socket.IO event handlers
+      socket.on('connect', () => {
+        console.log('Connected to server')
+        socket.emit('request_metrics')
+      })
+      
       socket.on('metrics_update', (data) => {
-        console.log('Received metrics update:', data);  // Debug log
-        updateMetrics(data);
-      });
+        updateMetrics(data)
+      })
       
-      // Add socket listeners for person detection metrics
-      socket.on('detection', (data) => {
-        console.log('Received detection data:', data);
-        document.getElementById('people-count').textContent = data.people_count;
-        
-        // Update confidence if available
-        if (data.detections && data.detections.length > 0) {
-          const avgConfidence = data.detections.reduce((sum, det) => sum + det.confidence, 0) / data.detections.length;
-          document.getElementById('detection-confidence').textContent = avgConfidence.toFixed(2);
-        } else {
-          document.getElementById('detection-confidence').textContent = '--';
-        }
-        
-        // Update motion status
-        document.getElementById('motion-status').textContent = data.motion_status || '--';
-        
-        // Update fall status
-        const fallStatus = data.fall_detected ? 'FALL DETECTED!' : 'No Falls';
-        document.getElementById('fall-status').textContent = fallStatus;
-        if (data.fall_detected) {
-          document.getElementById('fall-status').classList.add('status-critical');
-        } else {
-          document.getElementById('fall-status').classList.remove('status-critical');
-        }
-      });
+      // Request metrics update every second
+      setInterval(() => {
+        socket.emit('request_metrics')
+      }, 1000)
       
-      // Update test handling to include new test types
+      // Test handling functions
       function runTest(testType) {
-        const testModal = document.getElementById('testModal');
-        const testStatus = document.getElementById('testStatus');
-        const testOutput = document.getElementById('testOutput');
-        
-        testModal.style.display = 'block';
-        testStatus.className = 'test-status running';
-        testStatus.textContent = 'Running test...';
-        testOutput.textContent = '';
-        
-        const testPaths = {
-          'unit': '/tests/unit/test_person_detection.py',
-          'performance': '/tests/integration/test_system_performance.py',
-          'integration': '/tests/integration/test_system_performance.py --full'
-        };
-        
-        fetch(`/run_test?type=${testType}&path=${testPaths[testType]}`)
-          .then(response => response.json())
-          .then(data => {
-            testStatus.className = `test-status ${data.success ? 'success' : 'error'}`;
-            testStatus.textContent = data.success ? 'Test completed successfully' : 'Test failed';
-            testOutput.textContent = data.output;
-          })
-          .catch(error => {
-            testStatus.className = 'test-status error';
-            testStatus.textContent = 'Error running test';
-            testOutput.textContent = error.toString();
-          });
+        // Disable all test buttons
+        document.querySelectorAll('.dev-tool-button').forEach((btn) => {
+          btn.disabled = true
+        })
+      
+        // Show modal with running status
+        const modal = document.getElementById('testModal')
+        const status = document.getElementById('testStatus')
+        const output = document.getElementById('testOutput')
+      
+        modal.style.display = 'block'
+        status.className = 'test-status running'
+        status.textContent = `Running ${testType} test...`
+        output.textContent = ''
+      
+        // Emit test request
+        socket.emit('run_test', { type: testType })
       }
       
       function closeModal() {
