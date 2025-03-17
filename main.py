@@ -27,16 +27,17 @@ import signal
 import logging
 import argparse
 from threading import Event
+from pathlib import Path
 
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import Baby Monitor components
-from babymonitor.camera import Camera
+from babymonitor.camera_wrapper import Camera
 from babymonitor.audio import AudioProcessor
 from babymonitor.detectors.person_detector import PersonDetector
 from babymonitor.detectors.emotion_detector import EmotionDetector
-from babymonitor.web.server import BabyMonitorWeb
+from babymonitor.web.simple_server import SimpleBabyMonitorWeb
 
 # Configure logging
 logging.basicConfig(
@@ -75,7 +76,7 @@ def run_normal_mode(args):
     try:
         # Initialize camera
         logger.info("Initializing camera...")
-        camera = Camera(camera_id=args.camera_id)
+        camera = Camera(args.camera_id)
         
         # Initialize audio processor
         logger.info("Initializing audio processor...")
@@ -84,19 +85,18 @@ def run_normal_mode(args):
         # Initialize person detector
         logger.info("Initializing person detector...")
         person_detector = PersonDetector(
-            detection_threshold=args.threshold,
-            camera=camera
+            threshold=args.threshold
         )
         
         # Initialize emotion detector
         logger.info("Initializing emotion detector...")
         emotion_detector = EmotionDetector(
-            audio_processor=audio_processor
+            threshold=args.threshold
         )
         
         # Start web interface
         logger.info("Starting web interface...")
-        web_interface = BabyMonitorWeb(
+        web_interface = SimpleBabyMonitorWeb(
             camera=camera,
             person_detector=person_detector,
             emotion_detector=emotion_detector,
@@ -105,27 +105,58 @@ def run_normal_mode(args):
             mode="normal",
             debug=args.debug
         )
-        web_interface.start()
         
-        # Keep main thread alive until stop event is set
-        while not stop_event.is_set():
-            time.sleep(1)
+        # Print access information
+        print("\n" + "="*80)
+        print(f"Baby Monitor Web Interface is running!")
+        print(f"Access the web interface at: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}")
+        print("Press Ctrl+C to stop the server")
+        print("="*80 + "\n")
+        
+        # Start the web interface in the main thread
+        web_interface.run()
+        
+        # This code will only be reached when the web interface is stopped
+        logger.info("Web interface stopped")
             
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:
         logger.error(f"Error in normal mode: {e}")
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        if 'web_interface' in locals():
-            web_interface.stop()
-        if 'person_detector' in locals():
-            person_detector.stop()
-        if 'emotion_detector' in locals():
-            emotion_detector.stop()
-        if 'camera' in locals():
-            camera.release()
-        if 'audio_processor' in locals():
-            audio_processor.stop()
+        try:
+            if 'web_interface' in locals():
+                web_interface.stop()
+        except Exception as e:
+            logger.error(f"Error stopping web interface: {e}")
+            
+        try:
+            if 'person_detector' in locals() and hasattr(person_detector, 'stop'):
+                person_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping person detector: {e}")
+            
+        try:
+            if 'emotion_detector' in locals() and hasattr(emotion_detector, 'stop'):
+                emotion_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping emotion detector: {e}")
+            
+        try:
+            if 'camera' in locals():
+                camera.release()
+        except Exception as e:
+            logger.error(f"Error releasing camera: {e}")
+            
+        try:
+            if 'audio_processor' in locals():
+                audio_processor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping audio processor: {e}")
+    
+    return 0
 
 def run_dev_mode(args):
     """
@@ -142,7 +173,7 @@ def run_dev_mode(args):
     try:
         # Initialize camera
         logger.info("Initializing camera...")
-        camera = Camera(camera_id=args.camera_id)
+        camera = Camera(args.camera_id)
         
         # Initialize audio processor
         logger.info("Initializing audio processor...")
@@ -151,19 +182,18 @@ def run_dev_mode(args):
         # Initialize person detector
         logger.info("Initializing person detector...")
         person_detector = PersonDetector(
-            detection_threshold=args.threshold,
-            camera=camera
+            threshold=args.threshold
         )
         
         # Initialize emotion detector
         logger.info("Initializing emotion detector...")
         emotion_detector = EmotionDetector(
-            audio_processor=audio_processor
+            threshold=args.threshold
         )
         
         # Start web interface in dev mode
         logger.info("Starting web interface in developer mode...")
-        web_interface = BabyMonitorWeb(
+        web_interface = SimpleBabyMonitorWeb(
             camera=camera,
             person_detector=person_detector,
             emotion_detector=emotion_detector,
@@ -172,27 +202,59 @@ def run_dev_mode(args):
             mode="dev",
             debug=True  # Always enable debug in dev mode
         )
-        web_interface.start()
         
-        # Keep main thread alive until stop event is set
-        while not stop_event.is_set():
-            time.sleep(1)
+        # Print access information
+        print("\n" + "="*80)
+        print(f"Baby Monitor Web Interface is running in DEVELOPER mode!")
+        print(f"Access the web interface at: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}")
+        print(f"Developer tools are available at: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}/dev/tools")
+        print("Press Ctrl+C to stop the server")
+        print("="*80 + "\n")
+        
+        # Start the web interface in the main thread
+        web_interface.run()
+        
+        # This code will only be reached when the web interface is stopped
+        logger.info("Web interface stopped")
             
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:
         logger.error(f"Error in developer mode: {e}")
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        if 'web_interface' in locals():
-            web_interface.stop()
-        if 'person_detector' in locals():
-            person_detector.stop()
-        if 'emotion_detector' in locals():
-            emotion_detector.stop()
-        if 'camera' in locals():
-            camera.release()
-        if 'audio_processor' in locals():
-            audio_processor.stop()
+        try:
+            if 'web_interface' in locals():
+                web_interface.stop()
+        except Exception as e:
+            logger.error(f"Error stopping web interface: {e}")
+            
+        try:
+            if 'person_detector' in locals() and hasattr(person_detector, 'stop'):
+                person_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping person detector: {e}")
+            
+        try:
+            if 'emotion_detector' in locals() and hasattr(emotion_detector, 'stop'):
+                emotion_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping emotion detector: {e}")
+            
+        try:
+            if 'camera' in locals():
+                camera.release()
+        except Exception as e:
+            logger.error(f"Error releasing camera: {e}")
+            
+        try:
+            if 'audio_processor' in locals():
+                audio_processor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping audio processor: {e}")
+    
+    return 0
 
 def run_local_mode(args):
     """
@@ -206,23 +268,15 @@ def run_local_mode(args):
         # Import GUI components
         try:
             from PyQt5.QtWidgets import QApplication
-            from sound_emotion_gui import EmotionDetectorGUI
+            from babymonitor.gui.main_gui import launch_main_gui
         except ImportError as e:
             logger.error(f"Failed to import GUI components: {e}")
             logger.error("Make sure PyQt5 is installed: pip install PyQt5")
-            return
+            return 1
         
-        # Create QApplication
-        app = QApplication(sys.argv)
-        
-        # Create and show the GUI
+        # Launch the main GUI
         logger.info("Starting local GUI...")
-        gui = EmotionDetectorGUI()
-        gui.show()
-        
-        # Start the application event loop
-        logger.info("Local GUI started. Close the window to exit.")
-        sys.exit(app.exec_())
+        return launch_main_gui()
         
     except Exception as e:
         logger.error(f"Error in local mode: {e}")
@@ -255,14 +309,14 @@ def main():
     
     # Start the appropriate mode
     if args.mode == 'normal':
-        run_normal_mode(args)
+        return run_normal_mode(args)
     elif args.mode == 'dev':
-        run_dev_mode(args)
+        return run_dev_mode(args)
     elif args.mode == 'local':
-        run_local_mode(args)
+        return run_local_mode(args)
     else:
         logger.error(f"Unknown mode: {args.mode}")
-        sys.exit(1)
+        return 1
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

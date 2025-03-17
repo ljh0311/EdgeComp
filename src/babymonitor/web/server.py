@@ -81,7 +81,10 @@ class BabyMonitorWeb:
             'detection_log': []
         }
         
-        # System info
+        # Running flag
+        self.running = False
+        
+        # Start time
         self.start_time = time.time()
         
         # Setup routes and socket.io events
@@ -97,9 +100,6 @@ class BabyMonitorWeb:
         self.system_info_thread = threading.Thread(target=self._emit_system_info)
         self.system_info_thread.daemon = True
         self.system_info_thread.start()
-        
-        # Running flag
-        self.running = False
         
         logger.info(f"Baby Monitor Web Server initialized in {self.mode.upper()} mode")
     
@@ -477,13 +477,18 @@ class BabyMonitorWeb:
             time.sleep(1)
     
     def start(self):
-        """Start the web server"""
+        """Start the web server in a background thread"""
         self.running = True
         logger.info(f"Starting Baby Monitor Web Server in {self.mode.upper()} mode on http://{self.host}:{self.port}")
-        self.socketio.start_background_task(self.run)
+        # Start in a background thread
+        thread = threading.Thread(target=self.run)
+        thread.daemon = True
+        thread.start()
     
     def run(self):
-        """Run the web server"""
+        """Run the web server in the current thread"""
+        self.running = True
+        logger.info(f"Running Baby Monitor Web Server in {self.mode.upper()} mode on http://{self.host}:{self.port}")
         self.socketio.run(self.app, host=self.host, port=self.port, debug=self.debug, use_reloader=False)
     
     def stop(self):

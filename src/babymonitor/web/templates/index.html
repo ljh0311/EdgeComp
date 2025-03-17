@@ -134,28 +134,95 @@
             <!-- Dashboard Sidebar -->
             <div class="col-lg-4">
                 <div class="row">
+                    <!-- Sound Emotion Recognition -->
+                    <div class="col-12 mb-4">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <i class="bi bi-soundwave"></i> Baby's Sound Status
+                            </div>
+                            <div class="card-body">
+                                <div class="emotion-progress mb-3">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><i class="bi bi-emoji-frown text-danger"></i> Crying</span>
+                                        <span id="cryingValue">0%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div id="cryingProgress" class="progress-bar bg-danger" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+                                <div class="emotion-progress mb-3">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><i class="bi bi-emoji-laughing text-success"></i> Laughing</span>
+                                        <span id="laughingValue">0%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div id="laughingProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+                                <div class="emotion-progress mb-3">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><i class="bi bi-chat-dots text-info"></i> Babbling</span>
+                                        <span id="babblingValue">0%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div id="babblingProgress" class="progress-bar bg-info" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+                                <div class="emotion-progress">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><i class="bi bi-volume-mute text-secondary"></i> Silence</span>
+                                        <span id="silenceValue">0%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div id="silenceProgress" class="progress-bar bg-secondary" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- System Status -->
                     <div class="col-12 mb-4">
                         <div class="card dashboard-card">
                             <div class="card-header">
-                                <i class="bi bi-info-circle"></i> System Status
+                                <i class="bi bi-info-circle"></i> Monitor Status
                             </div>
                             <div class="card-body">
                                 <div class="info-item">
-                                    <div class="info-label">Uptime</div>
+                                    <div class="info-label"><i class="bi bi-clock"></i> Current Time</div>
+                                    <div id="currentTime" class="info-value">--:--:--</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label"><i class="bi bi-hourglass-split"></i> Monitoring Duration</div>
                                     <div id="systemUptime" class="info-value">00:00:00</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">FPS</div>
-                                    <div id="currentFps" class="info-value">0</div>
+                                    <div class="info-label"><i class="bi bi-camera-video"></i> Camera Status</div>
+                                    <div class="d-flex align-items-center">
+                                        <div id="cameraStatus" class="badge bg-success me-2">Active</div>
+                                        <span id="currentFps" class="info-value">0</span> FPS
+                                    </div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">CPU Usage</div>
-                                    <div id="currentCpu" class="info-value">0%</div>
+                                    <div class="info-label"><i class="bi bi-mic"></i> Audio Status</div>
+                                    <div class="d-flex align-items-center">
+                                        <div id="audioStatus" class="badge bg-success me-2">Active</div>
+                                        <span id="audioSampleRate" class="info-value">16000 Hz</span>
+                                    </div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">Memory Usage</div>
-                                    <div id="currentMemory" class="info-value">0%</div>
+                                    <div class="info-label"><i class="bi bi-person-bounding-box"></i> Person Detection</div>
+                                    <div class="d-flex align-items-center">
+                                        <div id="personDetectorStatus" class="badge bg-success me-2">Active</div>
+                                        <span id="detectionCountValue" class="info-value">0</span> detected
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label"><i class="bi bi-emoji-smile"></i> Emotion Detection</div>
+                                    <div class="d-flex align-items-center">
+                                        <div id="emotionDetectorStatus" class="badge bg-success me-2">Active</div>
+                                        <span id="currentEmotion" class="info-value">Unknown</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -274,13 +341,32 @@
                 }
                 systemState.lastDetectionCount = count;
             }
+            
+            // Update detection count in system status
+            const detectionCountValue = document.getElementById('detectionCountValue');
+            if (detectionCountValue) {
+                detectionCountValue.textContent = data.count || 0;
+            }
         });
         
         socket.on('emotion_update', (data) => {
             const emotion = data.emotion || 'unknown';
             const confidence = data.confidence || 0;
+            const emotionConfidences = data.confidences || {};
             
-            // Update emotion display
+            // Update emotion progress bars
+            updateEmotionProgress('crying', emotionConfidences.crying || 0);
+            updateEmotionProgress('laughing', emotionConfidences.laughing || 0);
+            updateEmotionProgress('babbling', emotionConfidences.babbling || 0);
+            updateEmotionProgress('silence', emotionConfidences.silence || 0);
+            
+            // Update current emotion in system status
+            if (document.getElementById('currentEmotion')) {
+                document.getElementById('currentEmotion').textContent = 
+                    emotion.charAt(0).toUpperCase() + emotion.slice(1);
+            }
+            
+            // Update emotion overlay display
             if (emotion !== 'unknown' && emotion !== 'silence') {
                 emotionText.textContent = emotion;
                 emotionConfidence.textContent = `${Math.round(confidence * 100)}%`;
@@ -410,6 +496,32 @@
         
         // Check emotion timeout every second
         setInterval(checkEmotionTimeout, 1000);
+
+        // Function to update emotion progress bars
+        function updateEmotionProgress(emotion, confidence) {
+            const progressBar = document.getElementById(`${emotion}Progress`);
+            const valueDisplay = document.getElementById(`${emotion}Value`);
+            
+            if (progressBar && valueDisplay) {
+                const percentage = Math.round(confidence * 100);
+                progressBar.style.width = `${percentage}%`;
+                progressBar.setAttribute('aria-valuenow', percentage);
+                valueDisplay.textContent = `${percentage}%`;
+            }
+        }
+        
+        // Function to update current time
+        function updateCurrentTime() {
+            const currentTimeElement = document.getElementById('currentTime');
+            if (currentTimeElement) {
+                const now = new Date();
+                currentTimeElement.textContent = now.toLocaleTimeString();
+            }
+        }
+        
+        // Update current time every second
+        setInterval(updateCurrentTime, 1000);
+        updateCurrentTime(); // Initial update
     </script>
 </body>
 </html> 
