@@ -121,6 +121,10 @@ class SimpleBabyMonitorWeb:
         self.status_thread = threading.Thread(target=self._update_system_status)
         self.status_thread.daemon = True
         
+        # Set up signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
     def _setup_routes(self):
         """Setup Flask routes"""
         
@@ -484,24 +488,11 @@ class SimpleBabyMonitorWeb:
                 logger.error(f"Error updating system status: {e}")
                 time.sleep(1)
     
-    def start(self):
-        """Start the web server in a background thread"""
-        self.running = True
-        logger.info(f"Starting Baby Monitor Web Server in {self.mode.upper()} mode on http://{self.host}:{self.port}")
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        logger.info(f"Received signal {signum}")
+        self.stop()
         
-        # Start processing thread
-        if not self.processing_thread.is_alive():
-            self.processing_thread.start()
-        
-        # Start system status thread
-        if not self.status_thread.is_alive():
-            self.status_thread.start()
-        
-        # Start web server in a background thread
-        server_thread = threading.Thread(target=self.run)
-        server_thread.daemon = True
-        server_thread.start()
-    
     def run(self):
         """Run the web server in the current thread"""
         self.running = True
@@ -515,16 +506,6 @@ class SimpleBabyMonitorWeb:
         if not self.status_thread.is_alive():
             self.status_thread.start()
         
-        # Set up signal handlers
-        def signal_handler(signum, frame):
-            logger.info("Received shutdown signal")
-            self.stop()
-            os._exit(0)  # Force exit if normal shutdown fails
-        
-        # Register signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
         try:
             # Run the Flask app with Socket.IO
             self.socketio.run(
@@ -534,6 +515,9 @@ class SimpleBabyMonitorWeb:
                 debug=self.debug,
                 use_reloader=False  # Disable reloader to prevent duplicate processes
             )
+        except KeyboardInterrupt:
+            logger.info("Received keyboard interrupt")
+            self.stop()
         except Exception as e:
             logger.error(f"Error running web server: {e}")
             self.stop()
@@ -548,7 +532,8 @@ class SimpleBabyMonitorWeb:
         
         try:
             # Stop Socket.IO
-            self.socketio.stop()
+            if hasattr(self, 'socketio'):
+                self.socketio.stop()
             
             # Stop camera if it's running
             if self.camera and hasattr(self.camera, 'release'):
@@ -563,14 +548,15 @@ class SimpleBabyMonitorWeb:
                 self.person_detector.stop()
             
             # Wait for threads to finish
-            if self.processing_thread.is_alive():
+            if hasattr(self, 'processing_thread') and self.processing_thread.is_alive():
                 self.processing_thread.join(timeout=1.0)
             
-            if self.status_thread.is_alive():
+            if hasattr(self, 'status_thread') and self.status_thread.is_alive():
                 self.status_thread.join(timeout=1.0)
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             
         finally:
-            logger.info("Web server stopped") 
+            logger.info("Web server stopped")
+            os._exit(0)  # Force exit if normal shutdown fails 

@@ -1,527 +1,344 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baby Monitor System</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/metrics.css') }}">
-    <style>
-        .video-container {
-            position: relative;
-            width: 100%;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+{% extends "base.html" %}
+
+{% block title %}Baby Monitor Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .video-container {
+        position: relative;
+        width: 100%;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        margin-bottom: 15px;
+        aspect-ratio: 16/9;
+    }
+    
+    .video-feed {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    
+    .status-overlay {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        z-index: 2;
+    }
+    
+    .emotion-overlay {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        z-index: 2;
+    }
+    
+    .emotion-crying {
+        background-color: rgba(220, 53, 69, 0.8);
+    }
+    
+    .emotion-laughing {
+        background-color: rgba(25, 135, 84, 0.8);
+    }
+    
+    .emotion-babbling {
+        background-color: rgba(13, 202, 240, 0.8);
+    }
+    
+    .dashboard-card {
+        height: 100%;
+        margin-bottom: 15px;
+    }
+    
+    .quick-action {
+        margin-bottom: 8px;
+    }
+
+    .alert-container {
+        position: fixed;
+        bottom: 70px;
+        right: 20px;
+        width: 350px;
+        max-height: 200px;
+        overflow-y: auto;
+        z-index: 1000;
+    }
+
+    .alert {
+        margin-bottom: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        opacity: 0.95;
+    }
+
+    .emotion-progress {
+        height: 20px;
+        margin-bottom: 8px;
+        background-color: rgba(0, 0, 0, 0.2);
+    }
+
+    .emotion-label {
+        position: absolute;
+        width: 100%;
+        text-align: center;
+        color: white;
+        font-weight: bold;
+        line-height: 20px;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        font-size: 0.9rem;
+    }
+
+    .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .status-label {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+
+    .status-value {
+        text-align: right;
+    }
+
+    .progress {
+        background-color: rgba(0, 0, 0, 0.2);
+    }
+
+    .system-status {
+        font-size: 0.9rem;
+    }
+
+    @media (max-width: 768px) {
+        .alert-container {
+            width: calc(100% - 40px);
+            left: 20px;
         }
-        
-        .video-feed {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        .status-overlay {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-        
-        .emotion-overlay {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-        
-        .emotion-crying {
-            background-color: rgba(220, 53, 69, 0.8);
-        }
-        
-        .emotion-laughing {
-            background-color: rgba(25, 135, 84, 0.8);
-        }
-        
-        .emotion-babbling {
-            background-color: rgba(13, 202, 240, 0.8);
-        }
-        
-        .dashboard-card {
-            height: 100%;
-        }
-        
-        .quick-action {
-            margin-bottom: 10px;
-        }
-    </style>
-</head>
-<body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-camera-video"></i> Baby Monitor
-                {% if mode == "dev" %}
-                <span class="badge bg-danger">DEV MODE</span>
-                {% endif %}
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/metrics">Metrics</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/repair">Repair Tools</a>
-                    </li>
-                    {% if mode == "dev" %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/tools">Dev Tools</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/logs">Logs</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/settings">Settings</a>
-                    </li>
-                    {% endif %}
-                </ul>
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+    <div class="col-md-8">
+        <!-- Video Feed -->
+        <div class="video-container">
+            <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
+            <div class="status-overlay">
+                <i class="bi bi-circle-fill text-success"></i> Live
+            </div>
+            <div class="emotion-overlay" id="emotionOverlay">
+                <i class="bi bi-emoji-neutral"></i> Monitoring...
             </div>
         </div>
-    </nav>
 
-    <!-- Main Content -->
-    <div class="container mt-4">
-        <div class="row mb-4">
-            <div class="col">
-                <h1 class="mb-3">Baby Monitor Dashboard</h1>
-                <p class="text-muted">Real-time monitoring of your baby's activity and emotions.</p>
+        <!-- Emotion Progress Bars -->
+        <div class="card dashboard-card">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <div><i class="bi bi-emoji-smile"></i> Current Emotion State</div>
+                <small class="text-muted" id="lastUpdate"></small>
             </div>
-        </div>
-
-        <div class="row">
-            <!-- Video Feed -->
-            <div class="col-lg-8 mb-4">
-                <div class="video-container">
-                    <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
-                    <div class="status-overlay">
-                        <span id="statusText">Monitoring</span>
-                        <span id="detectionCount" class="badge bg-success ms-2">0</span>
+            <div class="card-body py-2">
+                <div class="position-relative">
+                    <div class="progress emotion-progress">
+                        <div id="cryingProgress" class="progress-bar bg-danger" role="progressbar" style="width: 0%"></div>
                     </div>
-                    <div id="emotionOverlay" class="emotion-overlay" style="display: none;">
-                        <i class="bi bi-emoji-neutral"></i>
-                        <span id="emotionText">Unknown</span>
-                        <span id="emotionConfidence" class="badge bg-secondary ms-1">0%</span>
-                    </div>
+                    <div class="emotion-label">Crying: <span id="cryingValue">0%</span></div>
                 </div>
-            </div>
-
-            <!-- Dashboard Sidebar -->
-            <div class="col-lg-4">
-                <div class="row">
-                    <!-- Sound Emotion Recognition -->
-                    <div class="col-12 mb-4">
-                        <div class="card dashboard-card">
-                            <div class="card-header">
-                                <i class="bi bi-soundwave"></i> Baby's Sound Status
-                            </div>
-                            <div class="card-body">
-                                <div class="emotion-progress mb-3">
-                                    <div class="d-flex justify-content-between mb-1">
-                                        <span><i class="bi bi-emoji-frown text-danger"></i> Crying</span>
-                                        <span id="cryingValue">0%</span>
-                                    </div>
-                                    <div class="progress">
-                                        <div id="cryingProgress" class="progress-bar bg-danger" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                                    </div>
-                                </div>
-                                <div class="emotion-progress mb-3">
-                                    <div class="d-flex justify-content-between mb-1">
-                                        <span><i class="bi bi-emoji-laughing text-success"></i> Laughing</span>
-                                        <span id="laughingValue">0%</span>
-                                    </div>
-                                    <div class="progress">
-                                        <div id="laughingProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                                    </div>
-                                </div>
-                                <div class="emotion-progress mb-3">
-                                    <div class="d-flex justify-content-between mb-1">
-                                        <span><i class="bi bi-chat-dots text-info"></i> Babbling</span>
-                                        <span id="babblingValue">0%</span>
-                                    </div>
-                                    <div class="progress">
-                                        <div id="babblingProgress" class="progress-bar bg-info" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                                    </div>
-                                </div>
-                                <div class="emotion-progress">
-                                    <div class="d-flex justify-content-between mb-1">
-                                        <span><i class="bi bi-volume-mute text-secondary"></i> Silence</span>
-                                        <span id="silenceValue">0%</span>
-                                    </div>
-                                    <div class="progress">
-                                        <div id="silenceProgress" class="progress-bar bg-secondary" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                <div class="position-relative">
+                    <div class="progress emotion-progress">
+                        <div id="laughingProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
                     </div>
-
-                    <!-- System Status -->
-                    <div class="col-12 mb-4">
-                        <div class="card dashboard-card">
-                            <div class="card-header">
-                                <i class="bi bi-info-circle"></i> Monitor Status
-                            </div>
-                            <div class="card-body">
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-clock"></i> Current Time</div>
-                                    <div id="currentTime" class="info-value">--:--:--</div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-hourglass-split"></i> Monitoring Duration</div>
-                                    <div id="systemUptime" class="info-value">00:00:00</div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-camera-video"></i> Camera Status</div>
-                                    <div class="d-flex align-items-center">
-                                        <div id="cameraStatus" class="badge bg-success me-2">Active</div>
-                                        <span id="currentFps" class="info-value">0</span> FPS
-                                    </div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-mic"></i> Audio Status</div>
-                                    <div class="d-flex align-items-center">
-                                        <div id="audioStatus" class="badge bg-success me-2">Active</div>
-                                        <span id="audioSampleRate" class="info-value">16000 Hz</span>
-                                    </div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-person-bounding-box"></i> Person Detection</div>
-                                    <div class="d-flex align-items-center">
-                                        <div id="personDetectorStatus" class="badge bg-success me-2">Active</div>
-                                        <span id="detectionCountValue" class="info-value">0</span> detected
-                                    </div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label"><i class="bi bi-emoji-smile"></i> Emotion Detection</div>
-                                    <div class="d-flex align-items-center">
-                                        <div id="emotionDetectorStatus" class="badge bg-success me-2">Active</div>
-                                        <span id="currentEmotion" class="info-value">Unknown</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="emotion-label">Laughing: <span id="laughingValue">0%</span></div>
+                </div>
+                <div class="position-relative">
+                    <div class="progress emotion-progress">
+                        <div id="babblingProgress" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
                     </div>
-
-                    <!-- Quick Actions -->
-                    <div class="col-12 mb-4">
-                        <div class="card dashboard-card">
-                            <div class="card-header">
-                                <i class="bi bi-lightning"></i> Quick Actions
-                            </div>
-                            <div class="card-body">
-                                <a href="/metrics" class="btn btn-primary quick-action w-100">
-                                    <i class="bi bi-graph-up"></i> View Detailed Metrics
-                                </a>
-                                <a href="/repair" class="btn btn-outline-primary quick-action w-100">
-                                    <i class="bi bi-tools"></i> Repair Tools
-                                </a>
-                                {% if mode == "dev" %}
-                                <a href="/dev/tools" class="btn btn-outline-warning quick-action w-100">
-                                    <i class="bi bi-gear"></i> Developer Tools
-                                </a>
-                                {% endif %}
-                            </div>
-                        </div>
+                    <div class="emotion-label">Babbling: <span id="babblingValue">0%</span></div>
+                </div>
+                <div class="position-relative">
+                    <div class="progress emotion-progress">
+                        <div id="silenceProgress" class="progress-bar bg-secondary" role="progressbar" style="width: 0%"></div>
                     </div>
-
-                    <!-- Recent Alerts -->
-                    <div class="col-12">
-                        <div class="card dashboard-card">
-                            <div class="card-header">
-                                <i class="bi bi-bell"></i> Recent Alerts
-                            </div>
-                            <div class="card-body p-0">
-                                <div id="alertHistory" class="alert-container">
-                                    <div class="alert-item alert-info">
-                                        <div class="alert-time">Now</div>
-                                        <div class="alert-message">System initialized</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <div class="emotion-label">Silence: <span id="silenceValue">0%</span></div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/socket.io@4.5.4/client-dist/socket.io.min.js"></script>
-    <script>
-        // Initialize Socket.IO connection
-        const socket = io();
+    <div class="col-md-4">
+        <!-- System Status -->
+        <div class="card dashboard-card">
+            <div class="card-header py-2">
+                <i class="bi bi-info-circle"></i> System Status
+            </div>
+            <div class="card-body py-2 system-status">
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-clock"></i> Uptime:</span>
+                    <span class="status-value" id="uptime">00:00:00</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-camera"></i> Camera:</span>
+                    <span class="status-value" id="cameraStatus">Connecting...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-person"></i> Person Detection:</span>
+                    <span class="status-value" id="personDetectorStatus">Initializing...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-emoji-smile"></i> Emotion Detection:</span>
+                    <span class="status-value" id="emotionDetectorStatus">Initializing...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-cpu"></i> CPU Usage:</span>
+                    <div class="progress" style="width: 120px; height: 8px;">
+                        <div id="cpuUsage" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <span class="status-label"><i class="bi bi-memory"></i> Memory Usage:</span>
+                    <div class="progress" style="width: 120px; height: 8px;">
+                        <div id="memoryUsage" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-        // DOM Elements
-        const statusText = document.getElementById('statusText');
-        const detectionCount = document.getElementById('detectionCount');
-        const emotionOverlay = document.getElementById('emotionOverlay');
-        const emotionText = document.getElementById('emotionText');
-        const emotionConfidence = document.getElementById('emotionConfidence');
-        const systemUptime = document.getElementById('systemUptime');
-        const currentFps = document.getElementById('currentFps');
-        const currentCpu = document.getElementById('currentCpu');
-        const currentMemory = document.getElementById('currentMemory');
-        const alertHistory = document.getElementById('alertHistory');
+        <!-- Quick Actions -->
+        <div class="card dashboard-card">
+            <div class="card-header py-2">
+                <i class="bi bi-lightning"></i> Quick Actions
+            </div>
+            <div class="card-body py-2">
+                <div class="quick-action">
+                    <button class="btn btn-primary btn-sm w-100" onclick="location.href='/metrics'">
+                        <i class="bi bi-graph-up"></i> View Detailed Metrics
+                    </button>
+                </div>
+                <div class="quick-action">
+                    <button class="btn btn-info btn-sm w-100" onclick="location.href='/repair'">
+                        <i class="bi bi-tools"></i> Repair Tools
+                    </button>
+                </div>
+                {% if mode == "dev" %}
+                <div class="quick-action">
+                    <button class="btn btn-warning btn-sm w-100" onclick="location.href='/dev/tools'">
+                        <i class="bi bi-gear"></i> Developer Tools
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
 
-        // System state
-        const systemState = {
-            lastDetectionCount: 0,
-            lastEmotionUpdate: Date.now(),
-            currentEmotion: 'unknown'
-        };
+<!-- Floating Alert Container -->
+<div class="alert-container" id="alertBox">
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        <i class="bi bi-info-circle"></i> System is actively monitoring for baby activity.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+</div>
+{% endblock %}
 
-        // Socket.IO event handlers
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            addAlert('Connected to server', 'info');
-        });
+{% block extra_js %}
+<script>
+    // Socket.IO connection
+    const socket = io();
+    
+    // Update emotion overlay and progress bars
+    socket.on('emotion_update', function(data) {
+        const emotion = data.emotion;
+        const confidence = data.confidence;
+        const confidences = data.confidences;
         
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            addAlert('Disconnected from server', 'warning');
-            statusText.textContent = 'Offline';
-            statusText.parentElement.classList.remove('bg-success');
-            statusText.parentElement.classList.add('bg-danger');
-        });
+        // Update emotion overlay
+        const overlay = document.getElementById('emotionOverlay');
+        overlay.className = 'emotion-overlay';
         
-        socket.on('detection_update', (data) => {
-            // Update detection count
-            const count = data.count || 0;
-            detectionCount.textContent = count;
-            
-            // Update status text
-            if (count > 0) {
-                statusText.textContent = 'Detected';
-                statusText.parentElement.classList.remove('bg-secondary');
-                statusText.parentElement.classList.add('bg-success');
-            } else {
-                statusText.textContent = 'Monitoring';
-                statusText.parentElement.classList.remove('bg-success');
-                statusText.parentElement.classList.add('bg-secondary');
-            }
-            
-            // Update FPS
-            if (currentFps) {
-                currentFps.textContent = Math.round(data.fps || 0);
-            }
-            
-            // Add to alert history if detection count changed
-            if (count !== systemState.lastDetectionCount) {
-                if (count > systemState.lastDetectionCount) {
-                    addAlert(`Detected ${count} person(s)`, 'info');
-                } else if (count === 0 && systemState.lastDetectionCount > 0) {
-                    addAlert('No persons detected', 'info');
-                }
-                systemState.lastDetectionCount = count;
-            }
-            
-            // Update detection count in system status
-            const detectionCountValue = document.getElementById('detectionCountValue');
-            if (detectionCountValue) {
-                detectionCountValue.textContent = data.count || 0;
-            }
-        });
+        let icon = 'emoji-neutral';
+        if (emotion === 'crying') {
+            overlay.classList.add('emotion-crying');
+            icon = 'emoji-frown';
+        } else if (emotion === 'laughing') {
+            overlay.classList.add('emotion-laughing');
+            icon = 'emoji-smile';
+        } else if (emotion === 'babbling') {
+            overlay.classList.add('emotion-babbling');
+            icon = 'emoji-laughing';
+        }
         
-        socket.on('emotion_update', (data) => {
-            const emotion = data.emotion || 'unknown';
-            const confidence = data.confidence || 0;
-            const emotionConfidences = data.confidences || {};
-            
-            // Update emotion progress bars
-            updateEmotionProgress('crying', emotionConfidences.crying || 0);
-            updateEmotionProgress('laughing', emotionConfidences.laughing || 0);
-            updateEmotionProgress('babbling', emotionConfidences.babbling || 0);
-            updateEmotionProgress('silence', emotionConfidences.silence || 0);
-            
-            // Update current emotion in system status
-            if (document.getElementById('currentEmotion')) {
-                document.getElementById('currentEmotion').textContent = 
-                    emotion.charAt(0).toUpperCase() + emotion.slice(1);
-            }
-            
-            // Update emotion overlay display
-            if (emotion !== 'unknown' && emotion !== 'silence') {
-                emotionText.textContent = emotion;
-                emotionConfidence.textContent = `${Math.round(confidence * 100)}%`;
-                
-                // Show emotion overlay
-                emotionOverlay.style.display = 'block';
-                
-                // Update emotion style
-                emotionOverlay.className = 'emotion-overlay';
-                if (emotion === 'crying') {
-                    emotionOverlay.classList.add('emotion-crying');
-                } else if (emotion === 'laughing') {
-                    emotionOverlay.classList.add('emotion-laughing');
-                } else if (emotion === 'babbling') {
-                    emotionOverlay.classList.add('emotion-babbling');
-                }
-                
-                // Update icon
-                const iconElement = emotionOverlay.querySelector('i');
-                if (iconElement) {
-                    iconElement.className = 'bi';
-                    if (emotion === 'crying') {
-                        iconElement.classList.add('bi-emoji-frown');
-                    } else if (emotion === 'laughing') {
-                        iconElement.classList.add('bi-emoji-laughing');
-                    } else if (emotion === 'babbling') {
-                        iconElement.classList.add('bi-chat-dots');
-                    } else {
-                        iconElement.classList.add('bi-emoji-neutral');
-                    }
-                }
-                
-                // Add alert if emotion is crying
-                if (emotion === 'crying' && confidence > 0.6) {
-                    addAlert('Baby is crying!', 'danger');
-                }
-                
-                // Update last emotion update time
-                systemState.lastEmotionUpdate = Date.now();
-                systemState.currentEmotion = emotion;
-            } else {
-                // Hide emotion overlay for silence or unknown
-                if (emotion === 'silence' || emotion === 'unknown') {
-                    emotionOverlay.style.display = 'none';
-                }
-            }
-        });
+        overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${emotion} (${(confidence * 100).toFixed(1)}%)`;
         
-        socket.on('metrics_update', (data) => {
-            // Update CPU and memory usage
-            if (currentCpu) {
-                currentCpu.textContent = `${Math.round(data.current.cpu_usage || 0)}%`;
-            }
-            
-            if (currentMemory) {
-                currentMemory.textContent = `${Math.round(data.current.memory_usage || 0)}%`;
-            }
-        });
-        
-        socket.on('system_info', (data) => {
-            // Update uptime
-            if (systemUptime) {
-                systemUptime.textContent = data.uptime || '00:00:00';
-            }
-        });
-        
-        socket.on('alert', (data) => {
-            addAlert(data.message, data.type);
-        });
-        
-        // Add alert to history
-        function addAlert(message, type = 'info') {
-            if (!alertHistory) return;
-            
-            const now = new Date();
-            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            
-            const alertItem = document.createElement('div');
-            alertItem.className = 'alert-item';
-            
-            // Add color based on type
-            if (type === 'crying' || type === 'danger') {
-                alertItem.classList.add('alert-danger');
-            } else if (type === 'warning') {
-                alertItem.classList.add('alert-warning');
-            } else {
-                alertItem.classList.add('alert-info');
-            }
-            
-            const alertTime = document.createElement('div');
-            alertTime.className = 'alert-time';
-            alertTime.textContent = timeString;
-            
-            const alertMessage = document.createElement('div');
-            alertMessage.className = 'alert-message';
-            alertMessage.textContent = message;
-            
-            alertItem.appendChild(alertTime);
-            alertItem.appendChild(alertMessage);
-            
-            // Add to container at the top
-            alertHistory.insertBefore(alertItem, alertHistory.firstChild);
-            
-            // Limit to 10 alerts
-            while (alertHistory.children.length > 10) {
-                alertHistory.removeChild(alertHistory.lastChild);
+        // Update progress bars
+        for (const [emotion, value] of Object.entries(confidences)) {
+            const progress = document.getElementById(`${emotion}Progress`);
+            const valueSpan = document.getElementById(`${emotion}Value`);
+            if (progress && valueSpan) {
+                const percentage = (value * 100).toFixed(1);
+                progress.style.width = `${percentage}%`;
+                valueSpan.textContent = `${percentage}%`;
             }
         }
         
-        // Check for emotion timeout
-        function checkEmotionTimeout() {
-            const now = Date.now();
-            const timeSinceUpdate = now - systemState.lastEmotionUpdate;
-            
-            // If no emotion update for 10 seconds, hide the overlay
-            if (timeSinceUpdate > 10000 && emotionOverlay.style.display !== 'none') {
-                emotionOverlay.style.display = 'none';
-                
-                // If the last emotion was crying, add an alert that it stopped
-                if (systemState.currentEmotion === 'crying') {
-                    addAlert('Baby stopped crying', 'info');
-                }
-                
-                systemState.currentEmotion = 'unknown';
-            }
-        }
+        // Update last update time
+        const lastUpdate = document.getElementById('lastUpdate');
+        const now = new Date();
+        lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
         
-        // Check emotion timeout every second
-        setInterval(checkEmotionTimeout, 1000);
-
-        // Function to update emotion progress bars
-        function updateEmotionProgress(emotion, confidence) {
-            const progressBar = document.getElementById(`${emotion}Progress`);
-            const valueDisplay = document.getElementById(`${emotion}Value`);
-            
-            if (progressBar && valueDisplay) {
-                const percentage = Math.round(confidence * 100);
-                progressBar.style.width = `${percentage}%`;
-                progressBar.setAttribute('aria-valuenow', percentage);
-                valueDisplay.textContent = `${percentage}%`;
-            }
+        // Add alert for crying
+        if (emotion === 'crying' && confidence > 0.7) {
+            addAlert('warning', 'Baby is crying with high confidence!');
         }
+    });
+    
+    // Update system status
+    socket.on('system_info', function(data) {
+        document.getElementById('uptime').textContent = data.uptime;
+        document.getElementById('cameraStatus').textContent = data.camera_status;
+        document.getElementById('personDetectorStatus').textContent = data.person_detector_status;
+        document.getElementById('emotionDetectorStatus').textContent = data.emotion_detector_status;
         
-        // Function to update current time
-        function updateCurrentTime() {
-            const currentTimeElement = document.getElementById('currentTime');
-            if (currentTimeElement) {
-                const now = new Date();
-                currentTimeElement.textContent = now.toLocaleTimeString();
-            }
+        const cpuBar = document.getElementById('cpuUsage');
+        cpuBar.style.width = `${data.cpu_usage}%`;
+        cpuBar.title = `${data.cpu_usage.toFixed(1)}%`;
+        
+        const memBar = document.getElementById('memoryUsage');
+        memBar.style.width = `${data.memory_usage}%`;
+        memBar.title = `${data.memory_usage.toFixed(1)}%`;
+    });
+    
+    // Add alert to the alert box
+    function addAlert(type, message) {
+        const alertBox = document.getElementById('alertBox');
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        alertBox.insertAdjacentHTML('afterbegin', alertHtml);
+        
+        // Remove old alerts if there are more than 3
+        const alerts = alertBox.getElementsByClassName('alert');
+        while (alerts.length > 3) {
+            alerts[alerts.length - 1].remove();
         }
-        
-        // Update current time every second
-        setInterval(updateCurrentTime, 1000);
-        updateCurrentTime(); // Initial update
-    </script>
-</body>
-</html> 
+    }
+</script>
+{% endblock %} 
