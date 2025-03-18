@@ -428,7 +428,7 @@
             </div>
             <div class="col-md-6">
               <div class="metric-chart-container">
-                <h6><i class="bi bi-person-bounding-box"></i> Detection Types</h6>
+                <h6><i class="bi bi-person-bounding-box"></i> YOLOv8 Detection Metrics</h6>
                 <canvas id="detectionTypesChart"></canvas>
               </div>
             </div>
@@ -439,20 +439,20 @@
             <h6 class="text-muted mb-3">Detection Types Breakdown</h6>
             <div class="detection-types-grid">
               <div class="detection-type-card detection-type-face">
-                <div class="detection-type-value" id="faceDetectionCount">0</div>
-                <div class="detection-type-label">Face</div>
+                <div class="detection-type-value" id="personDetectionCount">0</div>
+                <div class="detection-type-label">Person</div>
               </div>
               <div class="detection-type-card detection-type-upper_body">
-                <div class="detection-type-value" id="upperBodyDetectionCount">0</div>
-                <div class="detection-type-label">Upper Body</div>
+                <div class="detection-type-value" id="confidenceAvg">0%</div>
+                <div class="detection-type-label">Avg Confidence</div>
               </div>
               <div class="detection-type-card detection-type-full_body">
-                <div class="detection-type-value" id="fullBodyDetectionCount">0</div>
-                <div class="detection-type-label">Full Body</div>
+                <div class="detection-type-value" id="totalDetections">0</div>
+                <div class="detection-type-label">Total Detections</div>
               </div>
               <div class="detection-type-card detection-type-lower_body">
-                <div class="detection-type-value" id="lowerBodyDetectionCount">0</div>
-                <div class="detection-type-label">Lower Body</div>
+                <div class="detection-type-value" id="peakDetections">0</div>
+                <div class="detection-type-label">Peak Detections</div>
               </div>
             </div>
           </div>
@@ -516,6 +516,49 @@
           </div>
         </div>
       </div>
+      
+      <!-- YOLOv8 Detector Features -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-person-bounding-box"></i> Person Detection Features</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="text-muted mb-3">YOLOv8 Features</h6>
+              <ul class="list-group">
+                <li class="list-group-item bg-dark text-light border-secondary">Real-time person detection using YOLOv8</li>
+                <li class="list-group-item bg-dark text-light border-secondary">High accuracy bounding box visualization</li>
+                <li class="list-group-item bg-dark text-light border-secondary">Multiple person detection & tracking</li>
+                <li class="list-group-item bg-dark text-light border-secondary">Optimized for edge devices & low latency</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6 class="text-muted mb-3">Detection Settings</h6>
+              <table class="table table-sm table-dark">
+                <tbody>
+                  <tr>
+                    <th>Frame Skip:</th>
+                    <td id="frameSkipValue">2</td>
+                  </tr>
+                  <tr>
+                    <th>Processing Resolution:</th>
+                    <td id="processResolution">640x480</td>
+                  </tr>
+                  <tr>
+                    <th>Confidence Threshold:</th>
+                    <td id="confidenceThreshold">0.7</td>
+                  </tr>
+                  <tr>
+                    <th>Detection History:</th>
+                    <td id="detectionHistorySize">5 frames</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- System Info and Stats -->
@@ -534,7 +577,15 @@
               </tr>
               <tr>
                 <th>Person Detector:</th>
-                <td id="personDetectorInfo">Active</td>
+                <td id="personDetectorInfo">YOLOv8 Active</td>
+              </tr>
+              <tr>
+                <th>Detector Model:</th>
+                <td id="detectorModelInfo">YOLOv8n</td>
+              </tr>
+              <tr>
+                <th>Detection Threshold:</th>
+                <td id="detectionThreshold">0.7</td>
               </tr>
               <tr>
                 <th>Emotion Detector:</th>
@@ -547,10 +598,6 @@
               <tr>
                 <th>Audio Sample Rate:</th>
                 <td id="audioSampleRate">16000 Hz</td>
-              </tr>
-              <tr>
-                <th>Detection Threshold:</th>
-                <td id="detectionThreshold">0.7</td>
               </tr>
               <tr>
                 <th>Operating System:</th>

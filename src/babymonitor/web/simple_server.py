@@ -152,7 +152,48 @@ class SimpleBabyMonitorWeb:
         @self.app.route('/api/metrics')
         def api_metrics():
             """API endpoint for metrics"""
-            return jsonify(self.metrics)
+            # Enhanced metrics structure to match what the metrics.js expects
+            metrics_data = {
+                'current': {
+                    'fps': self.metrics['current']['fps'],
+                    'detections': self.metrics['current'].get('detections', 0),
+                    'emotion': self.metrics['current'].get('emotion', 'unknown'),
+                    'emotion_confidence': self.metrics['current'].get('emotion_confidence', 0.0),
+                },
+                'history': self.metrics['history'],
+                'detection_types': self.metrics['detection_types'],
+                'total_detections': self.metrics.get('total_detections', 0),
+                # Add YOLOv8 specific metrics
+                'detection_confidence_avg': 0.85,  # Example value, adjust based on actual data
+                'peak_detections': max(1, self.metrics['current'].get('detections', 0)),  # Default to at least 1
+                'frame_skip': 2,  # Frame skip rate from person detector
+                'process_resolution': '640x480',  # Processing resolution
+                'confidence_threshold': 0.5,  # Detection confidence threshold
+                'detection_history_size': 5,  # History size for detection smoothing
+                'detector_model': 'YOLOv8n'  # Detector model name
+            }
+            
+            # If person detector is available, get real values
+            if self.person_detector:
+                metrics_data['frame_skip'] = getattr(self.person_detector, 'frame_skip', 2)
+                metrics_data['confidence_threshold'] = getattr(self.person_detector, 'threshold', 0.5)
+                metrics_data['detection_history_size'] = getattr(self.person_detector, 'max_history_size', 5)
+                
+                # Get process resolution if available
+                process_res = getattr(self.person_detector, 'process_resolution', None)
+                if process_res and isinstance(process_res, tuple) and len(process_res) == 2:
+                    metrics_data['process_resolution'] = f"{process_res[0]}x{process_res[1]}"
+                    
+                # Calculate confidence average from detection history if available
+                detection_history = getattr(self.person_detector, 'detection_history', [])
+                if detection_history and hasattr(self.person_detector, 'last_result') and self.person_detector.last_result:
+                    detections = self.person_detector.last_result.get('detections', [])
+                    if detections:
+                        confidence_sum = sum(d.get('confidence', 0) for d in detections)
+                        if len(detections) > 0:
+                            metrics_data['detection_confidence_avg'] = confidence_sum / len(detections)
+            
+            return jsonify(metrics_data)
         
         @self.app.route('/api/system_info')
         def api_system_info():
@@ -299,9 +340,19 @@ class SimpleBabyMonitorWeb:
                 # Update detection metrics and emit update
                 if 'detections' in results:
                     detection_count = len(results['detections'])
+                    # Update metrics
+                    self.metrics['current']['detections'] = detection_count
+                    
+                    # Update detection types
+                    if detection_count > 0:
+                        # Increment full-body count for YOLOv8 detections
+                        self.metrics['detection_types']['full_body'] = self.metrics['detection_types'].get('full_body', 0) + detection_count
+                        
+                    # Emit detection update via Socket.IO
                     self.socketio.emit('detection_update', {
                         'count': detection_count,
-                        'fps': self.metrics['current']['fps']
+                        'fps': self.metrics['current']['fps'],
+                        'detections': results['detections']  # Include actual detection data
                     })
                 
                 # Clean up old alerts
@@ -349,6 +400,20 @@ class SimpleBabyMonitorWeb:
                 if self.emotion_detector and hasattr(self.emotion_detector, 'current_emotion'):
                     current_emotion = self.emotion_detector.current_emotion
                 
+                # Track peak detections
+                current_detections = self.metrics['current'].get('detections', 0)
+                if not hasattr(self, '_peak_detections') or current_detections > self._peak_detections:
+                    self._peak_detections = current_detections
+                
+                # Track total detections (increment by current detection count)
+                if not hasattr(self, '_total_detections'):
+                    self._total_detections = 0
+                self._total_detections += current_detections
+                
+                # Update metrics with detection data
+                self.metrics['peak_detections'] = getattr(self, '_peak_detections', 0)
+                self.metrics['total_detections'] = getattr(self, '_total_detections', 0)
+                
                 # Update system status
                 self.system_status.update({
                     'uptime': f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}",
@@ -369,7 +434,8 @@ class SimpleBabyMonitorWeb:
                     'current': {
                         'cpu_usage': self.system_status['cpu_usage'],
                         'memory_usage': self.system_status['memory_usage'],
-                        'fps': self.system_status['fps']
+                        'fps': self.system_status['fps'],
+                        'detection_count': current_detections
                     }
                 })
                 
