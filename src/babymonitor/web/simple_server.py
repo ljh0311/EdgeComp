@@ -125,6 +125,9 @@ class SimpleBabyMonitorWeb:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
+        # Initialize alerts list
+        self.alerts = []
+        
     def _setup_routes(self):
         """Setup Flask routes"""
         
@@ -267,6 +270,9 @@ class SimpleBabyMonitorWeb:
                 # Process frame with person detector
                 results = self.person_detector.process_frame(frame)
                 
+                # Get the processed frame with bounding boxes and use it for display
+                processed_frame = results.get('frame', frame)
+                
                 # Get emotion detection results
                 if self.emotion_detector:
                     try:
@@ -298,144 +304,30 @@ class SimpleBabyMonitorWeb:
                         'fps': self.metrics['current']['fps']
                     })
                 
-                # Create a copy of the frame for drawing
-                display_frame = frame.copy()
+                # Clean up old alerts
+                current_time = time.time()
+                self.alerts = [a for a in self.alerts if current_time - a['timestamp'] < 60]
                 
-                # Draw detection results on the frame with improved visualization
-                if 'detections' in results:
-                    # Count detections by type
-                    face_count = 0
-                    upper_body_count = 0
-                    full_body_count = 0
-                    
-                    for detection in results['detections']:
-                        if 'bbox' in detection:
-                            x1, y1, x2, y2 = detection['bbox']
-                            confidence = detection.get('confidence', 0.0)
-                            detection_class = detection.get('class', 'person')
-                            
-                            # Skip low confidence detections
-                            if confidence < 0.5:
-                                continue
-                                
-                            # Count by type
-                            if detection_class == 'face':
-                                face_count += 1
-                            elif detection_class == 'upper_body':
-                                upper_body_count += 1
-                            elif detection_class == 'full_body':
-                                full_body_count += 1
-                            
-                            # Draw bounding box with different colors based on type
-                            if detection_class == 'face':
-                                color = (0, 255, 0)  # Green for face
-                            elif detection_class == 'upper_body':
-                                color = (255, 0, 0)  # Blue for upper body
-                            elif detection_class == 'full_body':
-                                color = (0, 0, 255)  # Red for full body
-                            else:
-                                color = (255, 255, 0)  # Yellow for other
-                            
-                            # Draw bounding box with thickness based on confidence
-                            thickness = max(1, int(confidence * 3))
-                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, thickness)
-                            
-                            # Draw label with confidence
-                            label = f"{detection_class}: {confidence:.2f}"
-                            
-                            # Get text size for background
-                            text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-                            
-                            # Draw semi-transparent background for text
-                            cv2.rectangle(
-                                display_frame, 
-                                (x1, y1 - text_size[1] - 10), 
-                                (x1 + text_size[0], y1), 
-                                color, 
-                                -1
-                            )
-                            
-                            # Draw text
-                            cv2.putText(
-                                display_frame, 
-                                label, 
-                                (x1, y1 - 5), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.5, 
-                                (0, 0, 0), 
-                                1, 
-                                cv2.LINE_AA
-                            )
-                    
-                    # Update metrics with detection counts
-                    total_detections = face_count + upper_body_count + full_body_count
-                    self.metrics['current']['detections'] = total_detections
-                    
-                    # Update detection types
-                    if face_count > 0:
-                        self.metrics['detection_types']['face'] += face_count
-                    if upper_body_count > 0:
-                        self.metrics['detection_types']['upper_body'] += upper_body_count
-                    if full_body_count > 0:
-                        self.metrics['detection_types']['full_body'] += full_body_count
-                    
-                    # Update total detections if any were found
-                    if total_detections > 0:
-                        self.metrics['total_detections'] += 1
+                # Update alert and notification for crying
+                if self.metrics['current']['emotion'] == 'crying' and self.metrics['current']['emotion_confidence'] > 0.7:
+                    # Check if we need to add a new alert
+                    if not self.alerts or (current_time - self.alerts[-1]['timestamp'] > 10 and self.alerts[-1]['type'] != 'crying'):
+                        alert = {
+                            'message': 'Baby is crying with high confidence!',
+                            'type': 'crying',
+                            'timestamp': current_time
+                        }
+                        self.alerts.append(alert)
+                        self.socketio.emit('alert', alert)
                 
-                # Update FPS
-                if 'fps' in results:
-                    self.metrics['current']['fps'] = results['fps']
-                
-                # Add monitoring status indicator
-                cv2.rectangle(display_frame, (display_frame.shape[1] - 120, 10), (display_frame.shape[1] - 10, 40), (0, 0, 0), -1)
-                cv2.putText(
-                    display_frame, 
-                    "Monitoring", 
-                    (display_frame.shape[1] - 115, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.5, 
-                    (0, 255, 0), 
-                    1, 
-                    cv2.LINE_AA
-                )
-                
-                # Add timestamp to the frame
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cv2.putText(
-                    display_frame, 
-                    timestamp, 
-                    (10, display_frame.shape[0] - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.5, 
-                    (255, 255, 255), 
-                    1, 
-                    cv2.LINE_AA
-                )
-                
-                # Add current emotion to the frame
-                if self.emotion_detector:
-                    emotion_text = f"Emotion: {self.metrics['current']['emotion']} ({self.metrics['current']['emotion_confidence']:.2f})"
-                    cv2.putText(
-                        display_frame,
-                        emotion_text,
-                        (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
-                        cv2.LINE_AA
-                    )
-                
-                # Encode frame to JPEG
-                _, buffer = cv2.imencode('.jpg', display_frame)
-                
-                # Update frame buffer
+                # Encode and store frame
                 with self.frame_lock:
+                    # Encode the processed frame with bounding boxes
+                    _, buffer = cv2.imencode('.jpg', processed_frame)
                     self.frame_buffer = buffer.tobytes()
                 
-                # Sleep to control processing rate
-                time.sleep(0.03)  # ~30 FPS
+                # Sleep to control CPU usage
+                time.sleep(0.02)  # 50 FPS maximum
                 
             except Exception as e:
                 logger.error(f"Error processing frame: {e}")

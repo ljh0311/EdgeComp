@@ -347,11 +347,8 @@
 </div>
 
 <!-- Floating Alert Container -->
-<div class="alert-container" id="alertBox">
-    <div class="alert alert-info alert-dismissible fade show" role="alert">
-        <i class="bi bi-info-circle"></i> System is actively monitoring for baby activity.
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
+<div class="alert-container" id="alertsContainer">
+    <!-- Alerts will be added dynamically by JavaScript -->
 </div>
 {% endblock %}
 
@@ -424,7 +421,7 @@
     
     // Add alert to the alert box
     function addAlert(type, message) {
-        const alertBox = document.getElementById('alertBox');
+        const alertBox = document.getElementById('alertsContainer');
         const alertHtml = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert">
                 ${message}

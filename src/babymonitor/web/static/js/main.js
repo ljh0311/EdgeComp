@@ -463,6 +463,28 @@ function handleAlert(data) {
 function addAlert(message, type = 'info') {
     if (!alertsContainer) return;
     
+    // Prevent duplicate crying alerts
+    if (type === 'crying') {
+        // Check if a crying alert already exists
+        const existingAlerts = alertsContainer.querySelectorAll('.alert-danger');
+        if (existingAlerts.length > 0) {
+            // If the most recent alert is crying and less than 10 seconds old, don't add a new one
+            const lastAlert = existingAlerts[0];
+            const lastAlertTime = lastAlert.querySelector('.alert-time');
+            if (lastAlertTime) {
+                const timeString = lastAlertTime.textContent;
+                const lastTime = new Date();
+                const [hours, minutes, seconds] = timeString.split(':').map(Number);
+                lastTime.setHours(hours, minutes, seconds);
+                
+                // If less than 10 seconds old, don't add new alert
+                if ((new Date() - lastTime) < 10000) {
+                    return;
+                }
+            }
+        }
+    }
+    
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
