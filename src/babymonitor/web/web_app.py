@@ -4,7 +4,7 @@ Baby Monitor Web Application
 Web interface for the Baby Monitor System using Flask and Flask-SocketIO.
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, url_for
 from flask_socketio import SocketIO
 import cv2
 import numpy as np
@@ -14,6 +14,8 @@ import time
 import base64
 import os
 import signal
+import psutil
+import datetime
 from scipy import signal as scipy_signal
 from datetime import datetime
 from queue import Queue, Empty
@@ -189,37 +191,225 @@ class BabyMonitorWeb:
         def index():
             return render_template('index.html', dev_mode=self.dev_mode)
 
+        @self.app.route('/repair')
+        def repair_tools():
+            """Render the repair tools page."""
+            return render_template('repair_tools.html', dev_mode=self.dev_mode)
+
         @self.app.route('/metrics')
         def metrics_page():
             """Render the metrics page."""
-            return render_template('metrics.html')
+            return render_template('metrics.html', dev_mode=self.dev_mode)
 
-        @self.app.route('/api/metrics')
-        def get_metrics():
-            """Get current performance metrics."""
-            with self.metrics_lock:
-                return jsonify(self.metrics_history)
+        @self.app.route('/dev/logs')
+        def dev_logs():
+            """Render the logs page (dev mode only)."""
+            if not self.dev_mode:
+                return redirect(url_for('index'))
+            return render_template('logs.html', dev_mode=self.dev_mode)
 
-        @self.app.route('/cameras')
+        @self.app.route('/repair/api/cameras')
         def get_cameras():
+            """Get available cameras and their capabilities."""
             if not self.monitor_system:
-                return jsonify({'error': 'Monitor system not initialized'})
+                return jsonify({'error': 'Monitor system not initialized'}), 503
             
             try:
                 cameras = []
-                available_cameras = self.monitor_system.camera.get_available_cameras()
+                # Get available cameras
+                try:
+                    available_cameras = self.monitor_system.camera.get_available_cameras()
+                except (AttributeError, Exception) as e:
+                    available_cameras = [0]  # Default to camera 0
+                    logging.warning(f"Error getting available cameras: {str(e)}")
                 
+                # Get current camera
+                try:
+                    current_camera = self.monitor_system.camera.get_current_camera()
+                except (AttributeError, Exception) as e:
+                    current_camera = 0
+                    logging.warning(f"Error getting current camera: {str(e)}")
+                
+                # Add available cameras with resolutions
                 for idx in available_cameras:
+                    try:
+                        resolutions = self.monitor_system.camera.get_camera_resolutions(idx)
+                    except (AttributeError, Exception):
+                        resolutions = ['640x480', '1280x720', '1920x1080']  # Default resolutions
+                    
                     cameras.append({
                         'id': str(idx),
                         'name': f'Camera {idx}',
-                        'resolutions': ['640x480', '1280x720', '1920x1080']
+                        'resolutions': resolutions
                     })
                 
-                return jsonify(cameras)
+                return jsonify({
+                    'cameras': cameras,
+                    'current_camera': str(current_camera) if current_camera is not None else '0'
+                })
             except Exception as e:
-                self.logger.error(f"Error getting cameras: {str(e)}")
-                return jsonify({'error': str(e)})
+                logging.error(f"Error in get_cameras: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/repair/api/camera/configure', methods=['POST'])
+        def configure_camera():
+            """Configure camera settings."""
+            if not self.monitor_system:
+                return jsonify({'error': 'Monitor system not initialized'}), 503
+            
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'No data provided'}), 400
+                
+                width = data.get('width')
+                height = data.get('height')
+                
+                if not all([width, height]):
+                    return jsonify({'error': 'Missing required parameters'}), 400
+                
+                # Try to set resolution
+                try:
+                    success = self.monitor_system.camera.set_resolution(width, height)
+                    if not success:
+                        return jsonify({'error': 'Failed to set resolution'}), 400
+                except Exception as e:
+                    return jsonify({'error': f'Error setting resolution: {str(e)}'}), 500
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Camera configured with resolution {width}x{height}'
+                })
+            except Exception as e:
+                self.logger.error(f"Error configuring camera: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/repair/api/system/memory')
+        def api_system_memory():
+            """Get system memory information."""
+            try:
+                memory = psutil.virtual_memory()
+                current_resolution = None
+                
+                # Safely get current resolution
+                if self.monitor_system and hasattr(self.monitor_system, 'camera'):
+                    try:
+                        current_resolution = self.monitor_system.camera.get_current_resolution()
+                    except:
+                        pass
+                
+                return jsonify({
+                    'total_memory': memory.total / (1024 * 1024),  # Convert to MB
+                    'available_memory': memory.available / (1024 * 1024),  # Convert to MB
+                    'used_memory': memory.used / (1024 * 1024),  # Convert to MB
+                    'memory_percent': memory.percent,
+                    'current_resolution': current_resolution
+                })
+            except Exception as e:
+                self.logger.error(f"Error getting system memory: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/repair/api/system/info')
+        def api_system_info():
+            """Get system information."""
+            try:
+                if not self.monitor_system:
+                    return jsonify({'error': 'Monitor system not initialized'}), 503
+
+                cpu = psutil.cpu_percent(interval=0.1)  # Reduced interval for faster response
+                memory = psutil.virtual_memory()
+                disk = psutil.disk_usage('/')
+                
+                uptime = 0
+                if hasattr(self.monitor_system, 'start_time'):
+                    uptime = time.time() - self.monitor_system.start_time
+                
+                camera_status = 'Inactive'
+                audio_status = 'Inactive'
+                
+                if self.monitor_system:
+                    camera_status = 'Active' if getattr(self.monitor_system, 'camera_enabled', False) else 'Inactive'
+                    audio_status = 'Active' if getattr(self.monitor_system, 'audio_enabled', False) else 'Inactive'
+                
+                return jsonify({
+                    'cpu_usage': cpu,
+                    'memory_usage': memory.percent,
+                    'memory_available': memory.available / (1024 * 1024),  # Convert to MB
+                    'disk_usage': disk.percent,
+                    'camera_status': camera_status,
+                    'audio_status': audio_status,
+                    'uptime': str(datetime.timedelta(seconds=int(uptime)))
+                })
+            except Exception as e:
+                self.logger.error(f"Error getting system info: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/repair/run', methods=['POST'])
+        def repair_run():
+            """Run repair tools."""
+            if not self.monitor_system:
+                return jsonify({'error': 'Monitor system not initialized'}), 503
+            
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'No data provided'}), 400
+                
+                tool = data.get('tool')
+                if not tool:
+                    return jsonify({'error': 'No tool specified'}), 400
+                
+                if tool == 'restart_camera':
+                    # Handle camera restart
+                    if hasattr(self.monitor_system, 'camera'):
+                        try:
+                            self.monitor_system.camera.release()
+                            time.sleep(1)
+                            self.monitor_system.camera.initialize()
+                            return jsonify({'status': 'success', 'message': 'Camera restarted successfully'})
+                        except Exception as e:
+                            return jsonify({'error': f'Failed to restart camera: {str(e)}'}), 500
+                
+                elif tool == 'restart_audio':
+                    # Handle audio restart
+                    if hasattr(self.monitor_system, 'audio_processor'):
+                        try:
+                            self.monitor_system.audio_processor.restart()
+                            return jsonify({'status': 'success', 'message': 'Audio system restarted successfully'})
+                        except Exception as e:
+                            return jsonify({'error': f'Failed to restart audio: {str(e)}'}), 500
+                
+                elif tool == 'check_system':
+                    # Perform system check
+                    try:
+                        status = {
+                            'cpu': psutil.cpu_percent(interval=0.1),
+                            'memory': psutil.virtual_memory().percent,
+                            'disk': psutil.disk_usage('/').percent,
+                            'camera': 'OK' if self.monitor_system.camera_enabled else 'Inactive',
+                            'audio': 'OK' if self.monitor_system.audio_enabled else 'Inactive'
+                        }
+                        return jsonify({'status': 'success', 'message': 'System check completed', 'data': status})
+                    except Exception as e:
+                        return jsonify({'error': f'System check failed: {str(e)}'}), 500
+                
+                elif tool == 'restart_system':
+                    # Handle full system restart
+                    try:
+                        if hasattr(self.monitor_system, 'restart'):
+                            self.monitor_system.restart()
+                            return jsonify({'status': 'success', 'message': 'System restarted successfully'})
+                        else:
+                            return jsonify({'error': 'System restart not supported'}), 501
+                    except Exception as e:
+                        return jsonify({'error': f'Failed to restart system: {str(e)}'}), 500
+                
+                else:
+                    return jsonify({'error': f'Unknown tool: {tool}'}), 400
+                
+            except Exception as e:
+                self.logger.error(f"Error running repair tool: {str(e)}")
+                return jsonify({'error': str(e)}), 500
 
         @self.app.route('/status')
         def status():
@@ -232,11 +422,6 @@ class BabyMonitorWeb:
                 'detection_enabled': True if hasattr(self.monitor_system, 'person_detector') else False,
                 'dev_mode': self.dev_mode
             })
-
-        @self.app.route('/direct-feed')
-        def direct_feed():
-            """Render the direct camera feed page."""
-            return render_template('direct_feed.html')
 
         @self.app.route('/video-feed')
         def video_feed():
@@ -297,7 +482,7 @@ class BabyMonitorWeb:
                     return jsonify({'error': f'Unknown action: {action}'})
             except Exception as e:
                 self.logger.error(f"Error in control action {action}: {str(e)}")
-                return jsonify({'error': str(e)})
+                return jsonify({'error': str(e)}), 500
 
     def setup_socketio(self):
         """Setup Socket.IO event handlers."""

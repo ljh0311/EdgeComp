@@ -1,698 +1,516 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Baby Monitor System - Metrics</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-    <style>
-      body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #121212;
-        color: #e0e0e0;
-      }
-      
-      .navbar {
-        background-color: #1e1e1e !important;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-      }
-      
-      .card {
-        background-color: #1e1e1e;
-        border: none;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 20px;
-        border-radius: 10px;
-        overflow: hidden;
-        transition: transform 0.3s, box-shadow 0.3s;
-      }
-      
-      .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
-      }
-      
-      .card-header {
-        background-color: #252525;
-        color: #e0e0e0;
-        border-bottom: 1px solid #333;
-        padding: 15px 20px;
-      }
-      
-      .card-body {
-        padding: 20px;
-      }
-      
-      .metric-chart-container {
-        background-color: #252525;
-        border-radius: 8px;
-        padding: 15px;
-        margin-bottom: 15px;
-        height: 250px;
-      }
-      
-      .metric-chart-container h6 {
-        color: #0dcaf0;
-        margin-bottom: 15px;
-        font-weight: 600;
-      }
-      
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 15px;
-      }
-      
-      .stat-item {
-        background-color: #252525;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        transition: transform 0.2s;
-      }
-      
-      .stat-item:hover {
-        transform: scale(1.05);
-      }
-      
-      .stat-icon {
-        font-size: 1.8rem;
-        margin-bottom: 10px;
-        color: #0dcaf0;
-      }
-      
-      .stat-value {
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 5px;
-        color: #ffffff;
-      }
-      
-      .stat-label {
-        font-size: 0.8rem;
-        color: #aaaaaa;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-      }
-      
-      .table {
-        color: #e0e0e0;
-      }
-      
-      .table th {
-        color: #0dcaf0;
-        font-weight: 600;
-        border-color: #333;
-      }
-      
-      .table td {
-        border-color: #333;
-      }
-      
-      .alerts-container {
-        max-height: 300px;
-        overflow-y: auto;
-      }
-      
-      .alert-item {
-        padding: 10px 15px;
-        border-bottom: 1px solid #333;
-        transition: background-color 0.2s;
-      }
-      
-      .alert-item:hover {
-        background-color: #252525;
-      }
-      
-      .alert-time {
-        font-size: 0.75rem;
-        color: #888;
-        margin-bottom: 5px;
-      }
-      
-      .alert-message {
-        font-size: 0.9rem;
-      }
-      
-      .alert-danger {
-        border-left: 4px solid #dc3545;
-      }
-      
-      .alert-warning {
-        border-left: 4px solid #ffc107;
-      }
-      
-      .alert-info {
-        border-left: 4px solid #0dcaf0;
-      }
-      
-      .btn-outline-primary {
-        color: #0dcaf0;
-        border-color: #0dcaf0;
-      }
-      
-      .btn-outline-primary:hover,
-      .btn-outline-primary.active {
-        background-color: #0dcaf0;
-        border-color: #0dcaf0;
-        color: #121212;
-      }
-      
-      /* Custom scrollbar */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      
-      ::-webkit-scrollbar-track {
-        background: #252525;
-        border-radius: 4px;
-      }
-      
-      ::-webkit-scrollbar-thumb {
-        background: #444;
-        border-radius: 4px;
-      }
-      
-      ::-webkit-scrollbar-thumb:hover {
-        background: #555;
-      }
-      
-      /* Detection types grid */
-      .detection-types-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-        gap: 10px;
-        margin-top: 15px;
-      }
-      
-      .detection-type-card {
-        background-color: #252525;
-        border-radius: 8px;
-        padding: 15px;
-        text-align: center;
-        border-left: 4px solid;
-      }
-      
-      .detection-type-value {
-        font-size: 1.5rem;
-        font-weight: bold;
-        margin: 10px 0;
-        color: #ffffff;
-      }
-      
-      .detection-type-label {
-        font-size: 0.8rem;
-        color: #aaaaaa;
-      }
-      
-      .detection-type-face {
-        border-color: #00ff00;
-      }
-      
-      .detection-type-upper_body {
-        border-color: #ff0000;
-      }
-      
-      .detection-type-full_body {
-        border-color: #0000ff;
-      }
-      
-      .detection-type-lower_body {
-        border-color: #ffff00;
-      }
-      
-      /* Status indicators */
-      .status-badge {
-        padding: 5px 10px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-      }
-      
-      .status-active {
-        background-color: rgba(25, 135, 84, 0.2);
-        color: #198754;
-      }
-      
-      .status-inactive {
-        background-color: rgba(220, 53, 69, 0.2);
-        color: #dc3545;
-      }
-      
-      /* Emotion distribution */
-      .emotion-distribution {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 15px;
-      }
-      
-      .emotion-item {
-        flex: 1;
-        min-width: 100px;
-        background-color: #252525;
-        border-radius: 8px;
-        padding: 15px;
-        text-align: center;
-      }
-      
-      .emotion-icon {
-        font-size: 1.5rem;
-        margin-bottom: 10px;
-      }
-      
-      .emotion-crying .emotion-icon {
-        color: #dc3545;
-      }
-      
-      .emotion-laughing .emotion-icon {
-        color: #198754;
-      }
-      
-      .emotion-babbling .emotion-icon {
-        color: #0dcaf0;
-      }
-      
-      .emotion-silence .emotion-icon {
-        color: #6c757d;
-      }
-      
-      .emotion-value {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #ffffff;
-      }
-      
-      .emotion-label {
-        font-size: 0.8rem;
-        color: #aaaaaa;
-        margin-top: 5px;
-      }
-      
-      /* System health indicators */
-      .health-indicator {
-        display: flex;
-        align-items: center;
-        margin-bottom: 10px;
-      }
-      
-      .health-label {
-        flex: 1;
-        font-size: 0.9rem;
-        color: #aaaaaa;
-      }
-      
-      .health-value {
-        font-weight: 600;
-        color: #ffffff;
-      }
-      
-      .health-bar-container {
-        flex: 2;
-        height: 8px;
-        background-color: #333;
-        border-radius: 4px;
-        overflow: hidden;
-        margin: 0 15px;
-      }
-      
-      .health-bar {
-        height: 100%;
-        border-radius: 4px;
-      }
-      
-      .health-good {
-        background-color: #198754;
-      }
-      
-      .health-warning {
-        background-color: #ffc107;
-      }
-      
-      .health-critical {
-        background-color: #dc3545;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container-fluid">
-      <nav class="navbar navbar-expand-lg navbar-dark mb-4">
-        <div class="container-fluid">
-          <a class="navbar-brand" href="#"><i class="bi bi-camera-video"></i> Baby Monitor System</a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
-          <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav">
-              <li class="nav-item">
-                <a class="nav-link" href="/">Dashboard</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link active" href="/metrics">Metrics</a>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </nav>
+{% extends "base.html" %}
 
-      <!-- System Overview -->
-      <div class="row mb-4">
-        <div class="col-12">
-          <div class="card shadow-sm">
-            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-              <h5 class="mb-0"><i class="bi bi-speedometer2"></i> System Overview</h5>
-              <div id="systemUptime" class="badge bg-light text-dark">
-                Uptime: <span>00:00:00</span>
+{% block title %}Baby Monitor - Metrics{% endblock %}
+
+{% block extra_css %}
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #121212;
+    color: #e0e0e0;
+  }
+  
+  .card {
+    background-color: #1e1e1e;
+    border: none;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  
+  .card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+  }
+  
+  .card-header {
+    background-color: #252525;
+    color: #e0e0e0;
+    border-bottom: 1px solid #333;
+    padding: 15px 20px;
+  }
+  
+  .card-body {
+    padding: 20px;
+  }
+  
+  .metric-chart-container {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    height: 250px;
+  }
+  
+  .metric-chart-container h6 {
+    color: #0dcaf0;
+    margin-bottom: 15px;
+    font-weight: 600;
+  }
+  
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 30px;
+  }
+  
+  .stat-item {
+    background-color: #252525;
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    transition: transform 0.2s;
+  }
+  
+  .stat-item:hover {
+    transform: scale(1.05);
+  }
+  
+  .stat-icon {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    color: #0dcaf0;
+  }
+  
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+    color: #ffffff;
+  }
+  
+  .stat-label {
+    font-size: 0.8rem;
+    color: #aaaaaa;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  
+  .table {
+    color: #e0e0e0;
+  }
+  
+  .table th {
+    color: #0dcaf0;
+    font-weight: 600;
+    border-color: #333;
+  }
+  
+  .table td {
+    border-color: #333;
+  }
+  
+  .alerts-container {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  
+  .alert-item {
+    padding: 10px 15px;
+    border-bottom: 1px solid #333;
+    transition: background-color 0.2s;
+  }
+  
+  .alert-item:hover {
+    background-color: #252525;
+  }
+  
+  .alert-time {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 5px;
+  }
+  
+  .alert-message {
+    font-size: 0.9rem;
+  }
+  
+  .alert-danger {
+    border-left: 4px solid #dc3545;
+  }
+  
+  .alert-warning {
+    border-left: 4px solid #ffc107;
+  }
+  
+  .alert-info {
+    border-left: 4px solid #0dcaf0;
+  }
+  
+  .btn-outline-primary {
+    color: #0dcaf0;
+    border-color: #0dcaf0;
+  }
+  
+  .btn-outline-primary:hover,
+  .btn-outline-primary.active {
+    background-color: #0dcaf0;
+    border-color: #0dcaf0;
+    color: #121212;
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: #252525;
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
+  
+  /* Detection types grid */
+  .detection-types-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-top: 15px;
+  }
+  
+  .detection-type-card {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    border-left: 4px solid;
+  }
+  
+  .detection-type-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin: 10px 0;
+    color: #ffffff;
+  }
+  
+  .detection-type-label {
+    font-size: 0.8rem;
+    color: #aaaaaa;
+  }
+  
+  .detection-type-face {
+    border-color: #00ff00;
+  }
+  
+  .detection-type-upper_body {
+    border-color: #ff0000;
+  }
+  
+  .detection-type-full_body {
+    border-color: #0000ff;
+  }
+  
+  .detection-type-lower_body {
+    border-color: #ffff00;
+  }
+  
+  /* Status indicators */
+  .status-badge {
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  
+  .status-active {
+    background-color: rgba(25, 135, 84, 0.2);
+    color: #198754;
+  }
+  
+  .status-inactive {
+    background-color: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+  }
+  
+  /* Emotion distribution */
+  .emotion-distribution {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-top: 15px;
+  }
+  
+  .emotion-item {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+  }
+  
+  .emotion-icon {
+    font-size: 1.5rem;
+    margin-bottom: 10px;
+  }
+  
+  .emotion-crying .emotion-icon {
+    color: #dc3545;
+  }
+  
+  .emotion-laughing .emotion-icon {
+    color: #198754;
+  }
+  
+  .emotion-babbling .emotion-icon {
+    color: #0dcaf0;
+  }
+  
+  .emotion-silence .emotion-icon {
+    color: #6c757d;
+  }
+  
+  .emotion-value {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #ffffff;
+  }
+  
+  .emotion-label {
+    font-size: 0.8rem;
+    color: #aaaaaa;
+    margin-top: 5px;
+  }
+  
+  /* System health indicators */
+  .health-indicator {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  
+  .health-label {
+    flex: 1;
+    font-size: 0.9rem;
+    color: #aaaaaa;
+  }
+  
+  .health-value {
+    font-weight: 600;
+    color: #ffffff;
+  }
+  
+  .health-bar-container {
+    flex: 2;
+    height: 8px;
+    background-color: #333;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0 15px;
+  }
+  
+  .health-bar {
+    height: 100%;
+    border-radius: 4px;
+  }
+  
+  .health-good {
+    background-color: #198754;
+  }
+  
+  .health-warning {
+    background-color: #ffc107;
+  }
+  
+  .health-critical {
+    background-color: #dc3545;
+  }
+
+  .page-header {
+    margin-bottom: 30px;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 10px;
+  }
+
+  .page-subtitle {
+    color: #aaaaaa;
+    font-size: 1rem;
+  }
+
+  .time-range-controls {
+    background-color: #252525;
+    padding: 10px;
+    border-radius: 8px;
+    display: inline-flex;
+    gap: 5px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+  <!-- Page Header -->
+  <div class="page-header d-flex justify-content-between align-items-center">
+    <div>
+      <h1 class="page-title">System Metrics</h1>
+      <p class="page-subtitle">Monitor system performance and detection statistics</p>
+    </div>
+    <div class="time-range-controls">
+      <button id="timeRange1h" class="btn btn-sm btn-outline-primary active">1h</button>
+      <button id="timeRange3h" class="btn btn-sm btn-outline-primary">3h</button>
+      <button id="timeRange24h" class="btn btn-sm btn-outline-primary">24h</button>
+    </div>
+  </div>
+
+  <!-- System Overview -->
+  <div class="stats-grid">
+    <div class="stat-item">
+      <div class="stat-icon">
+        <i class="bi bi-speedometer"></i>
+      </div>
+      <div class="stat-value" id="currentFps">0</div>
+      <div class="stat-label">Frames Per Second</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-icon">
+        <i class="bi bi-people"></i>
+      </div>
+      <div class="stat-value" id="currentDetections">0</div>
+      <div class="stat-label">People Detected</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-icon">
+        <i class="bi bi-cpu"></i>
+      </div>
+      <div class="stat-value" id="currentCpu">0%</div>
+      <div class="stat-label">CPU Usage</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-icon">
+        <i class="bi bi-memory"></i>
+      </div>
+      <div class="stat-value" id="currentMemory">0%</div>
+      <div class="stat-label">Memory Usage</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Performance Metrics -->
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-graph-up"></i> Performance Metrics</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-speedometer"></i> FPS</h6>
+                <canvas id="fpsChart"></canvas>
               </div>
             </div>
-            <div class="card-body">
-              <!-- Key Stats -->
-              <div class="row">
-                <div class="col-md-3 mb-3">
-                  <div class="stat-item p-3 bg-light rounded text-center">
-                    <div class="stat-icon text-primary mb-2">
-                      <i class="bi bi-speedometer"></i>
-                    </div>
-                    <div class="stat-value h3" id="currentFps">0</div>
-                    <div class="stat-label text-muted">Frames Per Second</div>
-                  </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                  <div class="stat-item p-3 bg-light rounded text-center">
-                    <div class="stat-icon text-success mb-2">
-                      <i class="bi bi-people"></i>
-                    </div>
-                    <div class="stat-value h3" id="currentDetections">0</div>
-                    <div class="stat-label text-muted">People Detected</div>
-                  </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                  <div class="stat-item p-3 bg-light rounded text-center">
-                    <div class="stat-icon text-warning mb-2">
-                      <i class="bi bi-cpu"></i>
-                    </div>
-                    <div class="stat-value h3" id="currentCpu">0%</div>
-                    <div class="stat-label text-muted">CPU Usage</div>
-                  </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                  <div class="stat-item p-3 bg-light rounded text-center">
-                    <div class="stat-icon text-info mb-2">
-                      <i class="bi bi-memory"></i>
-                    </div>
-                    <div class="stat-value h3" id="currentMemory">0%</div>
-                    <div class="stat-label text-muted">Memory Usage</div>
-                  </div>
-                </div>
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-people"></i> Detection Count</h6>
+                <canvas id="detectionCountChart"></canvas>
               </div>
+            </div>
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-emoji-smile"></i> Emotion Distribution</h6>
+                <canvas id="emotionDistributionChart"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-person-bounding-box"></i> Detection Types</h6>
+                <canvas id="detectionTypesChart"></canvas>
+              </div>
+            </div>
+          </div>
 
-              <!-- System Health -->
-              <div class="row mt-4">
-                <div class="col-md-6">
-                  <div class="card">
-                    <div class="card-header bg-light">
-                      <h6 class="mb-0">System Resources</h6>
-                    </div>
-                    <div class="card-body">
-                      <div class="health-indicator mb-4">
-                        <div class="d-flex justify-content-between mb-1">
-                          <span class="health-label">CPU Usage</span>
-                          <span id="cpuHealthValue" class="health-value">20%</span>
-                        </div>
-                        <div class="progress">
-                          <div id="cpuHealthBar" class="progress-bar bg-success" role="progressbar" style="width: 20%" aria-valuenow="20" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                      </div>
-                      <div class="health-indicator mb-4">
-                        <div class="d-flex justify-content-between mb-1">
-                          <span class="health-label">Memory Usage</span>
-                          <span id="memoryHealthValue" class="health-value">30%</span>
-                        </div>
-                        <div class="progress">
-                          <div id="memoryHealthBar" class="progress-bar bg-success" role="progressbar" style="width: 30%" aria-valuenow="30" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                      </div>
-                      <div class="health-indicator">
-                        <div class="d-flex justify-content-between mb-1">
-                          <span class="health-label">Disk Usage</span>
-                          <span id="diskHealthValue" class="health-value">45%</span>
-                        </div>
-                        <div class="progress">
-                          <div id="diskHealthBar" class="progress-bar bg-success" role="progressbar" style="width: 45%" aria-valuenow="45" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+          <!-- Detection Types Details -->
+          <div class="mt-4">
+            <h6 class="text-muted mb-3">Detection Types Breakdown</h6>
+            <div class="detection-types-grid">
+              <div class="detection-type-card detection-type-face">
+                <div class="detection-type-value" id="faceDetectionCount">0</div>
+                <div class="detection-type-label">Face</div>
+              </div>
+              <div class="detection-type-card detection-type-upper_body">
+                <div class="detection-type-value" id="upperBodyDetectionCount">0</div>
+                <div class="detection-type-label">Upper Body</div>
+              </div>
+              <div class="detection-type-card detection-type-full_body">
+                <div class="detection-type-value" id="fullBodyDetectionCount">0</div>
+                <div class="detection-type-label">Full Body</div>
+              </div>
+              <div class="detection-type-card detection-type-lower_body">
+                <div class="detection-type-value" id="lowerBodyDetectionCount">0</div>
+                <div class="detection-type-label">Lower Body</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Emotion Distribution Details -->
+          <div class="mt-4">
+            <h6 class="text-muted mb-3">Emotion Distribution Breakdown</h6>
+            <div class="emotion-distribution">
+              <div class="emotion-item emotion-crying">
+                <div class="emotion-icon">
+                  <i class="bi bi-emoji-frown"></i>
                 </div>
-                <div class="col-md-6">
-                  <div class="card">
-                    <div class="card-header bg-light">
-                      <h6 class="mb-0">Component Status</h6>
-                    </div>
-                    <div class="card-body">
-                      <div class="list-group">
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <i class="bi bi-camera-video me-2"></i> Camera
-                          </div>
-                          <span id="cameraStatus" class="badge bg-success">Active</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <i class="bi bi-mic me-2"></i> Audio
-                          </div>
-                          <span id="audioStatus" class="badge bg-success">Active</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <i class="bi bi-person-bounding-box me-2"></i> Person Detector
-                          </div>
-                          <span id="personDetectorStatus" class="badge bg-success">Active</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <i class="bi bi-emoji-smile me-2"></i> Emotion Detector
-                          </div>
-                          <span id="emotionDetectorStatus" class="badge bg-success">Active</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                <div class="emotion-value" id="cryingPercentage">0%</div>
+                <div class="emotion-label">Crying</div>
+              </div>
+              <div class="emotion-item emotion-laughing">
+                <div class="emotion-icon">
+                  <i class="bi bi-emoji-laughing"></i>
                 </div>
+                <div class="emotion-value" id="laughingPercentage">0%</div>
+                <div class="emotion-label">Laughing</div>
+              </div>
+              <div class="emotion-item emotion-babbling">
+                <div class="emotion-icon">
+                  <i class="bi bi-chat-dots"></i>
+                </div>
+                <div class="emotion-value" id="babblingPercentage">0%</div>
+                <div class="emotion-label">Babbling</div>
+              </div>
+              <div class="emotion-item emotion-silence">
+                <div class="emotion-icon">
+                  <i class="bi bi-volume-mute"></i>
+                </div>
+                <div class="emotion-value" id="silencePercentage">0%</div>
+                <div class="emotion-label">Silence</div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="row">
-        <!-- Performance Metrics -->
-        <div class="col-lg-8">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <h5 class="mb-0"><i class="bi bi-graph-up"></i> Performance Metrics</h5>
-              <div class="btn-group">
-                <button id="timeRange1h" class="btn btn-sm btn-outline-primary active">1h</button>
-                <button id="timeRange3h" class="btn btn-sm btn-outline-primary">3h</button>
-                <button id="timeRange24h" class="btn btn-sm btn-outline-primary">24h</button>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="row">
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-speedometer"></i> FPS</h6>
-                    <canvas id="fpsChart"></canvas>
-                  </div>
-                </div>
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-people"></i> Detection Count</h6>
-                    <canvas id="detectionCountChart"></canvas>
-                  </div>
-                </div>
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-emoji-smile"></i> Emotion Distribution</h6>
-                    <canvas id="emotionDistributionChart"></canvas>
-                  </div>
-                </div>
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-person-bounding-box"></i> Detection Types</h6>
-                    <canvas id="detectionTypesChart"></canvas>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Detection Types Details -->
-              <div class="mt-4">
-                <h6 class="text-muted mb-3">Detection Types Breakdown</h6>
-                <div class="detection-types-grid">
-                  <div class="detection-type-card detection-type-face">
-                    <div class="detection-type-value" id="faceDetectionCount">0</div>
-                    <div class="detection-type-label">Face</div>
-                  </div>
-                  <div class="detection-type-card detection-type-upper_body">
-                    <div class="detection-type-value" id="upperBodyDetectionCount">0</div>
-                    <div class="detection-type-label">Upper Body</div>
-                  </div>
-                  <div class="detection-type-card detection-type-full_body">
-                    <div class="detection-type-value" id="fullBodyDetectionCount">0</div>
-                    <div class="detection-type-label">Full Body</div>
-                  </div>
-                  <div class="detection-type-card detection-type-lower_body">
-                    <div class="detection-type-value" id="lowerBodyDetectionCount">0</div>
-                    <div class="detection-type-label">Lower Body</div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Emotion Distribution Details -->
-              <div class="mt-4">
-                <h6 class="text-muted mb-3">Emotion Distribution Breakdown</h6>
-                <div class="emotion-distribution">
-                  <div class="emotion-item emotion-crying">
-                    <div class="emotion-icon">
-                      <i class="bi bi-emoji-frown"></i>
-                    </div>
-                    <div class="emotion-value" id="cryingPercentage">0%</div>
-                    <div class="emotion-label">Crying</div>
-                  </div>
-                  <div class="emotion-item emotion-laughing">
-                    <div class="emotion-icon">
-                      <i class="bi bi-emoji-laughing"></i>
-                    </div>
-                    <div class="emotion-value" id="laughingPercentage">0%</div>
-                    <div class="emotion-label">Laughing</div>
-                  </div>
-                  <div class="emotion-item emotion-babbling">
-                    <div class="emotion-icon">
-                      <i class="bi bi-chat-dots"></i>
-                    </div>
-                    <div class="emotion-value" id="babblingPercentage">0%</div>
-                    <div class="emotion-label">Babbling</div>
-                  </div>
-                  <div class="emotion-item emotion-silence">
-                    <div class="emotion-icon">
-                      <i class="bi bi-volume-mute"></i>
-                    </div>
-                    <div class="emotion-value" id="silencePercentage">0%</div>
-                    <div class="emotion-label">Silence</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- System Resource Usage -->
-          <div class="card mt-4">
-            <div class="card-header">
-              <h5 class="mb-0"><i class="bi bi-cpu"></i> System Resource Usage</h5>
-            </div>
-            <div class="card-body">
-              <div class="row">
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-cpu"></i> CPU Usage</h6>
-                    <canvas id="cpuUsageChart"></canvas>
-                  </div>
-                </div>
-                <div class="col-md-6">
-                  <div class="metric-chart-container">
-                    <h6><i class="bi bi-memory"></i> Memory Usage</h6>
-                    <canvas id="memoryUsageChart"></canvas>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <!-- System Resource Usage -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-cpu"></i> System Resource Usage</h5>
         </div>
-
-        <!-- System Info and Stats -->
-        <div class="col-lg-4">
-          <!-- System Information -->
-          <div class="card">
-            <div class="card-header">
-              <h5 class="mb-0"><i class="bi bi-info-circle"></i> System Information</h5>
-            </div>
-            <div class="card-body">
-              <table class="table table-sm">
-                <tbody>
-                  <tr>
-                    <th>Uptime:</th>
-                    <td id="systemUptimeInfo">00:00:00</td>
-                  </tr>
-                  <tr>
-                    <th>Person Detector:</th>
-                    <td id="personDetectorInfo">Active</td>
-                  </tr>
-                  <tr>
-                    <th>Emotion Detector:</th>
-                    <td id="emotionDetectorInfo">Active</td>
-                  </tr>
-                  <tr>
-                    <th>Camera Resolution:</th>
-                    <td id="cameraResolution">640x480</td>
-                  </tr>
-                  <tr>
-                    <th>Audio Sample Rate:</th>
-                    <td id="audioSampleRate">16000 Hz</td>
-                  </tr>
-                  <tr>
-                    <th>Detection Threshold:</th>
-                    <td id="detectionThreshold">0.7</td>
-                  </tr>
-                  <tr>
-                    <th>Operating System:</th>
-                    <td id="osInfo">Windows</td>
-                  </tr>
-                  <tr>
-                    <th>Python Version:</th>
-                    <td id="pythonVersion">3.8.10</td>
-                  </tr>
-                  <tr>
-                    <th>OpenCV Version:</th>
-                    <td id="opencvVersion">4.5.4</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Alert History -->
-          <div class="card mt-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Alert History</h5>
-              <div>
-                <button id="exportAlerts" class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> Export</button>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-cpu"></i> CPU Usage</h6>
+                <canvas id="cpuUsageChart"></canvas>
               </div>
             </div>
-            <div class="card-body p-0">
-              <div id="alertHistory" class="alerts-container">
-                <!-- Alert history will be populated here -->
-                <div class="alert-item alert-info">
-                  <div class="alert-time">System started</div>
-                  <div class="alert-message">Baby monitor system is now running</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Detection Log -->
-          <div class="card mt-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <h5 class="mb-0"><i class="bi bi-list-check"></i> Recent Detections</h5>
-              <div>
-                <button id="clearDetectionLog" class="btn btn-sm btn-outline-primary"><i class="bi bi-trash"></i> Clear</button>
-              </div>
-            </div>
-            <div class="card-body p-0">
-              <div id="detectionLogContainer" class="alerts-container">
-                <!-- Detection log will be populated here -->
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-memory"></i> Memory Usage</h6>
+                <canvas id="memoryUsageChart"></canvas>
               </div>
             </div>
           </div>
@@ -700,7 +518,96 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
-  </body>
-</html>
+    <!-- System Info and Stats -->
+    <div class="col-lg-4">
+      <!-- System Information -->
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-info-circle"></i> System Information</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-sm">
+            <tbody>
+              <tr>
+                <th>Uptime:</th>
+                <td id="systemUptimeInfo">00:00:00</td>
+              </tr>
+              <tr>
+                <th>Person Detector:</th>
+                <td id="personDetectorInfo">Active</td>
+              </tr>
+              <tr>
+                <th>Emotion Detector:</th>
+                <td id="emotionDetectorInfo">Active</td>
+              </tr>
+              <tr>
+                <th>Camera Resolution:</th>
+                <td id="cameraResolution">640x480</td>
+              </tr>
+              <tr>
+                <th>Audio Sample Rate:</th>
+                <td id="audioSampleRate">16000 Hz</td>
+              </tr>
+              <tr>
+                <th>Detection Threshold:</th>
+                <td id="detectionThreshold">0.7</td>
+              </tr>
+              <tr>
+                <th>Operating System:</th>
+                <td id="osInfo">Windows</td>
+              </tr>
+              <tr>
+                <th>Python Version:</th>
+                <td id="pythonVersion">3.8.10</td>
+              </tr>
+              <tr>
+                <th>OpenCV Version:</th>
+                <td id="opencvVersion">4.5.4</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Alert History -->
+      <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Alert History</h5>
+          <button id="exportAlerts" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-download"></i> Export
+          </button>
+        </div>
+        <div class="card-body p-0">
+          <div id="alertHistory" class="alerts-container">
+            <!-- Alert history will be populated here -->
+            <div class="alert-item alert-info">
+              <div class="alert-time">System started</div>
+              <div class="alert-message">Baby monitor system is now running</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detection Log -->
+      <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="bi bi-list-check"></i> Recent Detections</h5>
+          <button id="clearDetectionLog" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-trash"></i> Clear
+          </button>
+        </div>
+        <div class="card-body p-0">
+          <div id="detectionLogContainer" class="alerts-container">
+            <!-- Detection log will be populated here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
+{% endblock %}

@@ -3,19 +3,19 @@
 {% block title %}Baby Monitor Dashboard{% endblock %}
 
 {% block extra_css %}
-<style>
+    <style>
     .main-container {
         min-height: calc(100vh - 120px);
         padding: 1rem;
         background-color: #1a1a1a;
     }
 
-    .video-container {
-        position: relative;
-        width: 100%;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         margin-bottom: 15px;
         background-color: #000;
     }
@@ -24,55 +24,55 @@
         content: "";
         display: block;
         padding-top: 75%; /* 4:3 aspect ratio */
-    }
-    
-    .video-feed {
+        }
+        
+        .video-feed {
         position: absolute;
         top: 0;
         left: 0;
-        width: 100%;
+            width: 100%;
         height: 100%;
         object-fit: contain;
         background-color: #000;
-    }
-    
-    .status-overlay {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background-color: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 5px 10px;
-        border-radius: 4px;
-        font-size: 0.9rem;
+        }
+        
+        .status-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
         z-index: 2;
-    }
-    
-    .emotion-overlay {
-        position: absolute;
-        bottom: 10px;
-        left: 10px;
-        background-color: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 5px 10px;
-        border-radius: 4px;
-        font-size: 0.9rem;
+        }
+        
+        .emotion-overlay {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
         z-index: 2;
-    }
-    
-    .emotion-crying {
-        background-color: rgba(220, 53, 69, 0.8);
-    }
-    
-    .emotion-laughing {
-        background-color: rgba(25, 135, 84, 0.8);
-    }
-    
-    .emotion-babbling {
-        background-color: rgba(13, 202, 240, 0.8);
-    }
-    
-    .dashboard-card {
+        }
+        
+        .emotion-crying {
+            background-color: rgba(220, 53, 69, 0.8);
+        }
+        
+        .emotion-laughing {
+            background-color: rgba(25, 135, 84, 0.8);
+        }
+        
+        .emotion-babbling {
+            background-color: rgba(13, 202, 240, 0.8);
+        }
+        
+        .dashboard-card {
         background-color: #2d2d2d;
         border: 1px solid #404040;
         margin-bottom: 15px;
@@ -87,9 +87,9 @@
     
     .card-body {
         padding: 1rem;
-    }
-    
-    .quick-action {
+        }
+        
+        .quick-action {
         margin-bottom: 8px;
     }
 
@@ -151,7 +151,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 10px;
+            margin-bottom: 10px;
         color: #fff;
     }
 
@@ -225,8 +225,8 @@
         .video-container {
             max-height: 70vh;
         }
-    }
-</style>
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -234,9 +234,9 @@
     <div class="row g-3">
         <div class="col-lg-8">
             <!-- Video Feed -->
-            <div class="video-container">
-                <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
-                <div class="status-overlay">
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
+                    <div class="status-overlay">
                     <i class="bi bi-circle-fill text-success"></i> Live
                 </div>
                 <div class="emotion-overlay" id="emotionOverlay">
@@ -275,16 +275,16 @@
                         </div>
                         <div class="emotion-label">Silence: <span id="silenceValue">0%</span></div>
                     </div>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="col-lg-4">
-            <!-- System Status -->
-            <div class="card dashboard-card">
-                <div class="card-header">
-                    <i class="bi bi-info-circle"></i> System Status
-                </div>
+            <div class="col-lg-4">
+                    <!-- System Status -->
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <i class="bi bi-info-circle"></i> System Status
+                            </div>
                 <div class="card-body system-status">
                     <div class="status-item">
                         <span class="status-label"><i class="bi bi-clock"></i> Uptime:</span>
@@ -293,15 +293,15 @@
                     <div class="status-item">
                         <span class="status-label"><i class="bi bi-camera"></i> Camera:</span>
                         <span class="status-value" id="cameraStatus">Connecting...</span>
-                    </div>
+                                </div>
                     <div class="status-item">
                         <span class="status-label"><i class="bi bi-person"></i> Person Detection:</span>
                         <span class="status-value" id="personDetectorStatus">Initializing...</span>
-                    </div>
+                                </div>
                     <div class="status-item">
                         <span class="status-label"><i class="bi bi-emoji-smile"></i> Emotion Detection:</span>
                         <span class="status-value" id="emotionDetectorStatus">Initializing...</span>
-                    </div>
+                                </div>
                     <div class="status-item">
                         <span class="status-label"><i class="bi bi-cpu"></i> CPU Usage:</span>
                         <div class="progress" style="width: 120px; height: 6px;">
@@ -312,25 +312,25 @@
                         <span class="status-label"><i class="bi bi-memory"></i> Memory Usage:</span>
                         <div class="progress" style="width: 120px; height: 6px;">
                             <div id="memoryUsage" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <!-- Quick Actions -->
-            <div class="card dashboard-card">
-                <div class="card-header">
-                    <i class="bi bi-lightning"></i> Quick Actions
-                </div>
-                <div class="card-body">
+                    <!-- Quick Actions -->
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <i class="bi bi-lightning"></i> Quick Actions
+                            </div>
+                            <div class="card-body">
                     <div class="quick-action">
                         <button class="btn btn-primary btn-sm w-100" onclick="location.href='/metrics'">
-                            <i class="bi bi-graph-up"></i> View Detailed Metrics
+                                    <i class="bi bi-graph-up"></i> View Detailed Metrics
                         </button>
                     </div>
                     <div class="quick-action">
                         <button class="btn btn-info btn-sm w-100" onclick="location.href='/repair'">
-                            <i class="bi bi-tools"></i> Repair Tools
+                                    <i class="bi bi-tools"></i> Repair Tools
                         </button>
                     </div>
                     {% if mode == "dev" %}
@@ -356,10 +356,10 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+    <script>
     // Socket.IO connection
-    const socket = io();
-    
+        const socket = io();
+
     // Update emotion overlay and progress bars
     socket.on('emotion_update', function(data) {
         const emotion = data.emotion;
@@ -371,13 +371,13 @@
         overlay.className = 'emotion-overlay';
         
         let icon = 'emoji-neutral';
-        if (emotion === 'crying') {
+                if (emotion === 'crying') {
             overlay.classList.add('emotion-crying');
             icon = 'emoji-frown';
-        } else if (emotion === 'laughing') {
+                } else if (emotion === 'laughing') {
             overlay.classList.add('emotion-laughing');
             icon = 'emoji-smile';
-        } else if (emotion === 'babbling') {
+                } else if (emotion === 'babbling') {
             overlay.classList.add('emotion-babbling');
             icon = 'emoji-laughing';
         }
@@ -439,5 +439,5 @@
             alerts[alerts.length - 1].remove();
         }
     }
-</script>
+    </script>
 {% endblock %} 

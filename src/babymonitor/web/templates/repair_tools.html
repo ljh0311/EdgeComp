@@ -1,146 +1,364 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baby Monitor - Repair Tools</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/metrics.css') }}">
-    <style>
-        .repair-card {
-            margin-bottom: 20px;
-            transition: transform 0.2s;
-        }
-        
-        .repair-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .repair-icon {
-            font-size: 3rem;
-            margin-bottom: 15px;
-            color: #0dcaf0;
-        }
-        
-        .repair-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        
-        .repair-description {
-            color: #aaaaaa;
-            margin-bottom: 15px;
-        }
-        
-        .repair-button {
-            width: 100%;
-        }
-    </style>
-</head>
-<body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-camera-video"></i> Baby Monitor
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/metrics">Metrics</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/repair">Repair Tools</a>
-                    </li>
-                    {% if mode == "dev" %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/tools">Dev Tools</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/logs">Logs</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dev/settings">Settings</a>
-                    </li>
-                    {% endif %}
-                </ul>
+{% extends "base.html" %}
+
+{% block title %}Baby Monitor - Repair Tools{% endblock %}
+
+{% block extra_css %}
+<style>
+    .repair-card {
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        margin-bottom: 20px;
+        transition: transform 0.2s;
+    }
+    
+    .repair-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .repair-icon {
+        font-size: 3rem;
+        margin-bottom: 15px;
+        color: #0dcaf0;
+    }
+    
+    .repair-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #fff;
+    }
+    
+    .repair-description {
+        color: #aaa;
+        margin-bottom: 15px;
+    }
+    
+    .repair-button {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+
+    .repair-button:last-child {
+        margin-bottom: 0;
+    }
+
+    .status-container {
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        border-radius: 4px;
+        padding: 1rem;
+        margin-top: 20px;
+    }
+
+    .status-message {
+        display: flex;
+        align-items: center;
+        padding: 8px;
+        margin-bottom: 8px;
+        border-radius: 4px;
+        background-color: rgba(0, 0, 0, 0.2);
+    }
+
+    .status-time {
+        color: #aaa;
+        margin-right: 10px;
+        font-size: 0.9rem;
+    }
+
+    .status-text {
+        color: #fff;
+    }
+
+    .status-message.success {
+        background-color: rgba(25, 135, 84, 0.2);
+        border-left: 4px solid #198754;
+    }
+
+    .status-message.warning {
+        background-color: rgba(255, 193, 7, 0.2);
+        border-left: 4px solid #ffc107;
+    }
+
+    .status-message.error {
+        background-color: rgba(220, 53, 69, 0.2);
+        border-left: 4px solid #dc3545;
+    }
+
+    .status-message.info {
+        background-color: rgba(13, 202, 240, 0.2);
+        border-left: 4px solid #0dcaf0;
+    }
+
+    .camera-select {
+        background-color: #333;
+        border: 1px solid #404040;
+        color: #fff;
+        padding: 0.5rem;
+        margin-bottom: 10px;
+        width: 100%;
+        border-radius: 4px;
+    }
+
+    .camera-select option {
+        background-color: #333;
+        color: #fff;
+    }
+
+    .resolution-select {
+        background-color: #333;
+        border: 1px solid #404040;
+        color: #fff;
+        padding: 0.5rem;
+        width: 100%;
+        border-radius: 4px;
+    }
+
+    .resolution-select option {
+        background-color: #333;
+        color: #fff;
+    }
+
+    .system-info {
+        color: #aaa;
+        font-size: 0.9rem;
+        margin-top: 10px;
+    }
+
+    .system-info strong {
+        color: #fff;
+    }
+
+    .direct-feed-container {
+        background-color: #1a1a1a;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 20px;
+        text-align: center;
+    }
+
+    .direct-feed-frame {
+        max-width: 100%;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+    }
+
+    .feed-stats {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin-bottom: 1rem;
+        color: #aaa;
+    }
+
+    .feed-stat {
+        text-align: center;
+    }
+
+    .feed-stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #0dcaf0;
+    }
+
+    .feed-stat-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .feed-controls {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+    }
+
+    /* Dev tools specific styles */
+    .dev-card {
+        margin-bottom: 20px;
+        transition: transform 0.2s;
+    }
+    
+    .dev-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .dev-icon {
+        font-size: 3rem;
+        margin-bottom: 15px;
+        color: #fd7e14;
+    }
+    
+    .dev-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        padding: 5px 10px;
+        background-color: #dc3545;
+        color: white;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+
+    .memory-info {
+        background-color: #252525;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .memory-bar {
+        height: 8px;
+        background-color: #333;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 10px 0;
+    }
+
+    .memory-bar-fill {
+        height: 100%;
+        background-color: #0dcaf0;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+    }
+
+    .memory-text {
+        display: flex;
+        justify-content: space-between;
+        color: #aaa;
+    }
+
+    .resolution-info {
+        font-size: 0.8rem;
+        color: #aaa;
+        margin-top: 5px;
+    }
+
+    .resolution-warning {
+        color: #ffc107;
+        font-size: 0.8rem;
+        margin-top: 5px;
+        display: none;
+    }
+
+    .resolution-select option:disabled {
+        color: #666;
+        font-style: italic;
+    }
+
+    .stream-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 15px;
+        padding: 10px;
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+    }
+
+    .stream-stat {
+        text-align: center;
+    }
+
+    .stream-stat-value {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #0dcaf0;
+    }
+
+    .stream-stat-label {
+        font-size: 0.8rem;
+        color: #aaa;
+        text-transform: uppercase;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .status-active {
+        background-color: rgba(25, 135, 84, 0.2);
+        color: #198754;
+    }
+
+    .status-warning {
+        background-color: rgba(255, 193, 7, 0.2);
+        color: #ffc107;
+    }
+
+    .status-error {
+        background-color: rgba(220, 53, 69, 0.2);
+        color: #dc3545;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="mb-3">Repair Tools</h1>
+            <p class="text-muted">Use these tools to fix common issues with the Baby Monitor system.</p>
+            {% if dev_mode %}
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i> Developer Mode is active. Additional tools are available below.
             </div>
+            {% endif %}
         </div>
-    </nav>
+    </div>
 
-    <!-- Main Content -->
-    <div class="container mt-4">
-        <div class="row mb-4">
-            <div class="col">
-                <h1 class="mb-3">Repair Tools</h1>
-                <p class="text-muted">Use these tools to fix common issues with the Baby Monitor system.</p>
-            </div>
-        </div>
-
-        <div class="row">
-            <!-- Camera Repair -->
-            <div class="col-md-4">
-                <div class="card repair-card">
-                    <div class="card-body text-center">
-                        <i class="bi bi-camera repair-icon"></i>
-                        <h5 class="repair-title">Camera Repair</h5>
-                        <p class="repair-description">Fix issues with the camera not working or showing a black screen.</p>
-                        <button class="btn btn-primary repair-button" data-tool="restart_camera">
-                            <i class="bi bi-arrow-clockwise"></i> Restart Camera
-                        </button>
+    <!-- Direct Camera Feed Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card repair-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h5 class="repair-title mb-0">
+                            <i class="bi bi-camera-video"></i> Direct Camera Feed
+                        </h5>
+                        <div class="feed-controls">
+                            <button class="btn btn-sm btn-outline-info" id="toggleFeed">
+                                <i class="bi bi-play-circle"></i> Start Feed
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" id="toggleStats">
+                                <i class="bi bi-graph-up"></i> Show Stats
+                            </button>
+                        </div>
                     </div>
-                </div>
-            </div>
+                    
+                    <div class="direct-feed-container">
+                        <!-- Memory Usage Info -->
+                        <div class="memory-info">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>System Memory</span>
+                                <span id="memoryUsageText">0 MB / 0 MB</span>
+                            </div>
+                            <div class="memory-bar">
+                                <div class="memory-bar-fill" id="memoryUsageBar" style="width: 0%"></div>
+                            </div>
+                            <div class="memory-text">
+                                <span>Available: <span id="availableMemory">0 MB</span></span>
+                                <span>Required: <span id="requiredMemory">0 MB</span></span>
+                            </div>
+                        </div>
 
-            <!-- Audio Repair -->
-            <div class="col-md-4">
-                <div class="card repair-card">
-                    <div class="card-body text-center">
-                        <i class="bi bi-mic repair-icon"></i>
-                        <h5 class="repair-title">Audio Repair</h5>
-                        <p class="repair-description">Fix issues with audio not working or emotion detection failures.</p>
-                        <button class="btn btn-primary repair-button" data-tool="restart_audio">
-                            <i class="bi bi-arrow-clockwise"></i> Restart Audio
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- System Repair -->
-            <div class="col-md-4">
-                <div class="card repair-card">
-                    <div class="card-body text-center">
-                        <i class="bi bi-gear repair-icon"></i>
-                        <h5 class="repair-title">System Repair</h5>
-                        <p class="repair-description">Fix general system issues by restarting all components.</p>
-                        <button class="btn btn-warning repair-button" data-tool="restart_system">
-                            <i class="bi bi-arrow-clockwise"></i> Restart System
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Status Messages -->
-        <div class="row mt-4">
-            <div class="col">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-info-circle"></i> Status
-                    </div>
-                    <div class="card-body">
-                        <div id="statusMessages" class="alert-container">
-                            <div class="alert-item alert-info">
-                                <div class="alert-time">Now</div>
-                                <div class="alert-message">Repair tools ready. Select a tool to begin.</div>
+                        <img id="directFeed" class="direct-feed-frame" src="" alt="Direct camera feed" style="display: none;">
+                        <div class="stream-stats" id="feedStats" style="display: none;">
+                            <div class="stream-stat">
+                                <div class="stream-stat-value" id="currentFps">0</div>
+                                <div class="stream-stat-label">FPS</div>
+                            </div>
+                            <div class="stream-stat">
+                                <div class="stream-stat-value" id="processingTime">0</div>
+                                <div class="stream-stat-label">Processing (ms)</div>
+                            </div>
+                            <div class="stream-stat">
+                                <div class="stream-stat-value" id="frameQuality">0</div>
+                                <div class="stream-stat-label">Quality</div>
                             </div>
                         </div>
                     </div>
@@ -149,100 +367,579 @@
         </div>
     </div>
 
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/socket.io@4.5.4/client-dist/socket.io.min.js"></script>
-    <script>
-        // Initialize Socket.IO connection
-        const socket = io();
+    <div class="row">
+        <!-- Camera Management -->
+        <div class="col-md-4">
+            <div class="card repair-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-camera repair-icon"></i>
+                    <h5 class="repair-title">Camera Management</h5>
+                    <p class="repair-description">Configure camera settings and fix video issues.</p>
+                    
+                    <select id="resolutionSelect" class="resolution-select mb-3">
+                        <option value="">Loading resolutions...</option>
+                    </select>
+                    <div class="resolution-info" id="resolutionInfo">
+                        Estimated memory usage: <span id="estimatedMemory">0 MB</span>
+                    </div>
+                    <div class="resolution-warning" id="resolutionWarning">
+                        <i class="bi bi-exclamation-triangle"></i> This resolution may impact system performance
+                    </div>
+                    
+                    <button class="btn btn-primary repair-button" data-tool="apply_camera">
+                        <i class="bi bi-check-circle"></i> Apply Settings
+                    </button>
+                    <button class="btn btn-warning repair-button" data-tool="restart_camera">
+                        <i class="bi bi-arrow-clockwise"></i> Restart Camera
+                    </button>
+                </div>
+            </div>
+        </div>
 
-        // DOM Elements
-        const statusMessages = document.getElementById('statusMessages');
-        const repairButtons = document.querySelectorAll('.repair-button');
+        <!-- Audio Repair -->
+        <div class="col-md-4">
+            <div class="card repair-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-mic repair-icon"></i>
+                    <h5 class="repair-title">Audio System</h5>
+                    <p class="repair-description">Fix audio processing and emotion detection issues.</p>
+                    <button class="btn btn-primary repair-button" data-tool="test_audio">
+                        <i class="bi bi-soundwave"></i> Test Audio
+                    </button>
+                    <button class="btn btn-warning repair-button" data-tool="restart_audio">
+                        <i class="bi bi-arrow-clockwise"></i> Restart Audio
+                    </button>
+                </div>
+            </div>
+        </div>
 
-        // Add event listeners to repair buttons
-        repairButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                const tool = this.dataset.tool;
-                runRepairTool(tool);
-            });
-        });
+        <!-- System Repair -->
+        <div class="col-md-4">
+            <div class="card repair-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-gear repair-icon"></i>
+                    <h5 class="repair-title">System Control</h5>
+                    <p class="repair-description">Manage system resources and performance.</p>
+                    <button class="btn btn-info repair-button" data-tool="check_system">
+                        <i class="bi bi-search"></i> Check System
+                    </button>
+                    <button class="btn btn-warning repair-button" data-tool="restart_system">
+                        <i class="bi bi-arrow-clockwise"></i> Restart System
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        // Run repair tool
-        function runRepairTool(tool) {
-            // Disable all buttons
-            repairButtons.forEach(btn => btn.disabled = true);
-            
-            // Add status message
-            addStatusMessage(`Running repair tool: ${tool}...`, 'info');
-            
-            // Send request to server
-            fetch('/repair/run', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `tool=${tool}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    addStatusMessage(data.message, 'success');
-                } else {
-                    addStatusMessage(`Error: ${data.message}`, 'danger');
+    {% if dev_mode %}
+    <!-- Developer Tools Section -->
+    <div class="row mt-4">
+        <h4 class="mb-3"><i class="bi bi-gear"></i> Developer Tools</h4>
+        
+        <!-- Metrics Tools -->
+        <div class="col-md-4">
+            <div class="card dev-card">
+                <div class="dev-badge">Metrics</div>
+                <div class="card-body text-center">
+                    <i class="bi bi-graph-up dev-icon"></i>
+                    <h5 class="dev-title">Metrics Tools</h5>
+                    <p class="dev-description">Tools for managing and simulating metrics data.</p>
+                    <button class="btn btn-outline-warning dev-button" data-command="clear_metrics">
+                        <i class="bi bi-trash"></i> Clear Metrics History
+                    </button>
+                    <button class="btn btn-outline-warning dev-button" data-command="reset_alerts">
+                        <i class="bi bi-trash"></i> Clear Alerts
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Simulation -->
+        <div class="col-md-4">
+            <div class="card dev-card">
+                <div class="dev-badge">Simulation</div>
+                <div class="card-body text-center">
+                    <i class="bi bi-person-bounding-box dev-icon"></i>
+                    <h5 class="dev-title">Detection Simulation</h5>
+                    <p class="dev-description">Simulate person detection events.</p>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">Count</span>
+                        <input type="number" id="detectionCount" class="form-control" value="1" min="0" max="10">
+                    </div>
+                    <button class="btn btn-outline-warning dev-button" data-command="simulate_detection">
+                        <i class="bi bi-play"></i> Simulate Detection
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emotion Simulation -->
+        <div class="col-md-4">
+            <div class="card dev-card">
+                <div class="dev-badge">Simulation</div>
+                <div class="card-body text-center">
+                    <i class="bi bi-emoji-smile dev-icon"></i>
+                    <h5 class="dev-title">Emotion Simulation</h5>
+                    <p class="dev-description">Simulate emotion detection events.</p>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">Emotion</span>
+                        <select id="emotionType" class="form-select">
+                            <option value="crying">Crying</option>
+                            <option value="laughing">Laughing</option>
+                            <option value="babbling">Babbling</option>
+                            <option value="silence">Silence</option>
+                        </select>
+                    </div>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">Confidence</span>
+                        <input type="range" id="emotionConfidence" class="form-range" min="0" max="1" step="0.1" value="0.8">
+                        <span class="input-group-text" id="confidenceValue">80%</span>
+                    </div>
+                    <button class="btn btn-outline-warning dev-button" data-command="simulate_emotion">
+                        <i class="bi bi-play"></i> Simulate Emotion
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- System Information -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="status-container">
+                <h5 class="mb-3"><i class="bi bi-info-circle"></i> System Information</h5>
+                <div id="systemInfo" class="system-info">
+                    Loading system information...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Messages -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="status-container">
+                <h5 class="mb-3"><i class="bi bi-terminal"></i> Status Log</h5>
+                <div id="statusMessages"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize Socket.IO connection
+    const socket = io();
+    
+    // DOM Elements
+    const statusMessages = document.getElementById('statusMessages');
+    const systemInfo = document.getElementById('systemInfo');
+    const resolutionSelect = document.getElementById('resolutionSelect');
+    const resolutionInfo = document.getElementById('resolutionInfo');
+    const resolutionWarning = document.getElementById('resolutionWarning');
+    const memoryUsageBar = document.getElementById('memoryUsageBar');
+    const memoryUsageText = document.getElementById('memoryUsageText');
+    const availableMemory = document.getElementById('availableMemory');
+    const requiredMemory = document.getElementById('requiredMemory');
+    const estimatedMemory = document.getElementById('estimatedMemory');
+    const repairButtons = document.querySelectorAll('.repair-button');
+    
+    // Direct feed elements
+    const directFeed = document.getElementById('directFeed');
+    const feedStats = document.getElementById('feedStats');
+    const toggleFeedBtn = document.getElementById('toggleFeed');
+    const toggleStatsBtn = document.getElementById('toggleStats');
+    const currentFps = document.getElementById('currentFps');
+    const processingTime = document.getElementById('processingTime');
+    const frameQuality = document.getElementById('frameQuality');
+    
+    let feedActive = false;
+    let statsVisible = false;
+
+    // API endpoints
+    const API = {
+        systemMemory: '/repair/api/system/memory',
+        systemInfo: '/repair/api/system/info',
+        cameraConfig: '/repair/api/camera/configure',
+        repairRun: '/repair/run'
+    };
+
+    // Available resolutions with memory requirements (3 bytes per pixel + overhead)
+    const commonResolutions = [
+        { width: 640, height: 480, label: "640x480 (VGA)" },
+        { width: 800, height: 600, label: "800x600 (SVGA)" },
+        { width: 1024, height: 768, label: "1024x768 (XGA)" },
+        { width: 1280, height: 720, label: "1280x720 (HD)" },
+        { width: 1920, height: 1080, label: "1920x1080 (Full HD)" }
+    ];
+
+    // Calculate memory requirement for a resolution
+    function calculateMemoryRequirement(width, height) {
+        // 3 bytes per pixel (RGB) + 20% overhead
+        return Math.ceil((width * height * 3 * 1.2) / (1024 * 1024));
+    }
+
+    // Update memory information display
+    function updateMemoryInfo(totalMemory, availableMem, requiredMem) {
+        const usedMemory = totalMemory - availableMem;
+        const usagePercent = (usedMemory / totalMemory) * 100;
+        
+        memoryUsageBar.style.width = `${usagePercent}%`;
+        memoryUsageText.textContent = `${Math.round(usedMemory)} MB / ${Math.round(totalMemory)} MB`;
+        availableMemory.textContent = `${Math.round(availableMem)} MB`;
+        requiredMemory.textContent = `${Math.round(requiredMem)} MB`;
+        
+        // Update bar color based on usage
+        if (usagePercent > 90) {
+            memoryUsageBar.style.backgroundColor = '#dc3545';
+        } else if (usagePercent > 70) {
+            memoryUsageBar.style.backgroundColor = '#ffc107';
+        } else {
+            memoryUsageBar.style.backgroundColor = '#0dcaf0';
+        }
+    }
+
+    // Initialize camera selection
+    function initializeCameraSelect() {
+        addStatusMessage('Loading available resolutions...', 'info');
+        resolutionSelect.innerHTML = '<option value="">Loading resolutions...</option>';
+        resolutionSelect.disabled = true;
+        
+        fetch(API.systemMemory)
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 503) {
+                        throw new Error('Monitor system not initialized. Please start the system first.');
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                const totalMemoryMB = data.total_memory;
+                const availableMemoryMB = data.available_memory;
+                const currentResolution = data.current_resolution;
+                
+                updateMemoryInfo(totalMemoryMB, availableMemoryMB, 0);
+                
+                resolutionSelect.innerHTML = '';
+                
+                // Filter and sort resolutions based on memory requirements
+                const availableResolutions = commonResolutions
+                    .map(res => ({
+                        ...res,
+                        memoryRequired: calculateMemoryRequirement(res.width, res.height),
+                        isViable: calculateMemoryRequirement(res.width, res.height) < availableMemoryMB * 0.8
+                    }))
+                    .sort((a, b) => a.memoryRequired - b.memoryRequired);
+                
+                availableResolutions.forEach(res => {
+                    const option = document.createElement('option');
+                    option.value = `${res.width}x${res.height}`;
+                    option.textContent = `${res.label} (${res.memoryRequired} MB)`;
+                    option.disabled = !res.isViable;
+                    resolutionSelect.appendChild(option);
+                });
+                
+                if (currentResolution) {
+                    resolutionSelect.value = currentResolution;
+                    const [width, height] = currentResolution.split('x').map(Number);
+                    const memRequired = calculateMemoryRequirement(width, height);
+                    estimatedMemory.textContent = `${memRequired} MB`;
+                    requiredMemory.textContent = `${memRequired} MB`;
+                    
+                    // Show warning if current resolution is using too much memory
+                    resolutionWarning.style.display = memRequired > availableMemoryMB * 0.8 ? 'block' : 'none';
+                }
+                
+                resolutionSelect.disabled = false;
+                addStatusMessage('Resolutions updated based on available memory', 'info');
             })
             .catch(error => {
-                addStatusMessage(`Error: ${error.message}`, 'danger');
-            })
-            .finally(() => {
-                // Re-enable buttons after a delay
-                setTimeout(() => {
-                    repairButtons.forEach(btn => btn.disabled = false);
-                }, 3000);
+                console.error('Resolution loading error:', error);
+                resolutionSelect.innerHTML = '<option value="">Error loading resolutions</option>';
+                resolutionSelect.disabled = true;
+                addStatusMessage('Error loading resolutions: ' + error.message, 'error');
+                setTimeout(initializeCameraSelect, 5000);
             });
-        }
+    }
 
+    // Handle resolution selection change
+    resolutionSelect.addEventListener('change', function() {
+        const resolution = this.value;
+        if (resolution) {
+            const [width, height] = resolution.split('x').map(Number);
+            const memRequired = calculateMemoryRequirement(width, height);
+            estimatedMemory.textContent = `${memRequired} MB`;
+            
+            // Show warning if selected resolution might impact performance
+            fetch(API.systemMemory)
+                .then(response => response.json())
+                .then(data => {
+                    const availableMemoryMB = data.available_memory;
+                    resolutionWarning.style.display = memRequired > availableMemoryMB * 0.8 ? 'block' : 'none';
+                });
+        }
+    });
+
+    // Apply camera settings
+    function applyCameraSettings() {
+        const resolution = resolutionSelect.value;
+        
+        if (!resolution) {
+            addStatusMessage('Please select a resolution', 'warning');
+            return;
+        }
+        
+        const [width, height] = resolution.split('x').map(Number);
+        addStatusMessage('Applying camera settings...', 'info');
+        
+        fetch(API.cameraConfig, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                width: width,
+                height: height
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                if (response.status === 503) {
+                    throw new Error('Monitor system not initialized. Please start the system first.');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            addStatusMessage(data.message, 'success');
+            updateSystemInfo();
+            
+            // Update memory info after changing resolution
+            fetch(API.systemMemory)
+                .then(response => response.json())
+                .then(memData => {
+                    const memRequired = calculateMemoryRequirement(width, height);
+                    updateMemoryInfo(memData.total_memory, memData.available_memory, memRequired);
+                });
+        })
+        .catch(error => {
+            console.error('Error applying camera settings:', error);
+            addStatusMessage('Error applying settings: ' + error.message, 'error');
+        });
+    }
+
+    // Run repair tool
+    function runRepairTool(tool) {
+        // Disable all buttons
+        repairButtons.forEach(btn => btn.disabled = true);
+        
         // Add status message
-        function addStatusMessage(message, type) {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            
-            const alertItem = document.createElement('div');
-            alertItem.className = `alert-item alert-${type}`;
-            
-            const alertTime = document.createElement('div');
-            alertTime.className = 'alert-time';
-            alertTime.textContent = timeString;
-            
-            const alertMessage = document.createElement('div');
-            alertMessage.className = 'alert-message';
-            alertMessage.textContent = message;
-            
-            alertItem.appendChild(alertTime);
-            alertItem.appendChild(alertMessage);
-            
-            // Add to container at the top
-            statusMessages.insertBefore(alertItem, statusMessages.firstChild);
-            
-            // Limit to 10 messages
-            while (statusMessages.children.length > 10) {
-                statusMessages.removeChild(statusMessages.lastChild);
+        addStatusMessage(`Running repair tool: ${tool}...`, 'info');
+        
+        // Send request to server
+        fetch(API.repairRun, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ tool: tool })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                addStatusMessage(data.message, 'success');
+            } else {
+                addStatusMessage('Error: ' + data.message, 'error');
+            }
+        })
+        .catch(error => {
+            addStatusMessage('Error: ' + error.message, 'error');
+        })
+        .finally(() => {
+            // Re-enable buttons after a delay
+            setTimeout(() => {
+                repairButtons.forEach(btn => btn.disabled = false);
+            }, 3000);
+        });
+    }
+
+    // Add status message
+    function addStatusMessage(message, type = 'info') {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `status-message ${type}`;
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'status-time';
+        timeSpan.textContent = timeString;
+        
+        const textSpan = document.createElement('span');
+        textSpan.className = 'status-text';
+        textSpan.textContent = message;
+        
+        messageDiv.appendChild(timeSpan);
+        messageDiv.appendChild(textSpan);
+        
+        // Add to container at the top
+        statusMessages.insertBefore(messageDiv, statusMessages.firstChild);
+        
+        // Limit to 10 messages
+        while (statusMessages.children.length > 10) {
+            statusMessages.removeChild(statusMessages.lastChild);
+        }
+    }
+
+    // Update system information
+    function updateSystemInfo() {
+        fetch(API.systemInfo)
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 503) {
+                        throw new Error('Monitor system not initialized. Please start the system first.');
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                const info = `
+                    <div><strong>CPU Usage:</strong> ${data.cpu_usage.toFixed(1)}%</div>
+                    <div><strong>Memory Usage:</strong> ${data.memory_usage.toFixed(1)}% (${data.memory_available.toFixed(1)} MB available)</div>
+                    <div><strong>Disk Usage:</strong> ${data.disk_usage.toFixed(1)}%</div>
+                    <div><strong>Camera Status:</strong> ${data.camera_status}</div>
+                    <div><strong>Audio Status:</strong> ${data.audio_status}</div>
+                    <div><strong>Uptime:</strong> ${data.uptime}</div>
+                `;
+                systemInfo.innerHTML = info;
+            })
+            .catch(error => {
+                console.error('System info loading error:', error);
+                systemInfo.innerHTML = `<div class="text-danger">Error loading system information: ${error.message}</div>`;
+                // Try to recover by retrying after 5 seconds
+                setTimeout(updateSystemInfo, 5000);
+            });
+    }
+
+    // Toggle direct feed
+    toggleFeedBtn.addEventListener('click', () => {
+        feedActive = !feedActive;
+        if (feedActive) {
+            socket.emit('start_direct_feed');
+            directFeed.style.display = 'block';
+            toggleFeedBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Feed';
+            toggleFeedBtn.classList.replace('btn-outline-info', 'btn-outline-danger');
+        } else {
+            socket.emit('stop_direct_feed');
+            directFeed.style.display = 'none';
+            toggleFeedBtn.innerHTML = '<i class="bi bi-play-circle"></i> Start Feed';
+            toggleFeedBtn.classList.replace('btn-outline-danger', 'btn-outline-info');
+        }
+    });
+
+    // Toggle stats display
+    toggleStatsBtn.addEventListener('click', () => {
+        statsVisible = !statsVisible;
+        feedStats.style.display = statsVisible ? 'flex' : 'none';
+        toggleStatsBtn.innerHTML = statsVisible ? 
+            '<i class="bi bi-graph-down"></i> Hide Stats' : 
+            '<i class="bi bi-graph-up"></i> Show Stats';
+    });
+
+    // Handle direct feed updates
+    socket.on('direct_feed_frame', (data) => {
+        if (feedActive) {
+            directFeed.src = `data:image/jpeg;base64,${data.frame}`;
+            if (statsVisible) {
+                currentFps.textContent = data.fps.toFixed(1);
+                processingTime.textContent = data.processing_time.toFixed(1);
+                frameQuality.textContent = data.quality_score.toFixed(1);
             }
         }
+    });
 
-        // Socket.IO event handlers
-        socket.on('connect', () => {
-            addStatusMessage('Connected to server', 'info');
+    // Socket.IO event handlers
+    socket.on('connect', () => {
+        addStatusMessage('Connected to server', 'success');
+        initializeCameraSelect();
+        updateSystemInfo();
+    });
+    
+    socket.on('disconnect', () => {
+        addStatusMessage('Disconnected from server', 'error');
+    });
+    
+    socket.on('system_update', (data) => {
+        updateSystemInfo();
+    });
+    
+    // Update system info every 5 seconds
+    setInterval(updateSystemInfo, 5000);
+
+    {% if dev_mode %}
+    // Dev tools elements
+    const devButtons = document.querySelectorAll('.dev-button');
+    const detectionCount = document.getElementById('detectionCount');
+    const emotionType = document.getElementById('emotionType');
+    const emotionConfidence = document.getElementById('emotionConfidence');
+    const confidenceValue = document.getElementById('confidenceValue');
+
+    // Update confidence value display
+    emotionConfidence.addEventListener('input', function() {
+        confidenceValue.textContent = `${Math.round(this.value * 100)}%`;
+    });
+
+    // Add event listeners to dev buttons
+    devButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const command = this.dataset.command;
+            executeDevCommand(command);
         });
+    });
+
+    // Execute developer command
+    function executeDevCommand(command) {
+        // Disable all buttons
+        devButtons.forEach(btn => btn.disabled = true);
         
-        socket.on('disconnect', () => {
-            addStatusMessage('Disconnected from server', 'warning');
-        });
+        // Add status message
+        addStatusMessage(`Executing command: ${command}...`, 'info');
         
-        socket.on('alert', (data) => {
-            addStatusMessage(data.message, data.type);
-        });
-    </script>
-</body>
-</html> 
+        // Prepare command data
+        let commandData = { command };
+        
+        if (command === 'simulate_detection') {
+            commandData.count = parseInt(detectionCount.value) || 1;
+        } else if (command === 'simulate_emotion') {
+            commandData.emotion = emotionType.value;
+            commandData.confidence = parseFloat(emotionConfidence.value);
+        }
+        
+        // Send command to server
+        socket.emit('dev_command', commandData);
+        
+        // Re-enable buttons after a delay
+        setTimeout(() => {
+            devButtons.forEach(btn => btn.disabled = false);
+        }, 1000);
+    }
+    {% endif %}
+</script>
+{% endblock %} 
