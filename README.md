@@ -13,6 +13,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 - **Alerting System**: Notifications when crying is detected or when a person enters/leaves the frame
 - **Multiple Launch Modes**: Normal, Developer, and Local GUI modes for different use cases
 - **Dark Theme UI**: Modern dark-themed interface with responsive design
+- **Unified Installer & Repair Tool**: Easy-to-use GUI for installation, maintenance, and troubleshooting
 
 ## Requirements
 
@@ -23,6 +24,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 - Flask
 - SocketIO
 - PyQt5 (for local GUI mode)
+- Tkinter (for the unified installer & repair tool)
 
 ## Setup Instructions
 
@@ -40,17 +42,27 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
    cd baby-monitor-system
    ```
 
-3. **Run the Windows installer**:
+3. **Run the Unified Installer**:
+
+   ```powershell
+   .\scripts\scripts_manager.bat
+   ```
+   
+   Then select "Install / Reinstall System" from the GUI.
+
+4. **Alternatively, run the Windows installer directly**:
 
    ```powershell
    .\scripts\install\install.bat
    ```
 
-4. **If you encounter any issues, run the fix script**:
+5. **If you encounter any issues, use the Unified Repair Tool**:
 
    ```powershell
-   .\scripts\fix_windows.bat
+   .\scripts\scripts_manager.bat
    ```
+   
+   Then select "Repair / Fix System" from the GUI.
 
 ### macOS Setup
 
@@ -70,7 +82,15 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
    cd baby-monitor-system
    ```
 
-3. **Run the installer**:
+3. **Run the Unified Installer**:
+
+   ```bash
+   bash scripts/scripts_manager.sh
+   ```
+   
+   Then select "Install / Reinstall System" from the GUI.
+
+4. **Alternatively, run the installer directly**:
 
    ```bash
    bash scripts/install/install.sh
@@ -83,7 +103,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 
      ```bash
      sudo apt update
-     sudo apt install -y python3-pip python3-venv portaudio19-dev libopencv-dev
+     sudo apt install -y python3-pip python3-venv portaudio19-dev libopencv-dev python3-tk
      ```
 
 2. **Clone the repository**:
@@ -93,7 +113,22 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
    cd baby-monitor-system
    ```
 
-3. **Run the installer**:
+3. **Run the Unified Installer**:
+   - For regular Linux:
+
+     ```bash
+     bash scripts/scripts_manager.sh
+     ```
+
+   - For Raspberry Pi:
+
+     ```bash
+     bash scripts/scripts_manager_pi.sh
+     ```
+   
+   Then select "Install / Reinstall System" from the GUI.
+
+4. **Alternatively, run the installer directly**:
    - For regular Linux:
 
      ```bash
@@ -110,13 +145,20 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 
 For a guided installation with a graphical interface:
 
-1. Make sure you have PyQt5 installed:
+1. Run the unified installer tool:
 
    ```bash
-   pip install PyQt5
+   # Windows
+   .\scripts\scripts_manager.bat
+   
+   # macOS/Linux
+   bash scripts/scripts_manager.sh
+   
+   # Raspberry Pi
+   bash scripts/scripts_manager_pi.sh
    ```
 
-2. Run the GUI installer:
+2. Or run the standalone GUI installer:
 
    ```bash
    # Windows
@@ -223,13 +265,38 @@ bash start.sh --mode local
 
 ## Troubleshooting
 
+### Unified Repair Tool
+
+The Baby Monitor System now includes a comprehensive repair tool to address common issues:
+
+1. **Launch the Unified Repair Tool**:
+
+   ```bash
+   # Windows
+   .\scripts\scripts_manager.bat
+   
+   # macOS/Linux
+   bash scripts/scripts_manager.sh
+   
+   # Raspberry Pi
+   bash scripts/scripts_manager_pi.sh
+   ```
+
+2. **Select "Repair / Fix System"** from the GUI
+
+3. **Choose the repair category** (Camera, Audio, or System) and run the appropriate repair tool
+
+4. **Web Interface Repair Tools** are also available at http://localhost:5000/repair when the system is running
+
 ### Common Issues
 
 #### Camera Issues
 
 If you encounter camera access issues:
 
-1. **Try a different camera ID**:
+1. **Use the Unified Repair Tool** to diagnose and fix camera issues
+
+2. **Try a different camera ID**:
 
    ```bash
    # Windows
@@ -239,12 +306,12 @@ If you encounter camera access issues:
    bash start.sh --camera_id 1
    ```
 
-2. **Check camera permissions**:
+3. **Check camera permissions**:
    - On Windows: Ensure the app has permission in Privacy settings
    - On macOS: Check System Preferences > Security & Privacy > Camera
    - On Linux: Ensure the user has proper permissions to access the camera device
 
-3. **Run the fix script**:
+4. **Run the fix script directly**:
 
    ```bash
    # Windows
@@ -256,7 +323,9 @@ If you encounter camera access issues:
 
 #### Audio Device Issues
 
-1. **List available audio devices**:
+1. **Use the Unified Repair Tool** to diagnose and fix audio issues
+
+2. **List available audio devices**:
 
    ```bash
    # Windows
@@ -266,7 +335,7 @@ If you encounter camera access issues:
    python3 -c "import sounddevice as sd; print(sd.query_devices())"
    ```
 
-2. **Specify a specific device**:
+3. **Specify a specific device**:
 
    ```bash
    # Windows
@@ -315,6 +384,10 @@ The Baby Monitor System supports Python 3.8 through 3.12. If you have multiple P
 
 Various maintenance and utility scripts are available:
 
+- **Unified Installer & Repair Tool**: 
+  - Windows: `scripts/scripts_manager.bat`
+  - macOS/Linux: `scripts/scripts_manager.sh`
+  - Raspberry Pi: `scripts/scripts_manager_pi.sh`
 - **Windows Fix Utility**: `scripts/fix_windows.bat`
 - **Raspberry Pi Fix Utility**: `scripts/fix_raspberry.sh`
 - **Metrics Fix Utility**: `scripts/fix_metrics.bat`
@@ -324,26 +397,32 @@ Various maintenance and utility scripts are available:
 
 ### Recent Updates
 
-1. **Installation Scripts Organization**:
+1. **Unified Installer & Repair Tool**:
+   - Added a comprehensive GUI-based tool for installation, repair, and maintenance
+   - Platform-specific optimization for Windows, Linux, and Raspberry Pi
+   - Integration with web-based repair tools
+   - One-click access to all installation and repair scripts
+
+2. **Installation Scripts Organization**:
    - Reorganized all installation scripts to `scripts/install` directory
    - Added GUI installer with PyQt5 interface
 
-2. **Enhanced Person Detection**:
+3. **Enhanced Person Detection**:
    - Upgraded to YOLOv8 for faster and more accurate person detection
    - Improved tracking stability with multi-frame history
 
-3. **Emotion Detection Improvements**:
+4. **Emotion Detection Improvements**:
    - Better crying detection accuracy
    - Added percentage-based emotion distribution display
    - Real-time emotion event logging
 
-4. **Metrics Dashboard**:
+5. **Metrics Dashboard**:
    - Redesigned dark theme interface
    - Added real-time charts for performance monitoring
    - Improved detection event logging
    - Added export functionality for alerts
 
-5. **Multi-platform Support**:
+6. **Multi-platform Support**:
    - Added compatibility for Python 3.8-3.12
    - Enhanced error handling for different platforms
    - Improved setup scripts for Windows, macOS, and Raspberry Pi
@@ -379,6 +458,10 @@ baby-monitor-system/
 │   │   ├── install_pi.sh      # Raspberry Pi installer
 │   │   ├── install.py         # GUI installer
 │   │   └── setup.py           # Core setup script
+│   ├── scripts_manager.bat    # Windows unified installer & repair tool
+│   ├── scripts_manager.sh     # Linux unified installer & repair tool
+│   ├── scripts_manager_pi.sh  # Raspberry Pi unified installer & repair tool
+│   ├── scripts_manager_gui.py # GUI for the unified installer & repair tool
 │   ├── fix_windows.bat        # Windows fix script
 │   ├── fix_raspberry.sh       # Raspberry Pi fix script
 │   ├── fix_metrics.bat        # Metrics fix script
@@ -402,6 +485,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Flask for the web framework
 - SocketIO for real-time communication
 - PyQt5 for the local GUI interface
+- Tkinter for the unified installer & repair tool interface
 
 ## Start Scripts
 
