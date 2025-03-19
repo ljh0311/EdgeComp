@@ -13,7 +13,7 @@ Options:
     --no-gui         Run installation without GUI
     --skip-models    Skip downloading models
     --skip-shortcut  Skip creating desktop shortcut
-    --help           Show this help message
+    --help          Show this help message
 """
 
 import os
@@ -37,6 +37,23 @@ def show_banner():
     """
     print(banner)
 
+def check_python_version():
+    """Check if the current Python version is supported."""
+    current_version = sys.version_info[:3]
+    if current_version > (3, 11, 5):
+        print("ERROR: Python version not supported!")
+        print(f"Current version: Python {'.'.join(map(str, current_version))}")
+        print("Please install Python 3.11.5 or earlier.")
+        print("Download Python 3.11.5 from: https://www.python.org/downloads/release/python-3115/")
+        sys.exit(1)
+    elif current_version < (3, 8):
+        print("ERROR: Python version too old!")
+        print(f"Current version: Python {'.'.join(map(str, current_version))}")
+        print("Minimum required version is Python 3.8")
+        sys.exit(1)
+    
+    print(f"Python version check passed: {'.'.join(map(str, current_version))}")
+
 def is_raspberry_pi():
     """Check if the system is a Raspberry Pi."""
     try:
@@ -45,9 +62,53 @@ def is_raspberry_pi():
     except:
         return False
 
+def check_dependencies():
+    """Check if required system dependencies are installed."""
+    system = platform.system()
+    
+    if system == "Windows":
+        # Check for Visual C++ Redistributable
+        if not os.path.exists("C:\\Windows\\System32\\vcruntime140.dll"):
+            print("WARNING: Visual C++ Redistributable might be missing.")
+            print("Please download and install from: https://aka.ms/vs/16/release/vc_redist.x64.exe")
+    
+    elif system == "Linux":
+        # Check for common Linux dependencies
+        dependencies = [
+            "python3-dev",
+            "python3-pip",
+            "python3-venv",
+            "libportaudio2",
+            "portaudio19-dev",
+            "libsndfile1"
+        ]
+        
+        if is_raspberry_pi():
+            dependencies.extend([
+                "python3-picamera2",
+                "libopencv-dev",
+                "python3-opencv"
+            ])
+        
+        missing = []
+        for dep in dependencies:
+            if subprocess.call(["dpkg", "-s", dep], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+                missing.append(dep)
+        
+        if missing:
+            print("Missing system dependencies:", ", ".join(missing))
+            print("Please install them using:")
+            print(f"sudo apt-get install {' '.join(missing)}")
+            return False
+    
+    return True
+
 def main():
     """Main entry point for the installer."""
     show_banner()
+    
+    # Check Python version first
+    check_python_version()
     
     parser = argparse.ArgumentParser(description="Baby Monitor System Installer")
     parser.add_argument("--no-gui", action="store_true", help="Run installation without GUI")
@@ -60,6 +121,11 @@ def main():
     system = platform.system()
     print(f"Detected platform: {system}")
     
+    # Check system dependencies
+    if not check_dependencies():
+        print("Please install the required dependencies and try again.")
+        return 1
+    
     if is_raspberry_pi():
         print("Detected Raspberry Pi hardware")
         
@@ -67,7 +133,7 @@ def main():
         if args.no_gui:
             print("Running Raspberry Pi installation script...")
             try:
-                subprocess.run(["bash", "install_pi.sh"], check=True)
+                subprocess.run(["bash", "scripts/install_pi.sh"], check=True)
                 print("Raspberry Pi installation completed successfully!")
                 return 0
             except subprocess.CalledProcessError as e:
@@ -91,6 +157,16 @@ def main():
     try:
         subprocess.run(cmd, check=True)
         print("Installation completed successfully!")
+        
+        # Print next steps
+        print("\nNext steps:")
+        if system == "Windows":
+            print("1. Run 'scripts\\fix_windows.bat' to start the application")
+        else:
+            print("1. Run 'python run_monitor.py' to start the application")
+        print("2. Open http://localhost:5000 in your web browser")
+        print("3. Check the README.md file for more information")
+        
         return 0
     except subprocess.CalledProcessError as e:
         print(f"Error during installation: {e}")

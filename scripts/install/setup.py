@@ -29,6 +29,106 @@ MODELS_DIR = Path("models")
 LOGS_DIR = Path("logs")
 CONFIG_DIR = Path("config")
 DATA_DIR = Path("data")
+SCRIPTS_DIR = Path("scripts")
+
+# Check Python version
+MIN_PYTHON = (3, 8)
+MAX_PYTHON = (3, 12)
+if sys.version_info < MIN_PYTHON or sys.version_info > MAX_PYTHON:
+    sys.exit(f"Python {'.'.join(map(str, MIN_PYTHON))} or newer but not newer than {'.'.join(map(str, MAX_PYTHON))} is required.")
+
+# Define package versions based on Python version
+def get_package_versions():
+    py_version = sys.version_info[:2]
+    
+    # Base packages that work across all supported Python versions
+    packages = {
+        'numpy': '1.24.3',
+        'opencv-python-headless': '4.8.1.78',
+        'flask': '2.3.3',
+        'python-dotenv': '1.0.0',
+        'psutil': '5.9.5',
+        'cffi': '1.15.1',
+        'pycparser': '2.21',
+        'sounddevice': '0.4.6',
+        'soundfile': '0.12.1',
+        'librosa': '0.10.0',
+        'aiortc': '1.5.0',
+        'aiohttp': '3.8.5',
+        'python-engineio': '4.5.1',
+        'python-socketio': '5.8.0',
+        'eventlet': '0.33.3',
+        'flask-socketio': '5.3.6',
+        'werkzeug': '2.3.7',
+    }
+    
+    # Python version specific adjustments
+    if py_version >= (3, 11):
+        packages.update({
+            'torch': '2.0.0',
+            'torchaudio': '2.0.0',
+        })
+    elif py_version >= (3, 8):
+        packages.update({
+            'torch': '1.13.1',
+            'torchaudio': '0.13.1',
+        })
+    
+    return packages
+
+REQUIRED_PACKAGES = get_package_versions()
+
+# Read README.md for long description
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+
+setup(
+    name="babymonitor",
+    version="1.0.0",
+    author="Your Name",
+    author_email="your.email@example.com",
+    description="A Baby Monitor System with AI-powered features",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/yourusername/babymonitor",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: End Users/Desktop",
+        "Topic :: Multimedia :: Video :: Capture",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    python_requires=f">={'.'.join(map(str, MIN_PYTHON))},<={'.'.join(map(str, MAX_PYTHON))}",
+    install_requires=[f"{pkg}=={ver}" for pkg, ver in REQUIRED_PACKAGES.items()],
+    extras_require={
+        'dev': [
+            'pytest>=8.0.0',
+            'black>=23.0.0',
+            'flake8>=6.0.0',
+            'mypy>=1.0.0',
+        ],
+    }
+)
+
+def check_python_version():
+    """Check if the current Python version is supported."""
+    current_version = sys.version_info[:3]
+    if current_version > (3, 11, 5):
+        logger.error(f"Python {'.'.join(map(str, current_version))} is not supported.")
+        logger.error("Please use Python 3.11 or earlier.")
+        logger.error("Download Python 3.11.5 from: https://www.python.org/downloads/release/python-3115/")
+        sys.exit(1)
+    elif current_version < MIN_PYTHON:
+        logger.error(f"Python {'.'.join(map(str, current_version))} is too old.")
+        logger.error(f"Minimum required version is Python {'.'.join(map(str, MIN_PYTHON))}")
+        sys.exit(1)
 
 def is_raspberry_pi():
     """Check if the system is a Raspberry Pi."""
@@ -42,13 +142,13 @@ def download_file(url, filename, desc=None):
     """Download a file with progress indicator."""
     if desc is None:
         desc = filename
-    print(f"Downloading {desc}...")
+    logger.info(f"Downloading {desc}...")
     try:
         urllib.request.urlretrieve(url, filename)
-        print(f"Successfully downloaded {desc}")
+        logger.info(f"Successfully downloaded {desc}")
         return True
     except Exception as e:
-        print(f"Error downloading {desc}: {e}")
+        logger.error(f"Error downloading {desc}: {e}")
         return False
 
 def setup_models():
@@ -101,8 +201,8 @@ def setup_environment():
     venv_path = Path("venv")
     
     if not venv_path.exists():
-        print("Creating virtual environment...")
-        subprocess.run([sys.executable, "-m", "venv", "venv"])
+        logger.info("Creating virtual environment...")
+        subprocess.run([sys.executable, "-m", "venv", "venv"], check=True)
 
     # Determine the correct pip path
     if platform.system() == "Windows":
@@ -113,49 +213,99 @@ def setup_environment():
         python_path = "venv/bin/python"
 
     # Install/upgrade pip
-    subprocess.run([pip_path, "install", "--upgrade", "pip"])
+    subprocess.run([pip_path, "install", "--upgrade", "pip"], check=True)
 
-    # Install dependencies
-    print("Installing dependencies...")
-    subprocess.run([pip_path, "install", "-r", "requirements.txt"])
-    
-    # Install PyQt5 for GUI
-    subprocess.run([pip_path, "install", "PyQt5"])
+    # Install dependencies with specific versions
+    logger.info("Installing dependencies...")
+    for package, version in REQUIRED_PACKAGES.items():
+        subprocess.run([pip_path, "install", f"{package}=={version}"], check=True)
     
     return python_path
 
-def setup_raspberry_pi():
-    """Setup Raspberry Pi specific configurations."""
-    print("Setting up Raspberry Pi specific configurations...")
+def create_scripts():
+    """Create or update utility scripts."""
+    SCRIPTS_DIR.mkdir(exist_ok=True)
     
-    # Install system dependencies
-    subprocess.run([
-        "sudo", "apt-get", "update"
-    ])
-    
-    subprocess.run([
-        "sudo", "apt-get", "install", "-y",
-        "python3-pip", "python3-picamera2", "libportaudio2", 
-        "portaudio19-dev", "python3-opencv", "libopencv-dev",
-        "python3-venv", "git"
-    ])
-    
-    # Setup camera module
-    subprocess.run(["sudo", "modprobe", "bcm2835-v4l2"])
-    
-    # Add module to load at boot
-    modules_file = Path("/etc/modules")
-    if modules_file.exists():
-        with open(modules_file, 'r') as f:
-            content = f.read()
-        
-        if "bcm2835-v4l2" not in content:
-            with open("/tmp/modules", 'w') as f:
-                f.write(content + "\nbcm2835-v4l2\n")
-            
-            subprocess.run(["sudo", "mv", "/tmp/modules", "/etc/modules"])
-    
-    print("Raspberry Pi setup completed.")
+    # Create Windows fix script
+    fix_windows_path = SCRIPTS_DIR / "fix_windows.bat"
+    with open(fix_windows_path, 'w') as f:
+        f.write("""@echo off
+echo ===================================
+echo Baby Monitor Windows Fix Utility
+echo ===================================
+
+echo.
+echo Step 1: Checking Python installation...
+where py >nul 2>nul
+if %errorlevel% neq 0 (
+    echo ERROR: Python launcher (py) not found.
+    echo Please install Python from https://www.python.org/downloads/release/python-3115/
+    echo Make sure to check "Add python.exe to PATH" during installation.
+    pause
+    exit /b 1
+)
+
+echo Checking for Python 3.11...
+py -3.11 --version >nul 2>nul
+if %errorlevel% neq 0 (
+    echo ERROR: Python 3.11 is not installed.
+    echo Please install Python 3.11 from https://www.python.org/downloads/release/python-3115/
+    echo After installing:
+    echo 1. Make sure to check "Add python.exe to PATH" during installation
+    echo 2. Run 'py -3.11 -m pip install --upgrade pip'
+    echo 3. Run this script again
+    pause
+    exit /b 1
+)
+
+echo Using Python 3.11...
+py -3.11 --version
+
+echo.
+echo Step 2: Stopping any running Baby Monitor processes...
+taskkill /F /IM python.exe /FI "WINDOWTITLE eq Baby Monitor*" 2>nul
+timeout /t 2 /nobreak >nul
+
+echo.
+echo Step 3: Cleaning Python cache...
+del /s /q *.pyc 2>nul
+rd /s /q __pycache__ 2>nul
+rd /s /q src\\babymonitor\\__pycache__ 2>nul
+rd /s /q src\\babymonitor\\web\\__pycache__ 2>nul
+rd /s /q src\\babymonitor\\detectors\\__pycache__ 2>nul
+
+echo.
+echo Step 4: Please ensure no other applications are using your camera
+echo Close any applications that might be using the camera (Zoom, Teams, etc.)
+echo Press any key when ready...
+pause >nul
+
+echo.
+echo Step 5: Installing required packages...
+py -3.11 -m pip uninstall -y eventlet flask-socketio python-engineio python-socketio
+py -3.11 -m pip install --no-cache-dir eventlet==0.33.3 flask-socketio==5.3.6 werkzeug==2.3.7 python-engineio==4.5.1 python-socketio==5.8.0
+
+echo.
+echo Step 6: Starting Baby Monitor...
+echo.
+echo The web interface will be available at: http://localhost:5000
+echo Press Ctrl+C to stop the server
+echo.
+
+set PYTHONPATH=%CD%
+set EVENTLET_NO_GREENDNS=yes
+py -3.11 run_monitor.py --mode dev --camera_id 0 --debug
+
+echo.
+echo If you see any errors, please try:
+echo 1. Make sure Python 3.11 is properly installed: py -3.11 --version
+echo 2. Try reinstalling packages: py -3.11 -m pip install --no-cache-dir -r requirements.txt
+echo 3. Close other applications using your camera
+echo 4. Try a different camera (use --camera_id 1)
+echo 5. Check Windows camera privacy settings
+echo.
+pause
+""")
 
 def create_env_file():
     """Create .env file with default configuration."""
@@ -597,6 +747,9 @@ def run_gui_installer():
 
 def main():
     """Main entry point for setup."""
+    # Check Python version first
+    check_python_version()
+    
     parser = argparse.ArgumentParser(description="Baby Monitor System Setup")
     parser.add_argument("--no-gui", action="store_true", help="Run setup without GUI")
     parser.add_argument("--skip-models", action="store_true", help="Skip downloading models")
@@ -605,39 +758,26 @@ def main():
     args = parser.parse_args()
     
     # Create necessary directories
-    for directory in [MODELS_DIR, LOGS_DIR, CONFIG_DIR, DATA_DIR]:
+    for directory in [MODELS_DIR, LOGS_DIR, CONFIG_DIR, DATA_DIR, SCRIPTS_DIR]:
         directory.mkdir(exist_ok=True)
         logger.info(f"Created directory: {directory}")
     
-    if args.no_gui:
-        # Run command-line setup
-        logger.info("Starting command-line setup...")
-        
+    try:
         # Setup environment
-        setup_environment()
+        python_path = setup_environment()
         
         # Setup models
         if not args.skip_models:
             setup_models()
         
-        # Raspberry Pi specific setup
-        if is_raspberry_pi():
-            setup_raspberry_pi()
-        
-        # Create configuration files
-        create_config_files()
-        
-        # Create .env file
-        create_env_file()
-        
-        # Create desktop shortcut
-        if not args.skip_shortcut:
-            create_desktop_shortcut()
+        # Create utility scripts
+        create_scripts()
         
         logger.info("Setup completed successfully!")
-    else:
-        # Run GUI setup
-        run_gui_installer()
+        
+    except Exception as e:
+        logger.error(f"Error during setup: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     if len(sys.argv) == 1 or sys.argv[1] != "install":
@@ -650,19 +790,8 @@ if __name__ == "__main__":
             version="1.0.0",
             packages=find_packages(where="src"),
             package_dir={"": "src"},
-            install_requires=[
-                "opencv-python>=4.5.0",
-                "numpy>=1.19.0",
-                "torch>=1.10.0",
-                "torchaudio>=0.10.0",
-                "librosa>=0.8.0",
-                "sounddevice>=0.4.0",
-                "soundfile>=0.10.0",
-                "flask>=2.0.0",
-                "flask-socketio>=5.1.1",
-                "python-dotenv>=0.19.0",
-                "psutil>=5.8.0"
-            ],
+            install_requires=[f"{pkg}=={ver}" for pkg, ver in REQUIRED_PACKAGES.items()],
+            python_requires=f">={'.'.join(map(str, MIN_PYTHON))},<={'.'.join(map(str, MAX_PYTHON))}",
             entry_points={
                 "console_scripts": [
                     "babymonitor=babymonitor.core.main:main",
@@ -678,18 +807,21 @@ if __name__ == "__main__":
                     "web/static/*"
                 ]
             },
-            python_requires=">=3.8",
             author="Your Name",
             author_email="your.email@example.com",
             description="A baby monitoring system with person detection and emotion recognition",
-            long_description=open("README.md").read() if os.path.exists("README.md") else "",
+            long_description=long_description,
             long_description_content_type="text/markdown",
             classifiers=[
                 "Development Status :: 3 - Alpha",
                 "Intended Audience :: End Users/Desktop",
-                "Programming Language :: Python :: 3",
+                "Topic :: Multimedia :: Video :: Capture",
                 "Programming Language :: Python :: 3.8",
                 "Programming Language :: Python :: 3.9",
                 "Programming Language :: Python :: 3.10",
+                "Programming Language :: Python :: 3.11",
+                "Programming Language :: Python :: 3.12",
+                "License :: OSI Approved :: MIT License",
+                "Operating System :: OS Independent",
             ],
         ) 

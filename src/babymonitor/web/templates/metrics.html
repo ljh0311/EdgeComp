@@ -172,10 +172,10 @@
     background: #555;
   }
   
-  /* Detection types grid */
+  /* Detection types grid - Simplified for person detection */
   .detection-types-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 15px;
     margin-top: 15px;
   }
@@ -200,20 +200,12 @@
     color: #aaaaaa;
   }
   
-  .detection-type-face {
+  .detection-type-person {
     border-color: #00ff00;
   }
   
-  .detection-type-upper_body {
+  .detection-type-confidence {
     border-color: #ff0000;
-  }
-  
-  .detection-type-full_body {
-    border-color: #0000ff;
-  }
-  
-  .detection-type-lower_body {
-    border-color: #ffff00;
   }
   
   /* Status indicators */
@@ -280,6 +272,12 @@
     font-size: 0.8rem;
     color: #aaaaaa;
     margin-top: 5px;
+  }
+
+  /* Crying event styles */
+  .crying-event {
+    background-color: rgba(220, 53, 69, 0.1);
+    border-left: 4px solid #dc3545;
   }
   
   /* System health indicators */
@@ -422,37 +420,29 @@
             </div>
             <div class="col-md-6">
               <div class="metric-chart-container">
-                <h6><i class="bi bi-emoji-smile"></i> Emotion Distribution</h6>
+                <h6><i class="bi bi-emoji-smile"></i> Emotion Distribution (%)</h6>
                 <canvas id="emotionDistributionChart"></canvas>
               </div>
             </div>
             <div class="col-md-6">
               <div class="metric-chart-container">
-                <h6><i class="bi bi-person-bounding-box"></i> YOLOv8 Detection Metrics</h6>
+                <h6><i class="bi bi-person-bounding-box"></i> Person Detection Metrics</h6>
                 <canvas id="detectionTypesChart"></canvas>
               </div>
             </div>
           </div>
 
-          <!-- Detection Types Details -->
+          <!-- Detection Types Details - Simplified for person detection -->
           <div class="mt-4">
-            <h6 class="text-muted mb-3">Detection Types Breakdown</h6>
+            <h6 class="text-muted mb-3">Person Detection Breakdown</h6>
             <div class="detection-types-grid">
-              <div class="detection-type-card detection-type-face">
+              <div class="detection-type-card detection-type-person">
                 <div class="detection-type-value" id="personDetectionCount">0</div>
-                <div class="detection-type-label">Person</div>
+                <div class="detection-type-label">People Detected</div>
               </div>
-              <div class="detection-type-card detection-type-upper_body">
+              <div class="detection-type-card detection-type-confidence">
                 <div class="detection-type-value" id="confidenceAvg">0%</div>
                 <div class="detection-type-label">Avg Confidence</div>
-              </div>
-              <div class="detection-type-card detection-type-full_body">
-                <div class="detection-type-value" id="totalDetections">0</div>
-                <div class="detection-type-label">Total Detections</div>
-              </div>
-              <div class="detection-type-card detection-type-lower_body">
-                <div class="detection-type-value" id="peakDetections">0</div>
-                <div class="detection-type-label">Peak Detections</div>
               </div>
             </div>
           </div>
@@ -517,7 +507,7 @@
         </div>
       </div>
       
-      <!-- YOLOv8 Detector Features -->
+      <!-- Person Detection Features -->
       <div class="card mt-4">
         <div class="card-header">
           <h5 class="mb-0"><i class="bi bi-person-bounding-box"></i> Person Detection Features</h5>
@@ -525,7 +515,7 @@
         <div class="card-body">
           <div class="row">
             <div class="col-md-6">
-              <h6 class="text-muted mb-3">YOLOv8 Features</h6>
+              <h6 class="text-muted mb-3">Detection Features</h6>
               <ul class="list-group">
                 <li class="list-group-item bg-dark text-light border-secondary">Real-time person detection using YOLOv8</li>
                 <li class="list-group-item bg-dark text-light border-secondary">High accuracy bounding box visualization</li>
@@ -635,7 +625,7 @@
         </div>
       </div>
 
-      <!-- Detection Log -->
+      <!-- Detection Log with Crying Events -->
       <div class="card mt-4">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0"><i class="bi bi-list-check"></i> Recent Detections</h5>
@@ -645,7 +635,13 @@
         </div>
         <div class="card-body p-0">
           <div id="detectionLogContainer" class="alerts-container">
-            <!-- Detection log will be populated here -->
+            <!-- Detection log will be populated here, including crying events -->
+            <div class="alert-item crying-event">
+              <div class="alert-time">2023-07-12 15:42:30</div>
+              <div class="alert-message">
+                <i class="bi bi-emoji-frown text-danger"></i> Crying detected
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -656,5 +652,42 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Add this to your existing metrics.js file or include it here
+document.addEventListener('DOMContentLoaded', function() {
+  // Function to format emotion data as percentages for tooltips
+  Chart.defaults.set('plugins.tooltip', {
+    callbacks: {
+      label: function(context) {
+        let label = context.dataset.label || '';
+        if (label) {
+          label += ': ';
+        }
+        if (context.parsed !== null) {
+          label += context.parsed + '%';
+        }
+        return label;
+      }
+    }
+  });
+  
+  // Add crying event to detection log
+  function addCryingEvent(timestamp) {
+    const detectionLog = document.getElementById('detectionLogContainer');
+    const newEvent = document.createElement('div');
+    newEvent.className = 'alert-item crying-event';
+    newEvent.innerHTML = `
+      <div class="alert-time">${timestamp}</div>
+      <div class="alert-message">
+        <i class="bi bi-emoji-frown text-danger"></i> Crying detected
+      </div>
+    `;
+    detectionLog.insertBefore(newEvent, detectionLog.firstChild);
+  }
+  
+  // Example of how to use the function (call this when crying is detected)
+  // addCryingEvent(new Date().toLocaleString());
+});
+</script>
 <script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
 {% endblock %}

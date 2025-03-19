@@ -26,18 +26,22 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 
 ## Installation
 
-1. Clone the repository:
+### Installation Scripts
 
-```bash
-git clone https://github.com/yourusername/baby-monitor-system.git
-cd baby-monitor-system
-```
+All installation and setup scripts have been reorganized into the `scripts/install` directory:
 
-2. Install dependencies:
+- **Windows Installation**: Use `scripts/install/install.bat`
+- **Linux/Raspberry Pi Installation**: Use `scripts/install/install.sh` or `scripts/install/install_pi.sh`
+- **GUI Installation**: Run `python scripts/install/install.py` for the graphical installer
 
-```bash
-pip install -r requirements.txt
-```
+### Maintenance Scripts
+
+Various maintenance and utility scripts are available in the `scripts` directory:
+
+- **Windows Fix Utility**: `scripts/fix_windows.bat`
+- **Raspberry Pi Fix Utility**: `scripts/fix_raspberry.sh`
+- **Metrics Fix Utility**: `scripts/fix_metrics.bat`
+- **Restart Monitor**: `scripts/restart_baby_monitor.bat`
 
 ## Usage
 
