@@ -20,6 +20,10 @@ from scipy import signal as scipy_signal
 from datetime import datetime
 from queue import Queue, Empty
 from threading import Lock
+import sys
+import platform
+import subprocess
+from pathlib import Path
 
 
 class BabyMonitorWeb:
@@ -312,37 +316,69 @@ class BabyMonitorWeb:
         @self.app.route('/repair/api/system/info')
         def api_system_info():
             """Get system information."""
+            if not self.monitor_system:
+                return jsonify({'error': 'Monitor system not initialized'}), 503
+            
             try:
-                if not self.monitor_system:
-                    return jsonify({'error': 'Monitor system not initialized'}), 503
-
-                cpu = psutil.cpu_percent(interval=0.1)  # Reduced interval for faster response
+                # Get system info
+                cpu_usage = psutil.cpu_percent(interval=0.1)
                 memory = psutil.virtual_memory()
                 disk = psutil.disk_usage('/')
                 
-                uptime = 0
-                if hasattr(self.monitor_system, 'start_time'):
-                    uptime = time.time() - self.monitor_system.start_time
+                # Get camera and audio status
+                try:
+                    camera_status = "Active" if self.monitor_system.camera and self.monitor_system.camera.is_active() else "Inactive"
+                except (AttributeError, Exception):
+                    camera_status = "Unknown"
                 
-                camera_status = 'Inactive'
-                audio_status = 'Inactive'
+                try:
+                    audio_status = "Active" if self.monitor_system.audio_processor and self.monitor_system.audio_processor.is_active() else "Inactive"
+                except (AttributeError, Exception):
+                    audio_status = "Unknown"
                 
-                if self.monitor_system:
-                    camera_status = 'Active' if getattr(self.monitor_system, 'camera_enabled', False) else 'Inactive'
-                    audio_status = 'Active' if getattr(self.monitor_system, 'audio_enabled', False) else 'Inactive'
+                # Calculate uptime
+                uptime = datetime.now() - datetime.fromtimestamp(psutil.boot_time())
+                uptime_str = f"{uptime.days}d {uptime.seconds // 3600}h {(uptime.seconds // 60) % 60}m"
                 
                 return jsonify({
-                    'cpu_usage': cpu,
+                    'cpu_usage': cpu_usage,
                     'memory_usage': memory.percent,
-                    'memory_available': memory.available / (1024 * 1024),  # Convert to MB
+                    'memory_available': memory.available / (1024 * 1024),  # MB
                     'disk_usage': disk.percent,
                     'camera_status': camera_status,
                     'audio_status': audio_status,
-                    'uptime': str(datetime.timedelta(seconds=int(uptime)))
+                    'uptime': uptime_str
                 })
             except Exception as e:
-                self.logger.error(f"Error getting system info: {str(e)}")
                 return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/repair/api/launch_desktop_app', methods=['POST'])
+        def launch_desktop_app():
+            """Launch the desktop repair and installation tool."""
+            try:
+                # Get project root directory
+                base_dir = Path(__file__).resolve().parents[3]  # Go up 3 levels from web_app.py
+                scripts_dir = base_dir / "scripts"
+                
+                if platform.system() == "Windows":
+                    script_path = scripts_dir / "scripts_manager.bat"
+                    # Use subprocess.Popen to avoid blocking
+                    subprocess.Popen(str(script_path), shell=True, cwd=str(base_dir))
+                else:
+                    script_path = scripts_dir / "scripts_manager_gui.py"
+                    # Use subprocess.Popen to avoid blocking
+                    subprocess.Popen([sys.executable, str(script_path)], cwd=str(base_dir))
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Desktop application launched successfully'
+                })
+            except Exception as e:
+                self.logger.error(f"Error launching desktop app: {str(e)}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to launch desktop application: {str(e)}'
+                }), 500
 
         @self.app.route('/repair/run', methods=['POST'])
         def repair_run():
