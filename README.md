@@ -6,7 +6,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 
 ## Features
 
-- **Person Detection**: Detects faces and bodies using Haar Cascade classifiers
+- **Person Detection**: Detects people using YOLOv8 object detection model
 - **Emotion Recognition**: Identifies baby emotions (crying, laughing, babbling, silence) from audio
 - **Web Interface**: Real-time monitoring dashboard with alerts and statistics
 - **Multi-threading**: Efficient processing of video and audio streams
@@ -16,7 +16,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.8-3.12
 - OpenCV
 - NumPy
 - SoundDevice
@@ -24,56 +24,194 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 - SocketIO
 - PyQt5 (for local GUI mode)
 
-## Installation
+## Setup Instructions
 
-### Installation Scripts
+### Windows Setup
 
-All installation and setup scripts have been reorganized into the `scripts/install` directory:
+1. **Prerequisites**:
+   - Install [Python 3.8-3.12](https://www.python.org/downloads/windows/)
+   - Install [Git for Windows](https://gitforwindows.org/)
+   - Install [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
 
-- **Windows Installation**: Use `scripts/install/install.bat`
-- **Linux/Raspberry Pi Installation**: Use `scripts/install/install.sh` or `scripts/install/install_pi.sh`
-- **GUI Installation**: Run `python scripts/install/install.py` for the graphical installer
+2. **Clone the repository**:
 
-### Maintenance Scripts
+   ```powershell
+   git clone https://github.com/yourusername/baby-monitor-system.git
+   cd baby-monitor-system
+   ```
 
-Various maintenance and utility scripts are available in the `scripts` directory:
+3. **Run the Windows installer**:
 
-- **Windows Fix Utility**: `scripts/fix_windows.bat`
-- **Raspberry Pi Fix Utility**: `scripts/fix_raspberry.sh`
-- **Metrics Fix Utility**: `scripts/fix_metrics.bat`
-- **Restart Monitor**: `scripts/restart_baby_monitor.bat`
+   ```powershell
+   .\scripts\install\install.bat
+   ```
 
-## Usage
+4. **If you encounter any issues, run the fix script**:
 
-### Launch Modes
+   ```powershell
+   .\scripts\fix_windows.bat
+   ```
 
-The Baby Monitor System now supports three launch modes:
+### macOS Setup
 
-#### Normal Mode (Default)
+1. **Prerequisites**:
+   - Install [Python 3.8-3.12](https://www.python.org/downloads/macos/)
+   - Install [Homebrew](https://brew.sh/)
+   - Install required system libraries:
+
+     ```bash
+     brew install portaudio
+     ```
+
+2. **Clone the repository**:
+
+   ```bash
+   git clone https://github.com/yourusername/baby-monitor-system.git
+   cd baby-monitor-system
+   ```
+
+3. **Run the installer**:
+
+   ```bash
+   bash scripts/install/install.sh
+   ```
+
+### Linux/Raspberry Pi Setup
+
+1. **Prerequisites**:
+   - Install required system libraries:
+
+     ```bash
+     sudo apt update
+     sudo apt install -y python3-pip python3-venv portaudio19-dev libopencv-dev
+     ```
+
+2. **Clone the repository**:
+
+   ```bash
+   git clone https://github.com/yourusername/baby-monitor-system.git
+   cd baby-monitor-system
+   ```
+
+3. **Run the installer**:
+   - For regular Linux:
+
+     ```bash
+     bash scripts/install/install.sh
+     ```
+
+   - For Raspberry Pi:
+
+     ```bash
+     bash scripts/install/install_pi.sh
+     ```
+
+### GUI Installer (All Platforms)
+
+For a guided installation with a graphical interface:
+
+1. Make sure you have PyQt5 installed:
+
+   ```bash
+   pip install PyQt5
+   ```
+
+2. Run the GUI installer:
+
+   ```bash
+   # Windows
+   python scripts\install\install.py
+   
+   # macOS/Linux
+   python scripts/install/install.py
+   ```
+
+## Launch Instructions
+
+### Windows
+
+1. **Start the Baby Monitor**:
+   - Using the desktop shortcut created during installation, or
+   - Using the command line:
+
+     ```powershell
+     cd C:\path\to\baby-monitor-system
+     .\start.bat
+     ```
+
+2. **For development mode**:
+
+   ```powershell
+   cd C:\path\to\baby-monitor-system
+   .\start.bat --mode dev
+   ```
+
+### macOS/Linux
+
+1. **Start the Baby Monitor**:
+
+   ```bash
+   cd /path/to/baby-monitor-system
+   bash start.sh
+   ```
+
+2. **For development mode**:
+
+   ```bash
+   cd /path/to/baby-monitor-system
+   bash start.sh --mode dev
+   ```
+
+### Raspberry Pi
+
+1. **Start the Baby Monitor**:
+
+   ```bash
+   cd /path/to/baby-monitor-system
+   bash start_pi.sh
+   ```
+
+## Launch Modes
+
+The Baby Monitor System supports three launch modes:
+
+### Normal Mode (Default)
 
 Standard mode for end users, showing the main dashboard with camera feed and metrics, but no access to development tools.
 
 ```bash
-python main.py --mode normal
+# Windows
+.\start.bat --mode normal
+
+# macOS/Linux
+bash start.sh --mode normal
 ```
 
-#### Developer Mode
+### Developer Mode
 
 Shows metrics page with access to all development tools, logs, and settings. Use this mode for debugging and development.
 
 ```bash
-python main.py --mode dev
+# Windows
+.\start.bat --mode dev
+
+# macOS/Linux
+bash start.sh --mode dev
 ```
 
-#### Local GUI Mode
+### Local GUI Mode
 
 Runs the local GUI version of the baby monitor using PyQt5, without the web interface.
 
 ```bash
-python main.py --mode local
+# Windows
+.\start.bat --mode local
+
+# macOS/Linux
+bash start.sh --mode local
 ```
 
-### Command Line Arguments
+## Command Line Arguments
 
 - `--mode`: Launch mode (`normal`, `dev`, `local`)
 - `--threshold`: Detection threshold (default: 0.5)
@@ -83,60 +221,144 @@ python main.py --mode local
 - `--port`: Web interface port (default: 5000)
 - `--debug`: Enable debug mode
 
-### Legacy Usage (Deprecated)
-
-The following commands are still supported for backward compatibility but are deprecated:
-
-```bash
-python scripts/run.py --mode web  # Web interface only
-python scripts/run.py --mode person  # Person detection only
-python scripts/run.py --mode emotion  # Emotion recognition only
-python scripts/run.py --mode full  # Full system
-```
-
 ## Troubleshooting
 
-### Camera Issues
+### Common Issues
 
-If you encounter camera access issues, try:
+#### Camera Issues
 
-```bash
-python main.py --camera_id 1
-```
+If you encounter camera access issues:
 
-Different camera IDs (0, 1, 2, etc.) can be tried if your default camera is not working.
+1. **Try a different camera ID**:
 
-### Audio Device Issues
+   ```bash
+   # Windows
+   .\start.bat --camera_id 1
+   
+   # macOS/Linux
+   bash start.sh --camera_id 1
+   ```
 
-List available audio devices:
+2. **Check camera permissions**:
+   - On Windows: Ensure the app has permission in Privacy settings
+   - On macOS: Check System Preferences > Security & Privacy > Camera
+   - On Linux: Ensure the user has proper permissions to access the camera device
 
-```bash
-python -c "import sounddevice as sd; print(sd.query_devices())"
-```
+3. **Run the fix script**:
 
-Then specify a device:
+   ```bash
+   # Windows
+   .\scripts\fix_windows.bat
+   
+   # macOS/Linux
+   bash scripts/fix_raspberry.sh
+   ```
 
-```bash
-python main.py --input_device 1
-```
+#### Audio Device Issues
 
-### Repair Tools
+1. **List available audio devices**:
 
-The system includes built-in repair tools accessible from the web interface:
+   ```bash
+   # Windows
+   python -c "import sounddevice as sd; print(sd.query_devices())"
+   
+   # macOS/Linux
+   python3 -c "import sounddevice as sd; print(sd.query_devices())"
+   ```
 
-1. Navigate to the "Repair Tools" page
-2. Select the component to repair (Camera, Audio, or System)
-3. Click the repair button to attempt to fix the issue
+2. **Specify a specific device**:
+
+   ```bash
+   # Windows
+   .\start.bat --input_device 1
+   
+   # macOS/Linux
+   bash start.sh --input_device 1
+   ```
+
+#### Python Version Issues
+
+The Baby Monitor System supports Python 3.8 through 3.12. If you have multiple Python versions installed:
+
+1. **Force a specific Python version in Windows**:
+
+   ```powershell
+   py -3.11 scripts\install\install.py
+   ```
+
+2. **Force a specific Python version in macOS/Linux**:
+
+   ```bash
+   python3.11 scripts/install/install.py
+   ```
+
+### Web Interface Issues
+
+1. **Default Access**:
+   - The web interface is available at <http://localhost:5000> by default
+
+2. **Change port if blocked**:
+
+   ```bash
+   # Windows
+   .\start.bat --port 8080
+   
+   # macOS/Linux
+   bash start.sh --port 8080
+   ```
+
+3. **Access from other devices**:
+   - Use the machine's IP address: <http://192.168.1.x:5000> (replace with your actual IP)
+   - Make sure firewall allows connections to the port
+
+## Maintenance Scripts
+
+Various maintenance and utility scripts are available:
+
+- **Windows Fix Utility**: `scripts/fix_windows.bat`
+- **Raspberry Pi Fix Utility**: `scripts/fix_raspberry.sh`
+- **Metrics Fix Utility**: `scripts/fix_metrics.bat`
+- **Restart Monitor**: `scripts/restart_baby_monitor.bat`
+
+## Updates and Fixes
+
+### Recent Updates
+
+1. **Installation Scripts Organization**:
+   - Reorganized all installation scripts to `scripts/install` directory
+   - Added GUI installer with PyQt5 interface
+
+2. **Enhanced Person Detection**:
+   - Upgraded to YOLOv8 for faster and more accurate person detection
+   - Improved tracking stability with multi-frame history
+
+3. **Emotion Detection Improvements**:
+   - Better crying detection accuracy
+   - Added percentage-based emotion distribution display
+   - Real-time emotion event logging
+
+4. **Metrics Dashboard**:
+   - Redesigned dark theme interface
+   - Added real-time charts for performance monitoring
+   - Improved detection event logging
+   - Added export functionality for alerts
+
+5. **Multi-platform Support**:
+   - Added compatibility for Python 3.8-3.12
+   - Enhanced error handling for different platforms
+   - Improved setup scripts for Windows, macOS, and Raspberry Pi
 
 ## Project Structure
 
 ```
 baby-monitor-system/
-├── main.py                  # Main entry point with multiple launch modes
+├── main.py                    # Main entry point with multiple launch modes
+├── start.bat                  # Windows startup script
+├── start.sh                   # macOS/Linux startup script
 ├── src/
 │   ├── babymonitor/
 │   │   ├── __init__.py
-│   │   ├── camera.py        # Camera handling
+│   │   ├── camera.py          # Camera handling
 │   │   ├── audio_processor.py # Audio processing
 │   │   ├── detectors/
 │   │   │   ├── __init__.py
@@ -144,51 +366,30 @@ baby-monitor-system/
 │   │   │   ├── person_detector.py
 │   │   │   └── emotion_detector.py
 │   │   └── web/
-│   │       ├── server.py    # Web server implementation
+│   │       ├── server.py      # Web server implementation
 │   │       ├── static/
-│   │       │   ├── css/     # Stylesheets including dark theme
-│   │       │   ├── js/      # JavaScript for UI interactions
-│   │       │   └── img/     # Images and icons
-│   │       └── templates/   # HTML templates for web interface
+│   │       │   ├── css/       # Stylesheets including dark theme
+│   │       │   ├── js/        # JavaScript for UI interactions
+│   │       │   └── img/       # Images and icons
+│   │       └── templates/     # HTML templates for web interface
 ├── scripts/
-│   └── run.py               # Legacy script (for backward compatibility)
-├── models/                  # Pre-trained models
-├── logs/                    # System logs
-├── tests/                   # Unit tests
+│   ├── install/
+│   │   ├── install.bat        # Windows installer
+│   │   ├── install.sh         # macOS/Linux installer
+│   │   ├── install_pi.sh      # Raspberry Pi installer
+│   │   ├── install.py         # GUI installer
+│   │   └── setup.py           # Core setup script
+│   ├── fix_windows.bat        # Windows fix script
+│   ├── fix_raspberry.sh       # Raspberry Pi fix script
+│   ├── fix_metrics.bat        # Metrics fix script
+│   └── restart_baby_monitor.bat # Service restart script
+├── models/                    # Pre-trained models
+├── logs/                      # System logs
+├── config/                    # Configuration files
+├── tests/                     # Unit tests
 ├── requirements.txt
 └── README.md
 ```
-
-## Development
-
-### Adding New Detectors
-
-New detectors should inherit from the `BaseDetector` class and implement the required methods:
-
-```python
-from babymonitor.detectors.base_detector import BaseDetector
-
-class MyDetector(BaseDetector):
-    def __init__(self, threshold=0.5):
-        super().__init__(threshold=threshold)
-        
-    def process_frame(self, frame):
-        # Process frame and return results
-        return {"frame": processed_frame, "detections": []}
-```
-
-### Web Interface Customization
-
-The web interface uses Flask and SocketIO. Templates are in `src/babymonitor/web/templates/` and static files in `src/babymonitor/web/static/`.
-
-### Developer Mode Features
-
-When running in developer mode, you have access to:
-
-- **Dev Tools**: Simulate detections, emotions, and clear metrics
-- **Logs**: View and filter system logs
-- **Settings**: Configure camera, detection, audio, and system settings
-- **Metrics**: Detailed system performance metrics with dark theme
 
 ## License
 
@@ -197,6 +398,67 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgements
 
 - OpenCV for computer vision capabilities
+- YOLOv8 for object detection
 - Flask for the web framework
 - SocketIO for real-time communication
 - PyQt5 for the local GUI interface
+
+## Start Scripts
+
+The Baby Monitor System includes several enhanced start scripts for different platforms:
+
+### Windows
+
+- **start.bat**: The main startup script for Windows. It supports all command-line arguments, displays helpful status information, and provides proper error handling. This replaces the older `start_monitor.bat` which was a simpler script with hardcoded parameters.
+
+  Usage examples:
+
+  ```powershell
+  # Simple startup (uses default camera ID 0 and normal mode)
+  .\start.bat
+  
+  # Developer mode with camera ID 1
+  .\start.bat --mode dev --camera_id 1
+  
+  # Full options example
+  .\start.bat --mode dev --camera_id 0 --port 8080 --host 127.0.0.1 --debug
+  ```
+
+### macOS/Linux
+
+- **start.sh**: The main startup script for macOS and Linux platforms. It supports all command-line arguments and has similar functionality to the Windows script.
+
+  Usage examples:
+
+  ```bash
+  # Make the script executable
+  chmod +x start.sh
+  
+  # Simple startup
+  ./start.sh
+  
+  # Developer mode with camera ID 1
+  ./start.sh --mode dev --camera_id 1
+  ```
+
+### Raspberry Pi
+
+- **start_pi.sh**: A specialized startup script for Raspberry Pi with performance optimizations. It includes options to manage CPU governor settings, GPU memory allocation, and automatically reduces resolution for better performance.
+
+  Usage examples:
+
+  ```bash
+  # Make the script executable
+  chmod +x start_pi.sh
+  
+  # Start with optimizations enabled (default)
+  ./start_pi.sh
+  
+  # Start without optimizations
+  ./start_pi.sh --no-optimize
+  
+  # Start in developer mode
+  ./start_pi.sh --mode dev
+  ```
+
+> **Note about start_monitor.bat**: The original `start_monitor.bat` was a simple script that started the monitor in developer mode with hardcoded parameters. The new `start.bat` script provides the same functionality but with much more flexibility, proper command-line argument handling, and better user feedback.
