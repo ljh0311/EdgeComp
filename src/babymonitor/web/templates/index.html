@@ -102,7 +102,7 @@
         bottom: 70px;
         right: 20px;
         width: 350px;
-        max-height: 200px;
+        max-height: 300px;
         overflow-y: auto;
         z-index: 1000;
     }
@@ -122,9 +122,55 @@
         color: #ffc107;
     }
 
+    .alert-danger {
+        background-color: rgba(220, 53, 69, 0.2);
+        border-color: #dc3545;
+        color: #dc3545;
+    }
+
     .alert-info {
         background-color: rgba(13, 202, 240, 0.2);
         border-color: #0dcaf0;
+        color: #0dcaf0;
+    }
+
+    .alert-history-card {
+        max-height: 300px;
+        overflow-y: auto;
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        margin-top: 15px;
+        border-radius: 5px;
+    }
+
+    .alert-item {
+        border-bottom: 1px solid #404040;
+        padding: 10px;
+    }
+
+    .alert-item:last-child {
+        border-bottom: none;
+    }
+
+    .alert-time {
+        font-size: 0.75rem;
+        color: #aaa;
+    }
+
+    .alert-message {
+        font-size: 0.85rem;
+        margin-top: 2px;
+    }
+
+    .alert-warning .alert-message {
+        color: #ffc107;
+    }
+
+    .alert-danger .alert-message {
+        color: #dc3545;
+    }
+
+    .alert-info .alert-message {
         color: #0dcaf0;
     }
 
@@ -277,6 +323,23 @@
                     </div>
                     </div>
                 </div>
+                
+                <!-- Alert History -->
+                <div class="card dashboard-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div><i class="bi bi-exclamation-triangle"></i> Alert History</div>
+                        <button id="clearAlerts" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Clear
+                        </button>
+                    </div>
+                    <div id="alertHistoryContainer" class="alert-history-card">
+                        <!-- Alert items will be added here by JavaScript -->
+                        <div class="alert-item alert-info">
+                            <div class="alert-time">System started</div>
+                            <div class="alert-message">Baby monitor system is now running</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="col-lg-4">
@@ -333,6 +396,11 @@
                                     <i class="bi bi-tools"></i> Repair Tools
                         </button>
                     </div>
+                    <div class="quick-action">
+                        <button id="exportAlerts" class="btn btn-warning btn-sm w-100">
+                            <i class="bi bi-download"></i> Export Alerts
+                        </button>
+                    </div>
                     {% if mode == "dev" %}
                     <div class="quick-action">
                         <button class="btn btn-warning btn-sm w-100" onclick="location.href='/dev/tools'">
@@ -355,7 +423,32 @@
 {% block extra_js %}
     <script>
     // Socket.IO connection
-        const socket = io();
+    const socket = io();
+    
+    // Track connection status
+    let socketConnected = false;
+    
+    // Emotion detection buffer
+    const EMOTION_BUFFER_SIZE = 5;
+    let emotionBuffer = {
+        crying: [],
+        laughing: [],
+        babbling: [],
+        silence: []
+    };
+    let emotionBufferCount = 0;
+    
+    socket.on('connect', function() {
+        console.log('Connected to server');
+        socketConnected = true;
+        addAlert('info', 'Connected to baby monitor server');
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('Disconnected from server');
+        socketConnected = false;
+        addAlert('danger', 'Disconnected from baby monitor server');
+    });
 
     // Update emotion overlay and progress bars
     socket.on('emotion_update', function(data) {
@@ -363,65 +456,160 @@
         const confidence = data.confidence;
         const confidences = data.confidences;
         
-        // Update emotion overlay
-        const overlay = document.getElementById('emotionOverlay');
-        overlay.className = 'emotion-overlay';
+        // Add new emotion data to buffer
+        emotionBuffer.crying.push(confidences.crying);
+        emotionBuffer.laughing.push(confidences.laughing);
+        emotionBuffer.babbling.push(confidences.babbling);
+        emotionBuffer.silence.push(confidences.silence);
+        emotionBufferCount++;
         
-        let icon = 'emoji-neutral';
-                if (emotion === 'crying') {
-            overlay.classList.add('emotion-crying');
-            icon = 'emoji-frown';
-                } else if (emotion === 'laughing') {
-            overlay.classList.add('emotion-laughing');
-            icon = 'emoji-smile';
-                } else if (emotion === 'babbling') {
-            overlay.classList.add('emotion-babbling');
-            icon = 'emoji-laughing';
-        }
-        
-        overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${emotion} (${(confidence * 100).toFixed(1)}%)`;
-        
-        // Update progress bars
-        for (const [emotion, value] of Object.entries(confidences)) {
-            const progress = document.getElementById(`${emotion}Progress`);
-            const valueSpan = document.getElementById(`${emotion}Value`);
-            if (progress && valueSpan) {
-                const percentage = (value * 100).toFixed(1);
-                progress.style.width = `${percentage}%`;
-                valueSpan.textContent = `${percentage}%`;
+        // Only update UI and send alerts after collecting 5 instances
+        if (emotionBufferCount >= EMOTION_BUFFER_SIZE) {
+            // Calculate averages
+            const averages = {
+                crying: emotionBuffer.crying.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
+                laughing: emotionBuffer.laughing.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
+                babbling: emotionBuffer.babbling.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
+                silence: emotionBuffer.silence.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE
+            };
+            
+            // Find the dominant emotion
+            const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b)[0];
+            
+            // Update emotion overlay
+            const overlay = document.getElementById('emotionOverlay');
+            overlay.className = 'emotion-overlay';
+            
+            let icon = 'emoji-neutral';
+            if (dominantEmotion === 'crying') {
+                overlay.classList.add('emotion-crying');
+                icon = 'emoji-frown';
+            } else if (dominantEmotion === 'laughing') {
+                overlay.classList.add('emotion-laughing');
+                icon = 'emoji-smile';
+            } else if (dominantEmotion === 'babbling') {
+                overlay.classList.add('emotion-babbling');
+                icon = 'emoji-laughing';
             }
-        }
-        
-        // Update last update time
-        const lastUpdate = document.getElementById('lastUpdate');
-        const now = new Date();
-        lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
-        
-        // Add alert for crying
-        if (emotion === 'crying' && confidence > 0.7) {
-            addAlert('warning', 'Baby is crying with high confidence!');
+            
+            overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${dominantEmotion} (${(averages[dominantEmotion] * 100).toFixed(1)}%)`;
+            
+            // Update progress bars with averages
+            for (const [emotion, value] of Object.entries(averages)) {
+                const progress = document.getElementById(`${emotion}Progress`);
+                const valueSpan = document.getElementById(`${emotion}Value`);
+                if (progress && valueSpan) {
+                    const percentage = (value * 100).toFixed(1);
+                    progress.style.width = `${percentage}%`;
+                    valueSpan.textContent = `${percentage}%`;
+                }
+            }
+            
+            // Update last update time
+            const lastUpdate = document.getElementById('lastUpdate');
+            const now = new Date();
+            lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
+            
+            // Add alert for crying if average confidence is high
+            if (dominantEmotion === 'crying' && averages.crying > 0.7) {
+                addAlert('warning', 'Baby is crying with high confidence!');
+                addAlertToHistory('warning', 'Baby is crying with high confidence!');
+            }
+            
+            // Reset buffer
+            emotionBuffer = {
+                crying: [],
+                laughing: [],
+                babbling: [],
+                silence: []
+            };
+            emotionBufferCount = 0;
         }
     });
     
     // Update system status
     socket.on('system_info', function(data) {
         document.getElementById('uptime').textContent = data.uptime;
-        document.getElementById('cameraStatus').textContent = data.camera_status;
-        document.getElementById('personDetectorStatus').textContent = data.person_detector_status;
-        document.getElementById('emotionDetectorStatus').textContent = data.emotion_detector_status;
         
+        // Update camera status
+        const cameraStatus = document.getElementById('cameraStatus');
+        if (cameraStatus) {
+            const status = data.camera_status || 'Unknown';
+            cameraStatus.textContent = capitalizeFirstLetter(status);
+            cameraStatus.className = getStatusClass(status);
+        }
+        
+        // Update person detector status
+        const personDetectorStatus = document.getElementById('personDetectorStatus');
+        if (personDetectorStatus) {
+            const status = data.person_detector_status || 'Unknown';
+            personDetectorStatus.textContent = capitalizeFirstLetter(status);
+            personDetectorStatus.className = getStatusClass(status);
+        }
+        
+        // Update emotion detector status
+        const emotionDetectorStatus = document.getElementById('emotionDetectorStatus');
+        if (emotionDetectorStatus) {
+            const status = data.emotion_detector_status || 'Unknown';
+            emotionDetectorStatus.textContent = capitalizeFirstLetter(status);
+            emotionDetectorStatus.className = getStatusClass(status);
+        }
+        
+        // Update CPU and memory bars
         const cpuBar = document.getElementById('cpuUsage');
-        cpuBar.style.width = `${data.cpu_usage}%`;
-        cpuBar.title = `${data.cpu_usage.toFixed(1)}%`;
+        if (cpuBar) {
+            const cpuUsage = data.cpu_usage || 0;
+            cpuBar.style.width = `${cpuUsage}%`;
+            cpuBar.title = `${cpuUsage.toFixed(1)}%`;
+            
+            // Update color based on usage
+            if (cpuUsage < 50) {
+                cpuBar.className = 'progress-bar bg-info';
+            } else if (cpuUsage < 80) {
+                cpuBar.className = 'progress-bar bg-warning';
+            } else {
+                cpuBar.className = 'progress-bar bg-danger';
+            }
+        }
         
         const memBar = document.getElementById('memoryUsage');
-        memBar.style.width = `${data.memory_usage}%`;
-        memBar.title = `${data.memory_usage.toFixed(1)}%`;
+        if (memBar) {
+            const memUsage = data.memory_usage || 0;
+            memBar.style.width = `${memUsage}%`;
+            memBar.title = `${memUsage.toFixed(1)}%`;
+            
+            // Update color based on usage
+            if (memUsage < 50) {
+                memBar.className = 'progress-bar bg-warning';
+            } else if (memUsage < 80) {
+                memBar.className = 'progress-bar bg-warning';
+            } else {
+                memBar.className = 'progress-bar bg-danger';
+            }
+        }
     });
     
-    // Add alert to the alert box
+    // Listen for alert events from server
+    socket.on('alert', function(data) {
+        console.log('Alert received:', data);
+        addAlert(data.level || 'info', data.message);
+        addAlertToHistory(data.level || 'info', data.message);
+    });
+    
+    // Listen for crying detected events
+    socket.on('crying_detected', function(data) {
+        console.log('Crying detected:', data);
+        const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : new Date().toLocaleString();
+        const message = `Crying detected (confidence: ${(data.confidence * 100).toFixed(1)}%)`;
+        addAlert('warning', message);
+        addAlertToHistory('warning', message, timestamp);
+    });
+    
+    // Add alert to the alert box (floating notifications)
     function addAlert(type, message) {
         const alertBox = document.getElementById('alertsContainer');
+        if (!alertBox) return;
+        
         const alertHtml = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert">
                 ${message}
@@ -435,6 +623,119 @@
         while (alerts.length > 3) {
             alerts[alerts.length - 1].remove();
         }
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            const firstAlert = alertBox.querySelector('.alert');
+            if (firstAlert) {
+                firstAlert.classList.remove('show');
+                setTimeout(() => firstAlert.remove(), 500);
+            }
+        }, 5000);
+    }
+    
+    // Add alert to history
+    function addAlertToHistory(type, message, timeString = null) {
+        const alertHistory = document.getElementById('alertHistoryContainer');
+        if (!alertHistory) return;
+        
+        const now = timeString || new Date().toLocaleTimeString();
+        
+        const alertItem = document.createElement('div');
+        alertItem.className = `alert-item alert-${type}`;
+        alertItem.innerHTML = `
+            <div class="alert-time">${now}</div>
+            <div class="alert-message">${message}</div>
+        `;
+        
+        alertHistory.insertBefore(alertItem, alertHistory.firstChild);
+        
+        // Limit to 15 alerts
+        while (alertHistory.children.length > 15) {
+            alertHistory.removeChild(alertHistory.lastChild);
+        }
+    }
+    
+    // Helper function to capitalize first letter
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+    
+    // Helper function to get status class
+    function getStatusClass(status) {
+        if (status === 'connected' || status === 'running') {
+            return 'badge bg-success';
+        } else if (status === 'initializing') {
+            return 'badge bg-info';
+        } else if (status === 'disconnected') {
+            return 'badge bg-danger';
+        } else if (status === 'error') {
+            return 'badge bg-warning';
+        } else {
+            return 'badge bg-secondary';
+        }
+    }
+    
+    // Clear alerts button
+    document.getElementById('clearAlerts').addEventListener('click', function() {
+        const alertHistory = document.getElementById('alertHistoryContainer');
+        if (alertHistory) {
+            alertHistory.innerHTML = '';
+            addAlertToHistory('info', 'Alert history cleared');
+        }
+    });
+    
+    // Export alerts button
+    document.getElementById('exportAlerts').addEventListener('click', function() {
+        const alertHistory = document.getElementById('alertHistoryContainer');
+        if (!alertHistory) return;
+        
+        const content = alertHistory.innerHTML;
+        const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Baby Monitor Alerts - ${new Date().toLocaleString()}</title>
+            <style>
+                body { font-family: Arial, sans-serif; background-color: #f5f5f5; }
+                .alert-container { max-width: 800px; margin: 20px auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                h1 { color: #333; font-size: 24px; margin-top: 0; }
+                .alert-item { padding: 10px; border-bottom: 1px solid #eee; }
+                .alert-time { font-size: 12px; color: #777; }
+                .alert-message { font-size: 14px; margin-top: 5px; }
+                .alert-info .alert-message { color: #0dcaf0; }
+                .alert-warning .alert-message { color: #ffc107; }
+                .alert-danger .alert-message { color: #dc3545; }
+            </style>
+        </head>
+        <body>
+            <div class="alert-container">
+                <h1>Baby Monitor Alerts - ${new Date().toLocaleString()}</h1>
+                ${content}
+            </div>
+        </body>
+        </html>`;
+        
+        const blob = new Blob([htmlContent], {type: 'text/html'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `baby_monitor_alerts_${formatDateForFilename(new Date())}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    });
+    
+    // Helper function to format date for filename
+    function formatDateForFilename(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}_${hours}-${minutes}`;
     }
     </script>
 {% endblock %} 

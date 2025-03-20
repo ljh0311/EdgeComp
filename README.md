@@ -14,6 +14,7 @@ A comprehensive baby monitoring solution with real-time person detection, emotio
 - **Multiple Launch Modes**: Normal, Developer, and Local GUI modes for different use cases
 - **Dark Theme UI**: Modern dark-themed interface with responsive design
 - **Unified Installer & Repair Tool**: Easy-to-use GUI for installation, maintenance, and troubleshooting
+- **Emotion Model Manager**: GUI tool for managing and training emotion recognition models
 
 ## Requirements
 
@@ -546,3 +547,146 @@ The Baby Monitor System includes several enhanced start scripts for different pl
   ```
 
 > **Note about start_monitor.bat**: The original `start_monitor.bat` was a simple script that started the monitor in developer mode with hardcoded parameters. The new `start.bat` script provides the same functionality but with much more flexibility, proper command-line argument handling, and better user feedback.
+
+## Emotion Recognition Model Management
+
+The Baby Monitor System includes a dedicated GUI tool for managing emotion recognition models.
+
+### Launching the Emotion Model Manager
+
+```bash
+# Windows
+src/babymonitor/tools/run_emotion_manager.bat
+
+# Linux/macOS
+python src/babymonitor/tools/emotion_model_manager.py
+```
+
+### Features
+- Import, export, and delete emotion recognition models
+- Test models on audio samples
+- Train new models using custom datasets
+- Monitor training progress
+- Manage model configurations
+
+### Model Types
+1. **SpeechBrain Models** (*.pt)
+   - General emotion recognition
+   - Based on HuBERT architecture
+   - Supports multiple emotion classes
+
+2. **Cry Detection Models** (*.pth)
+   - Specialized for detecting baby crying
+   - Binary classification (crying/not crying)
+
+### Training New Models
+
+#### Datasets
+The system uses two main datasets for training (located in `data/`):
+1. **IEMOCAP Dataset**
+   - Used for general emotion recognition
+   - Located in `data/IEMOCAP_full_release_audio/`
+   - Includes labeled emotional speech samples
+
+2. **ASVP Dataset**
+   - Used for cry detection
+   - Located in `data/Audio/`
+   - Contains baby cry and non-cry samples
+
+#### Training Steps
+
+1. **Prepare Dataset**:
+   ```bash
+   # Extract datasets if needed
+   cd data
+   unzip IEMOCAP_full_release_audio.zip
+   unzip asvp.zip
+   ```
+
+2. **Launch Emotion Model Manager**:
+   ```bash
+   src/babymonitor/tools/run_emotion_manager.bat
+   ```
+
+3. **Train New Model**:
+   - Go to the "Training" tab
+   - Select model type (SpeechBrain or Cry Detection)
+   - Choose dataset directory:
+     - For SpeechBrain: `data/IEMOCAP_full_release_audio`
+     - For Cry Detection: `data/Audio`
+   - Set training parameters:
+     - Epochs (recommended: 10-20)
+     - Batch size (recommended: 32)
+   - Click "Start Training"
+
+4. **Monitor Training**:
+   - Progress bar shows completion percentage
+   - Training log displays loss and accuracy metrics
+   - Training can be stopped at any time
+
+5. **Test Trained Model**:
+   - Go to the "Test" tab
+   - Select your trained model
+   - Choose an audio file for testing
+   - View results in the output window
+
+### Model Management Tips
+
+1. **Organizing Models**:
+   - Models are automatically organized in the `models/emotion/` directory
+   - SpeechBrain models go to `models/emotion/speechbrain/`
+   - Cry detection models go to `models/emotion/cry_detection/`
+
+2. **Importing Existing Models**:
+   - Click "Import Model" in the Models tab
+   - Select a .pt file (for SpeechBrain) or .pth file (for cry detection)
+   - Model will be automatically categorized and configured
+
+3. **Exporting Models**:
+   - Select a model from the list
+   - Click "Export Model"
+   - Choose destination for the model file
+
+4. **Model Status**:
+   - Ready: Model is loaded and ready for use
+   - Training: Model is currently being trained
+   - Error: Issues with model loading/configuration
+
+### Best Practices
+
+1. **Dataset Preparation**:
+   - Ensure audio files are in WAV format
+   - Check sample rate consistency (16kHz recommended)
+   - Verify dataset labels are correctly formatted
+
+2. **Training Parameters**:
+   - Start with default parameters
+   - Increase epochs for better accuracy
+   - Adjust batch size based on available memory
+
+3. **Model Testing**:
+   - Test with various audio samples
+   - Verify performance on different emotional states
+   - Check confidence scores for predictions
+
+4. **Backup Management**:
+   - Export important models regularly
+   - Keep track of training configurations
+   - Document model performance metrics
+
+### Troubleshooting
+
+1. **Training Issues**:
+   - Check dataset path is correct
+   - Verify sufficient disk space
+   - Monitor GPU memory usage
+
+2. **Model Loading Errors**:
+   - Ensure correct model format (.pt/.pth)
+   - Check file permissions
+   - Verify model compatibility
+
+3. **Performance Issues**:
+   - Try reducing batch size
+   - Check system resources
+   - Consider using GPU acceleration

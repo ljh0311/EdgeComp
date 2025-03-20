@@ -4,7 +4,7 @@ Speech Emotion Recognition Training Script
 This script sets up and trains a speech emotion recognition model using SpeechBrain.
 It handles:
 - Environment setup and dependency installation
-- Dataset preparation and preprocessing 
+- Dataset preparation and preprocessing
 - Model training across different hyperparameter combinations
 - Checkpoint management and logging
 """

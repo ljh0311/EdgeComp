@@ -606,41 +606,63 @@
         </div>
       </div>
 
-      <!-- Alert History -->
+      <!-- Detection Log with Events -->
       <div class="card mt-4">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Alert History</h5>
-          <button id="exportAlerts" class="btn btn-sm btn-outline-primary">
-            <i class="bi bi-download"></i> Export
-          </button>
-        </div>
-        <div class="card-body p-0">
-          <div id="alertHistory" class="alerts-container">
-            <!-- Alert history will be populated here -->
-            <div class="alert-item alert-info">
-              <div class="alert-time">System started</div>
-              <div class="alert-message">Baby monitor system is now running</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Detection Log with Crying Events -->
-      <div class="card mt-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h5 class="mb-0"><i class="bi bi-list-check"></i> Recent Detections</h5>
+          <h5 class="mb-0"><i class="bi bi-list-check"></i> Detection Log</h5>
           <button id="clearDetectionLog" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-trash"></i> Clear
           </button>
         </div>
         <div class="card-body p-0">
           <div id="detectionLogContainer" class="alerts-container">
-            <!-- Detection log will be populated here, including crying events -->
-            <div class="alert-item crying-event">
-              <div class="alert-time">2023-07-12 15:42:30</div>
+            <!-- Detection log will be populated here -->
+            <div class="alert-item">
+              <div class="alert-time">System started</div>
               <div class="alert-message">
-                <i class="bi bi-emoji-frown text-danger"></i> Crying detected
+                <i class="bi bi-info-circle text-info"></i> Detection logging started
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- System Health -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-heart-pulse"></i> System Health</h5>
+        </div>
+        <div class="card-body">
+          <div class="health-indicator">
+            <div class="health-label">CPU Usage</div>
+            <div class="health-bar-container">
+              <div id="cpuHealthBar" class="health-bar health-good" style="width: 10%;"></div>
+            </div>
+            <div id="cpuHealthValue" class="health-value">10%</div>
+          </div>
+          <div class="health-indicator">
+            <div class="health-label">Memory Usage</div>
+            <div class="health-bar-container">
+              <div id="memoryHealthBar" class="health-bar health-good" style="width: 25%;"></div>
+            </div>
+            <div id="memoryHealthValue" class="health-value">25%</div>
+          </div>
+          <div class="health-indicator">
+            <div class="health-label">Camera Status</div>
+            <div class="health-bar-container">
+              <div id="cameraHealthBar" class="health-bar health-good" style="width: 100%;"></div>
+            </div>
+            <div id="cameraHealthValue" class="health-value">
+              <span class="status-badge status-active" id="cameraStatusBadge">Active</span>
+            </div>
+          </div>
+          <div class="health-indicator">
+            <div class="health-label">AI Processing</div>
+            <div class="health-bar-container">
+              <div id="aiHealthBar" class="health-bar health-good" style="width: 90%;"></div>
+            </div>
+            <div id="aiHealthValue" class="health-value">
+              <span class="status-badge status-active" id="aiStatusBadge">Active</span>
             </div>
           </div>
         </div>
@@ -652,472 +674,5 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-// Add this to your existing metrics.js file or include it here
-document.addEventListener('DOMContentLoaded', function() {
-  // Common chart options
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: {
-      duration: 1000
-    },
-    plugins: {
-      legend: {
-        labels: {
-          color: '#e0e0e0'
-        }
-      }
-    },
-    scales: {
-      x: {
-        grid: {
-          color: 'rgba(255, 255, 255, 0.1)'
-        },
-        ticks: {
-          color: '#aaaaaa'
-        }
-      },
-      y: {
-        grid: {
-          color: 'rgba(255, 255, 255, 0.1)'
-        },
-        ticks: {
-          color: '#aaaaaa'
-        }
-      }
-    }
-  };
-  
-  // Time data (for x-axis)
-  const timeLabels = Array.from({length: 20}, (_, i) => i === 0 ? 'Now' : `-${i}m`).reverse();
-  
-  // FPS Chart
-  const fpsCtx = document.getElementById('fpsChart').getContext('2d');
-  const fpsData = {
-    labels: timeLabels,
-    datasets: [{
-      label: 'FPS',
-      data: Array(20).fill(0),
-      borderColor: '#0dcaf0',
-      backgroundColor: 'rgba(13, 202, 240, 0.1)',
-      borderWidth: 2,
-      tension: 0.4,
-      fill: true
-    }]
-  };
-  
-  const fpsChart = new Chart(fpsCtx, {
-    type: 'line',
-    data: fpsData,
-    options: {
-      ...chartOptions,
-      plugins: {
-        ...chartOptions.plugins,
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `FPS: ${context.parsed.y.toFixed(1)}`;
-            }
-          }
-        }
-      }
-    }
-  });
-  
-  // Detection Count Chart
-  const detectionCountCtx = document.getElementById('detectionCountChart').getContext('2d');
-  const detectionCountData = {
-    labels: timeLabels,
-    datasets: [{
-      label: 'People Detected',
-      data: Array(20).fill(0),
-      borderColor: '#00ff00',
-      backgroundColor: 'rgba(0, 255, 0, 0.1)',
-      borderWidth: 2,
-      tension: 0.4,
-      fill: true
-    }]
-  };
-  
-  const detectionCountChart = new Chart(detectionCountCtx, {
-    type: 'line',
-    data: detectionCountData,
-    options: chartOptions
-  });
-  
-  // Emotion Distribution Chart (Pie chart with percentages)
-  const emotionDistCtx = document.getElementById('emotionDistributionChart').getContext('2d');
-  const emotionDistData = {
-    labels: ['Crying', 'Laughing', 'Babbling', 'Silence'],
-    datasets: [{
-      data: [0, 0, 0, 100], // Default to 100% silence
-      backgroundColor: [
-        '#dc3545', // Crying - red
-        '#198754', // Laughing - green
-        '#0dcaf0', // Babbling - blue
-        '#6c757d'  // Silence - gray
-      ],
-      borderWidth: 1,
-      borderColor: '#252525'
-    }]
-  };
-  
-  const emotionDistChart = new Chart(emotionDistCtx, {
-    type: 'pie',
-    data: emotionDistData,
-    options: {
-      plugins: {
-        legend: {
-          position: 'right',
-          labels: {
-            color: '#e0e0e0',
-            boxWidth: 15,
-            padding: 10
-          }
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              const value = context.parsed;
-              const label = context.label || '';
-              return `${label}: ${value.toFixed(1)}%`;
-            }
-          }
-        }
-      }
-    }
-  });
-  
-  // Person Detection Metrics Chart
-  const detectionTypesCtx = document.getElementById('detectionTypesChart').getContext('2d');
-  const detectionTypesData = {
-    labels: timeLabels,
-    datasets: [
-      {
-        label: 'People Detected',
-        data: Array(20).fill(0),
-        borderColor: '#00ff00',
-        backgroundColor: 'rgba(0, 255, 0, 0.1)',
-        borderWidth: 2,
-        tension: 0.4,
-        fill: true,
-        yAxisID: 'y'
-      },
-      {
-        label: 'Detection Confidence (%)',
-        data: Array(20).fill(0),
-        borderColor: '#ff0000',
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderDash: [5, 5],
-        tension: 0.4,
-        fill: false,
-        yAxisID: 'y1'
-      }
-    ]
-  };
-  
-  const detectionTypesChart = new Chart(detectionTypesCtx, {
-    type: 'line',
-    data: detectionTypesData,
-    options: {
-      ...chartOptions,
-      scales: {
-        x: {
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          },
-          ticks: {
-            color: '#aaaaaa'
-          }
-        },
-        y: {
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          },
-          ticks: {
-            color: '#aaaaaa'
-          },
-          min: 0,
-          title: {
-            display: true,
-            text: 'Count',
-            color: '#aaaaaa'
-          }
-        },
-        y1: {
-          position: 'right',
-          grid: {
-            drawOnChartArea: false
-          },
-          ticks: {
-            color: '#aaaaaa'
-          },
-          min: 0,
-          max: 100,
-          title: {
-            display: true,
-            text: 'Confidence (%)',
-            color: '#aaaaaa'
-          }
-        }
-      }
-    }
-  });
-  
-  // CPU Usage Chart
-  const cpuUsageCtx = document.getElementById('cpuUsageChart').getContext('2d');
-  const cpuUsageData = {
-    labels: timeLabels,
-    datasets: [{
-      label: 'CPU Usage (%)',
-      data: Array(20).fill(0),
-      borderColor: '#dc3545',
-      backgroundColor: 'rgba(220, 53, 69, 0.1)',
-      borderWidth: 2,
-      tension: 0.4,
-      fill: true
-    }]
-  };
-  
-  const cpuUsageChart = new Chart(cpuUsageCtx, {
-    type: 'line',
-    data: cpuUsageData,
-    options: {
-      ...chartOptions,
-      scales: {
-        ...chartOptions.scales,
-        y: {
-          ...chartOptions.scales.y,
-          min: 0,
-          max: 100
-        }
-      }
-    }
-  });
-  
-  // Memory Usage Chart
-  const memoryUsageCtx = document.getElementById('memoryUsageChart').getContext('2d');
-  const memoryUsageData = {
-    labels: timeLabels,
-    datasets: [{
-      label: 'Memory Usage (%)',
-      data: Array(20).fill(0),
-      borderColor: '#ffc107',
-      backgroundColor: 'rgba(255, 193, 7, 0.1)',
-      borderWidth: 2,
-      tension: 0.4,
-      fill: true
-    }]
-  };
-  
-  const memoryUsageChart = new Chart(memoryUsageCtx, {
-    type: 'line',
-    data: memoryUsageData,
-    options: {
-      ...chartOptions,
-      scales: {
-        ...chartOptions.scales,
-        y: {
-          ...chartOptions.scales.y,
-          min: 0,
-          max: 100
-        }
-      }
-    }
-  });
-  
-  // Function to update charts with new data
-  function updateCharts(data) {
-    // Update FPS chart
-    if (data.fps) {
-      fpsChart.data.datasets[0].data = data.fps;
-      fpsChart.update();
-      document.getElementById('currentFps').textContent = data.fps[data.fps.length - 1].toFixed(1);
-    }
-    
-    // Update Detection Count chart
-    if (data.detectionCount) {
-      detectionCountChart.data.datasets[0].data = data.detectionCount;
-      detectionCountChart.update();
-      document.getElementById('currentDetections').textContent = data.detectionCount[data.detectionCount.length - 1];
-      document.getElementById('personDetectionCount').textContent = data.detectionCount[data.detectionCount.length - 1];
-    }
-    
-    // Update Emotion Distribution chart
-    if (data.emotions) {
-      emotionDistChart.data.datasets[0].data = [
-        data.emotions.crying,
-        data.emotions.laughing,
-        data.emotions.babbling,
-        data.emotions.silence
-      ];
-      emotionDistChart.update();
-      
-      // Update percentages in the UI
-      document.getElementById('cryingPercentage').textContent = data.emotions.crying.toFixed(1) + '%';
-      document.getElementById('laughingPercentage').textContent = data.emotions.laughing.toFixed(1) + '%';
-      document.getElementById('babblingPercentage').textContent = data.emotions.babbling.toFixed(1) + '%';
-      document.getElementById('silencePercentage').textContent = data.emotions.silence.toFixed(1) + '%';
-    }
-    
-    // Update Detection Types chart
-    if (data.detectionConfidence) {
-      detectionTypesChart.data.datasets[0].data = data.detectionCount;
-      detectionTypesChart.data.datasets[1].data = data.detectionConfidence;
-      detectionTypesChart.update();
-      
-      // Update average confidence in the UI
-      if (data.detectionConfidence.length > 0) {
-        const avg = data.detectionConfidence.reduce((a, b) => a + b, 0) / data.detectionConfidence.length;
-        document.getElementById('confidenceAvg').textContent = avg.toFixed(1) + '%';
-      }
-    }
-    
-    // Update CPU Usage chart
-    if (data.cpuUsage) {
-      cpuUsageChart.data.datasets[0].data = data.cpuUsage;
-      cpuUsageChart.update();
-      document.getElementById('currentCpu').textContent = data.cpuUsage[data.cpuUsage.length - 1] + '%';
-    }
-    
-    // Update Memory Usage chart
-    if (data.memoryUsage) {
-      memoryUsageChart.data.datasets[0].data = data.memoryUsage;
-      memoryUsageChart.update();
-      document.getElementById('currentMemory').textContent = data.memoryUsage[data.memoryUsage.length - 1] + '%';
-    }
-  }
-  
-  // Add crying event to detection log
-  function addCryingEvent(timestamp) {
-    const detectionLog = document.getElementById('detectionLogContainer');
-    const newEvent = document.createElement('div');
-    newEvent.className = 'alert-item crying-event';
-    newEvent.innerHTML = `
-      <div class="alert-time">${timestamp}</div>
-      <div class="alert-message">
-        <i class="bi bi-emoji-frown text-danger"></i> Crying detected
-      </div>
-    `;
-    detectionLog.insertBefore(newEvent, detectionLog.firstChild);
-  }
-  
-  // Example of how to use the addCryingEvent function:
-  // addCryingEvent(new Date().toLocaleString());
-  
-  // Time range buttons
-  document.getElementById('timeRange1h').addEventListener('click', function() {
-    this.classList.add('active');
-    document.getElementById('timeRange3h').classList.remove('active');
-    document.getElementById('timeRange24h').classList.remove('active');
-    // Request 1h data from server
-  });
-  
-  document.getElementById('timeRange3h').addEventListener('click', function() {
-    this.classList.add('active');
-    document.getElementById('timeRange1h').classList.remove('active');
-    document.getElementById('timeRange24h').classList.remove('active');
-    // Request 3h data from server
-  });
-  
-  document.getElementById('timeRange24h').addEventListener('click', function() {
-    this.classList.add('active');
-    document.getElementById('timeRange1h').classList.remove('active');
-    document.getElementById('timeRange3h').classList.remove('active');
-    // Request 24h data from server
-  });
-  
-  // Clear detection log
-  document.getElementById('clearDetectionLog').addEventListener('click', function() {
-    document.getElementById('detectionLogContainer').innerHTML = '';
-  });
-  
-  // Export alerts button
-  document.getElementById('exportAlerts').addEventListener('click', function() {
-    const alerts = document.getElementById('alertHistory').innerHTML;
-    const blob = new Blob([alerts], {type: 'text/html'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'baby_monitor_alerts.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  });
-  
-  // Socket.IO connection for real-time updates
-  // This would typically be implemented in metrics.js, but included here as an example
-  /*
-  const socket = io();
-  socket.on('metrics_update', function(data) {
-    updateCharts(data);
-  });
-  
-  socket.on('crying_detected', function(data) {
-    addCryingEvent(new Date(data.timestamp).toLocaleString());
-  });
-  */
-  
-  // For demonstration/testing, update with random data every 2 seconds
-  function generateRandomData() {
-    const randomFPS = Array(20).fill(0).map(() => Math.random() * 20 + 10);
-    const randomDetections = Array(20).fill(0).map(() => Math.floor(Math.random() * 3));
-    const randomConfidence = Array(20).fill(0).map(() => Math.random() * 30 + 70);
-    const randomCPU = Array(20).fill(0).map(() => Math.random() * 50 + 10);
-    const randomMemory = Array(20).fill(0).map(() => Math.random() * 40 + 20);
-    
-    const emotionData = {
-      crying: Math.random() * 20,
-      laughing: Math.random() * 20,
-      babbling: Math.random() * 20
-    };
-    
-    emotionData.silence = 100 - emotionData.crying - emotionData.laughing - emotionData.babbling;
-    
-    // Ensure non-negative values
-    if (emotionData.silence < 0) {
-      emotionData.silence = 0;
-      const total = emotionData.crying + emotionData.laughing + emotionData.babbling;
-      emotionData.crying = (emotionData.crying / total) * 100;
-      emotionData.laughing = (emotionData.laughing / total) * 100;
-      emotionData.babbling = (emotionData.babbling / total) * 100;
-    }
-    
-    updateCharts({
-      fps: randomFPS,
-      detectionCount: randomDetections,
-      detectionConfidence: randomConfidence,
-      cpuUsage: randomCPU,
-      memoryUsage: randomMemory,
-      emotions: emotionData
-    });
-    
-    // Randomly add crying events
-    if (Math.random() < 0.1) {
-      addCryingEvent(new Date().toLocaleString());
-    }
-  }
-  
-  // Uncomment to see demo data
-  // setInterval(generateRandomData, 2000);
-  
-  // Initial update with empty data
-  updateCharts({
-    fps: Array(20).fill(0),
-    detectionCount: Array(20).fill(0),
-    detectionConfidence: Array(20).fill(0),
-    cpuUsage: Array(20).fill(0),
-    memoryUsage: Array(20).fill(0),
-    emotions: {
-      crying: 0,
-      laughing: 0,
-      babbling: 0,
-      silence: 100
-    }
-  });
-});
-</script>
 <script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
 {% endblock %}
