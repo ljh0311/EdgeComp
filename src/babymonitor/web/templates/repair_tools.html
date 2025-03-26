@@ -1021,28 +1021,28 @@ function addCamera() {
     
     if (!cameraName) {
         addLogEntry('warning', 'Please enter a camera name');
-        return;
-    }
-    
+            return;
+        }
+        
     if (!cameraUrl) {
         addLogEntry('warning', 'Please enter a device ID or URL');
-        return;
-    }
-    
+            return;
+        }
+        
     addLogEntry('info', `Adding camera: ${cameraName}`);
     
     fetch(API.cameras.add, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
         body: JSON.stringify({
             name: cameraName,
             device: cameraUrl
         })
     })
     .then(response => {
-        if (!response.ok) {
+            if (!response.ok) {
             return response.json().then(data => {
                 throw new Error(data.message || `Server error: ${response.status}`);
             });
@@ -1074,7 +1074,7 @@ function toggleCameraInput() {
     if (cameraType === 'webcam') {
         webcamSection.style.display = 'block';
         ipCameraSection.style.display = 'none';
-    } else {
+                } else {
         webcamSection.style.display = 'none';
         ipCameraSection.style.display = 'block';
     }
@@ -1174,41 +1174,41 @@ function fetchAvailableModels() {
                     <div class="alert alert-danger">
                         <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Error Loading Models</h6>
                         <p class="mb-0">Please check if the model files are installed correctly in the models directory.</p>
-                    </div>
-                `;
-            }
+        </div>
+    `;
+}
         });
 }
 
 // Populate model select dropdown
 function populateModelSelect(data) {
-    const modelSelect = document.getElementById('modelSelect');
-    if (!modelSelect) return;
-    
-    // Clear existing options
-    modelSelect.innerHTML = '<option value="">Select a model...</option>';
-    
-    // Add options for each available model
-    if (data.models && Array.isArray(data.models)) {
-        data.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = `${model.name} (${model.type})`;
-            if (!model.is_available) {
-                option.disabled = true;
-                option.textContent += ' - Not Available';
-            }
+        const modelSelect = document.getElementById('modelSelect');
+        if (!modelSelect) return;
+        
+        // Clear existing options
+        modelSelect.innerHTML = '<option value="">Select a model...</option>';
+        
+        // Add options for each available model
+        if (data.models && Array.isArray(data.models)) {
+            data.models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = `${model.name} (${model.type})`;
+                if (!model.is_available) {
+                    option.disabled = true;
+                    option.textContent += ' - Not Available';
+                }
             if (data.current_model && data.current_model.id === model.id) {
                 option.selected = true;
                 currentModelId = model.id;
             }
-            modelSelect.appendChild(option);
-        });
-        
+                modelSelect.appendChild(option);
+            });
+            
         // Show info for current model
-        if (data.current_model) {
-            updateModelInfo(data.current_model);
-        }
+            if (data.current_model) {
+                updateModelInfo(data.current_model);
+            }
     }
 }
 
@@ -1229,9 +1229,9 @@ function updateModelInfo(model) {
                     <small class="text-muted">Supported Emotions: ${emotions}</small>
                 </p>
             </div>
-        </div>
-    `;
-}
+                </div>
+            `;
+        }
 
 // Get appropriate badge class for model type
 function getModelTypeClass(type) {
@@ -1259,10 +1259,10 @@ function applyEmotionModel() {
     addLogEntry('info', `Applying model: ${selectedModel}...`);
     
     fetch(API.emotion.switchModel, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
         body: JSON.stringify({ model_id: selectedModel })
     })
     .then(response => {
@@ -1363,7 +1363,7 @@ function restartAudio() {
     });
 }
 
-// Check system status
+        // Check system status
 function checkSystem() {
     {% if mode == "normal" %}
     addLogEntry('info', 'Checking baby monitor status...');
@@ -1571,77 +1571,77 @@ function updateSystemInfo(data) {
             <td>${data.uptime || '00:00:00'}</td>
         </tr>
     `;
-    
+        
     // System Information
     if (data.system_info) {
         html += `
-            <tr>
-                <th colspan="2" class="table-info">System Information</th>
-            </tr>
-            <tr>
-                <td>Operating System:</td>
+        <tr>
+            <th colspan="2" class="table-info">System Information</th>
+        </tr>
+        <tr>
+            <td>Operating System:</td>
                 <td>${data.system_info.os || 'Unknown'}</td>
-            </tr>
-            <tr>
-                <td>Python Version:</td>
+        </tr>
+        <tr>
+            <td>Python Version:</td>
                 <td>${data.system_info.python_version || 'Unknown'}</td>
-            </tr>
-            <tr>
-                <td>OpenCV Version:</td>
+        </tr>
+        <tr>
+            <td>OpenCV Version:</td>
                 <td>${data.system_info.opencv_version || 'Unknown'}</td>
-            </tr>
+        </tr>
         `;
     }
-    
+        
     // Camera Configuration
     if (data.system_info) {
         html += `
-            <tr>
-                <th colspan="2" class="table-info">Camera Configuration</th>
-            </tr>
-            <tr>
-                <td>Resolution:</td>
+        <tr>
+            <th colspan="2" class="table-info">Camera Configuration</th>
+        </tr>
+        <tr>
+            <td>Resolution:</td>
                 <td>${data.system_info.camera_resolution || 'Unknown'}</td>
-            </tr>
-            <tr>
-                <td>Camera Device:</td>
+        </tr>
+        <tr>
+            <td>Camera Device:</td>
                 <td>${data.system_info.camera_device || 'Unknown'}</td>
-            </tr>
+        </tr>
         `;
     }
-    
+        
     // Audio Configuration
     if (data.system_info) {
         html += `
-            <tr>
-                <th colspan="2" class="table-info">Audio Configuration</th>
-            </tr>
-            <tr>
-                <td>Microphone Device:</td>
+        <tr>
+            <th colspan="2" class="table-info">Audio Configuration</th>
+        </tr>
+        <tr>
+            <td>Microphone Device:</td>
                 <td>${data.system_info.microphone_device || 'Unknown'}</td>
-            </tr>
-            <tr>
-                <td>Sample Rate:</td>
+        </tr>
+        <tr>
+            <td>Sample Rate:</td>
                 <td>${data.system_info.audio_sample_rate || 'Unknown'}</td>
-            </tr>
+        </tr>
         `;
     }
-    
+        
     // Emotion Model
     if (data.model_info) {
         html += `
-            <tr>
-                <th colspan="2" class="table-info">Emotion Model</th>
-            </tr>
-            <tr>
-                <td>Current Model:</td>
+        <tr>
+            <th colspan="2" class="table-info">Emotion Model</th>
+        </tr>
+        <tr>
+            <td>Current Model:</td>
                 <td>${data.model_info.name || 'Unknown'} (${data.model_info.type || 'Unknown'})</td>
-            </tr>
-            <tr>
-                <td>Supported Emotions:</td>
+        </tr>
+        <tr>
+            <td>Supported Emotions:</td>
                 <td>${data.model_info.emotions?.join(', ') || 'Unknown'}</td>
-            </tr>
-        `;
+        </tr>
+    `;
     }
     
     table.innerHTML = html;
@@ -1697,7 +1697,7 @@ function clearLog() {
     const log = document.getElementById('statusLog');
     if (log) {
         log.innerHTML = '';
-        addLogEntry('info', 'Log cleared');
+    addLogEntry('info', 'Log cleared');
     }
 }
 

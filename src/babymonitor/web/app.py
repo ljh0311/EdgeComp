@@ -203,7 +203,7 @@ class BabyMonitorWeb:
                         'emotions': []
                     }
                 }), 500
-                
+            
         # System endpoints
         @self.app.route(SYSTEM_CHECK, methods=['GET'])
         def check_system_status():
@@ -439,7 +439,7 @@ class BabyMonitorWeb:
                 data = request.get_json()
                 if not data:
                     return jsonify({'status': 'error', 'message': 'No data provided'}), 400
-                    
+
                 name = data.get('name')
                 device = data.get('device')
                 
@@ -472,8 +472,8 @@ class BabyMonitorWeb:
                         'active': self.active_camera == name
                     })
                     
-                    return jsonify({
-                        'status': 'success',
+                return jsonify({
+                    'status': 'success',
                         'message': f'Camera "{name}" added successfully'
                     })
                 else:
@@ -487,7 +487,7 @@ class BabyMonitorWeb:
                 import traceback
                 logger.error(traceback.format_exc())
                 return jsonify({'status': 'error', 'message': str(e)}), 500
-                
+
         @self.app.route(CAMERA_REMOVE, methods=['POST'])
         def remove_camera():
             """Remove a camera."""
@@ -525,8 +525,8 @@ class BabyMonitorWeb:
                         'id': camera_id
                     })
                     
-                    return jsonify({
-                        'status': 'success',
+                return jsonify({
+                    'status': 'success',
                         'message': f'Camera removed successfully'
                     })
                 else:
@@ -571,8 +571,8 @@ class BabyMonitorWeb:
                         'id': camera_id
                     })
                     
-                    return jsonify({
-                        'status': 'success',
+                return jsonify({
+                    'status': 'success',
                         'message': f'Camera activated successfully'
                     })
                 else:
@@ -684,13 +684,13 @@ class BabyMonitorWeb:
             except Exception as e:
                 logger.error(f"Error stopping system: {str(e)}")
                 return jsonify({'error': str(e)}), 500
-                           
+
         # Favicon
         @self.app.route(FAVICON)
         def favicon():
             """Serve the favicon."""
             return '', 204  # Return empty response with 204 No Content status
-
+            
     def setup_socketio(self):
         """Set up Socket.IO event handlers."""
         @self.socketio.on('connect')
