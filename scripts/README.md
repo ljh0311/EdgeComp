@@ -1,0 +1,68 @@
+# Baby Monitor System - Scripts Directory
+
+This directory contains utility scripts for the Baby Monitor System.
+
+## Directory Structure
+
+- `/install/` - Installation and setup scripts
+- `*.bat` - Windows batch files
+- `*.sh` - Linux/Mac shell scripts
+- `*.py` - Python utility scripts
+
+## Installation Scripts
+
+The `/install/` directory contains comprehensive installation scripts:
+
+- `install.py` - Main installation script with GUI interface
+- `install.bat` - Windows-specific installation wrapper
+- `install.sh` - Linux-specific installation wrapper
+- `install_pi.sh` - Raspberry Pi optimized installation
+- `setup.py` - Core setup functionality
+
+## Utility Scripts
+
+- `run.py` - Main script for running the Baby Monitor System
+- `scripts_manager.bat` / `scripts_manager.sh` - Script management utilities for different platforms
+- `scripts_manager_gui.py` - Graphical interface for script management
+- `scripts_manager_pi.sh` - Raspberry Pi optimized script management
+- `restart_baby_monitor.bat` - Utility to restart the Baby Monitor System on Windows
+
+## Fix Scripts
+
+- `fix_windows.bat` - Fixes common issues on Windows systems
+- `fix_raspberry.sh` - Fixes common issues on Raspberry Pi
+- `fix_metrics.bat` - Fixes metrics-related issues
+
+## Demo Scripts
+
+- `metrics_demo.py` / `metrics_demo.bat` - Demonstrates and tests the metrics system
+
+## Usage
+
+Most scripts can be run directly:
+
+### Windows
+```
+scripts\script_name.bat
+```
+
+### Linux/Mac
+```
+bash scripts/script_name.sh
+```
+
+### Python Scripts
+```
+python scripts/script_name.py
+```
+
+## Adding New Scripts
+
+When adding new scripts to this directory:
+
+1. Follow the naming conventions:
+   - Use `.bat` extension for Windows scripts
+   - Use `.sh` extension for Linux/Mac scripts
+   - Use `.py` extension for Python scripts
+2. Add appropriate comments at the top of the script
+3. Update this README.md if adding a new category of scripts 
