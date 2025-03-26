@@ -347,16 +347,110 @@
     display: inline-flex;
     gap: 5px;
   }
+
+  /* Normal mode styles */
+  .mode-normal .stats-icon {
+    font-size: 2.5rem;
+    margin-bottom: 15px;
+    color: #4caf50;
+  }
+
+  .mode-normal .stat-value {
+    font-size: 2.5rem;
+  }
+
+  .mode-normal .stat-label {
+    font-size: 1rem;
+  }
+
+  /* Family-friendly emotion labels */
+  .mode-normal .emotion-crying .emotion-label:after {
+    content: " (Needs attention)";
+    font-size: 0.8rem;
+    color: #dc3545;
+  }
+
+  .mode-normal .emotion-laughing .emotion-label:after {
+    content: " (Happy)";
+    font-size: 0.8rem;
+    color: #198754;
+  }
+
+  .mode-normal .emotion-babbling .emotion-label:after {
+    content: " (Talking)";
+    font-size: 0.8rem;
+    color: #0dcaf0;
+  }
+
+  .mode-normal .emotion-silence .emotion-label:after {
+    content: " (Quiet)";
+    font-size: 0.8rem;
+    color: #6c757d;
+  }
+
+  /* Simple health indicators for normal mode */
+  .health-status {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-right: 10px;
+  }
+
+  .simple-card {
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .simple-card:hover {
+    transform: translateY(-5px);
+  }
+
+  .simple-card-icon {
+    font-size: 3rem;
+    margin-bottom: 15px;
+  }
+
+  .simple-card-title {
+    font-size: 1.5rem;
+    margin-bottom: 10px;
+  }
+
+  .simple-card-value {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+
+  .simple-card-status {
+    font-size: 1rem;
+    color: #aaa;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4">
+<div class="container-fluid px-4 {% if mode == 'normal' %}mode-normal{% endif %}">
   <!-- Page Header -->
   <div class="page-header d-flex justify-content-between align-items-center">
     <div>
-      <h1 class="page-title">System Metrics</h1>
-      <p class="page-subtitle">Monitor system performance and detection statistics</p>
+      <h1 class="page-title">
+        {% if mode == "normal" %}
+        Baby Monitor Stats
+        {% else %}
+        System Metrics
+        {% endif %}
+      </h1>
+      <p class="page-subtitle">
+        {% if mode == "normal" %}
+        See how your baby is doing
+        {% else %}
+        Monitor system performance and detection statistics
+        {% endif %}
+      </p>
     </div>
     <div class="time-range-controls">
       <button id="timeRange1h" class="btn btn-sm btn-outline-primary active">1h</button>
@@ -365,7 +459,117 @@
     </div>
   </div>
 
-  <!-- System Overview -->
+  {% if mode == "normal" %}
+  <!-- Simple Overview for Normal Mode -->
+  <div class="row">
+    <div class="col-md-3">
+      <div class="simple-card bg-dark">
+        <div class="simple-card-icon">
+          <i class="bi bi-people text-primary"></i>
+        </div>
+        <div class="simple-card-title">Baby Movement</div>
+        <div class="simple-card-value" id="normalDetections">0</div>
+        <div class="simple-card-status">Last detected</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="simple-card bg-dark">
+        <div class="simple-card-icon">
+          <i class="bi bi-emoji-smile text-success"></i>
+        </div>
+        <div class="simple-card-title">Current Sound</div>
+        <div class="simple-card-value" id="normalEmotion">Quiet</div>
+        <div class="simple-card-status">Last 5 minutes</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="simple-card bg-dark">
+        <div class="simple-card-icon">
+          <i class="bi bi-camera-video text-info"></i>
+        </div>
+        <div class="simple-card-title">Camera Status</div>
+        <div class="simple-card-value" id="normalCamera">OK</div>
+        <div class="simple-card-status">Working properly</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="simple-card bg-dark">
+        <div class="simple-card-icon">
+          <i class="bi bi-check-circle text-warning"></i>
+        </div>
+        <div class="simple-card-title">System Health</div>
+        <div class="simple-card-value" id="normalHealth">Good</div>
+        <div class="simple-card-status">All systems normal</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simple Emotion Charts -->
+  <div class="row mt-4">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-emoji-smile"></i> Baby Sounds Over Time</h5>
+        </div>
+        <div class="card-body">
+          <div class="metric-chart-container">
+            <canvas id="emotionDistributionChart"></canvas>
+          </div>
+          <div class="emotion-distribution">
+            <div class="emotion-item emotion-crying">
+              <div class="emotion-icon">
+                <i class="bi bi-emoji-frown"></i>
+              </div>
+              <div class="emotion-value" id="cryingPercentage">0%</div>
+              <div class="emotion-label">Crying</div>
+            </div>
+            <div class="emotion-item emotion-laughing">
+              <div class="emotion-icon">
+                <i class="bi bi-emoji-laughing"></i>
+              </div>
+              <div class="emotion-value" id="laughingPercentage">0%</div>
+              <div class="emotion-label">Laughing</div>
+            </div>
+            <div class="emotion-item emotion-babbling">
+              <div class="emotion-icon">
+                <i class="bi bi-chat-dots"></i>
+              </div>
+              <div class="emotion-value" id="babblingPercentage">0%</div>
+              <div class="emotion-label">Babbling</div>
+            </div>
+            <div class="emotion-item emotion-silence">
+              <div class="emotion-icon">
+                <i class="bi bi-volume-mute"></i>
+              </div>
+              <div class="emotion-value" id="silencePercentage">0%</div>
+              <div class="emotion-label">Silence</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-list-check"></i> Recent Activity</h5>
+        </div>
+        <div class="card-body p-0">
+          <div id="detectionLogContainer" class="alerts-container">
+            <!-- Detection log will be populated here -->
+            <div class="alert-item">
+              <div class="alert-time">System started</div>
+              <div class="alert-message">
+                <i class="bi bi-info-circle text-info"></i> Monitoring started
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  {% else %}
+  <!-- System Overview for Developer Mode -->
   <div class="stats-grid">
     <div class="stat-item">
       <div class="stat-icon">
@@ -586,6 +790,14 @@
                 <td id="cameraResolution">640x480</td>
               </tr>
               <tr>
+                <th>Camera Device:</th>
+                <td id="cameraDevice">Default Camera</td>
+              </tr>
+              <tr>
+                <th>Microphone Device:</th>
+                <td id="microphoneDevice">Default Microphone</td>
+              </tr>
+              <tr>
                 <th>Audio Sample Rate:</th>
                 <td id="audioSampleRate">16000 Hz</td>
               </tr>
@@ -669,10 +881,71 @@
       </div>
     </div>
   </div>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Add global mode variable to be used in JS
+const appMode = "{{ mode }}";
+</script>
 <script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
+<script>
+// Additional JavaScript for normal mode
+{% if mode == "normal" %}
+document.addEventListener('DOMContentLoaded', function() {
+  // Function to update the simple cards in normal mode
+  function updateNormalModeCards(data) {
+    if (!data) return;
+    
+    // Update movement detection
+    if (data.detections !== undefined) {
+      document.getElementById('normalDetections').textContent = data.detections;
+    }
+    
+    // Update emotion
+    if (data.emotion) {
+      let emotion = data.emotion;
+      let displayEmotion = "Quiet";
+      
+      if (emotion === "crying") displayEmotion = "Crying";
+      else if (emotion === "laughing") displayEmotion = "Laughing";
+      else if (emotion === "babbling") displayEmotion = "Babbling";
+      
+      document.getElementById('normalEmotion').textContent = displayEmotion;
+    }
+    
+    // Update camera status
+    if (data.camera_status !== undefined) {
+      let cameraStatus = "OK";
+      
+      if (data.camera_status === "error") cameraStatus = "Problem";
+      else if (data.camera_status === "warning") cameraStatus = "Warning";
+      
+      document.getElementById('normalCamera').textContent = cameraStatus;
+    }
+    
+    // Update system health
+    if (data.cpu_usage !== undefined && data.memory_usage !== undefined) {
+      let healthStatus = "Good";
+      
+      if (data.cpu_usage > 80 || data.memory_usage > 80) {
+        healthStatus = "Critical";
+      } else if (data.cpu_usage > 60 || data.memory_usage > 60) {
+        healthStatus = "Warning";
+      }
+      
+      document.getElementById('normalHealth').textContent = healthStatus;
+    }
+  }
+  
+  // Add socket.io listener for metrics updates
+  socket.on('metrics_update', function(data) {
+    updateNormalModeCards(data);
+  });
+});
+{% endif %}
+</script>
 {% endblock %}

@@ -272,6 +272,74 @@
             max-height: 70vh;
         }
         }
+
+    .camera-selector-overlay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 180px;
+        z-index: 2;
+        opacity: 0.6;
+        transition: opacity 0.3s;
+    }
+    
+    .camera-selector-overlay:hover {
+        opacity: 1;
+    }
+    
+    #cameraSelector {
+        background-color: rgba(0, 0, 0, 0.7);
+        border: 1px solid #444;
+        color: white;
+        font-size: 0.8rem;
+    }
+    
+    .multi-camera-layout {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    
+    .camera-item {
+        position: relative;
+        border-radius: 5px;
+        overflow: hidden;
+        background-color: #000;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .camera-item::before {
+        content: "";
+        display: block;
+        padding-top: 75%;
+    }
+    
+    .camera-feed {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    
+    .camera-name {
+        position: absolute;
+        top: 5px;
+        left: 5px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+        font-size: 0.8rem;
+    }
+    
+    @media (max-width: 576px) {
+        .multi-camera-layout {
+            grid-template-columns: 1fr;
+        }
+    }
     </style>
 {% endblock %}
 
@@ -280,13 +348,18 @@
     <div class="row g-3">
         <div class="col-lg-8">
             <!-- Video Feed -->
-                <div class="video-container">
-                    <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
-                    <div class="status-overlay">
+            <div class="video-container">
+                <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
+                <div class="status-overlay">
                     <i class="bi bi-circle-fill text-success"></i> Live
                 </div>
                 <div class="emotion-overlay" id="emotionOverlay">
                     <i class="bi bi-emoji-neutral"></i> Monitoring...
+                </div>
+                <div class="camera-selector-overlay">
+                    <select id="cameraSelector" class="form-select form-select-sm">
+                        <option value="">Loading cameras...</option>
+                    </select>
                 </div>
             </div>
 
@@ -297,32 +370,24 @@
                     <small class="text-muted" id="lastUpdate"></small>
                 </div>
                 <div class="card-body">
-                    <div class="position-relative">
-                        <div class="progress emotion-progress">
-                            <div id="cryingProgress" class="progress-bar bg-danger" role="progressbar" style="width: 0%"></div>
-                        </div>
-                        <div class="emotion-label">Crying: <span id="cryingValue">0%</span></div>
+                    <!-- Current model display -->
+                    <div class="d-flex justify-content-between mb-3">
+                        <span><strong>Model:</strong> <span id="currentModelName">Loading...</span></span>
+                        <span id="modelSwitchBtn" class="badge bg-primary rounded-pill" style="cursor: pointer;">Switch Model</span>
                     </div>
-                    <div class="position-relative">
-                        <div class="progress emotion-progress">
-                            <div id="laughingProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                    
+                    <!-- Dynamic emotion progress bars container -->
+                    <div id="emotionProgressContainer">
+                        <!-- Progress bars will be generated dynamically -->
+                        <div class="text-center p-3">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading emotion data...</p>
                         </div>
-                        <div class="emotion-label">Laughing: <span id="laughingValue">0%</span></div>
-                    </div>
-                    <div class="position-relative">
-                        <div class="progress emotion-progress">
-                            <div id="babblingProgress" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
-                        </div>
-                        <div class="emotion-label">Babbling: <span id="babblingValue">0%</span></div>
-                    </div>
-                    <div class="position-relative">
-                        <div class="progress emotion-progress">
-                            <div id="silenceProgress" class="progress-bar bg-secondary" role="progressbar" style="width: 0%"></div>
-                        </div>
-                        <div class="emotion-label">Silence: <span id="silenceValue">0%</span></div>
-                    </div>
                     </div>
                 </div>
+            </div>
                 
                 <!-- Alert History -->
                 <div class="card dashboard-card">
@@ -428,26 +493,67 @@
     // Track connection status
     let socketConnected = false;
     
+    // Current model info
+    let currentModel = {
+        id: 'basic_emotion',
+        name: 'Basic Emotion',
+        emotions: ['crying', 'laughing', 'babbling', 'silence']
+    };
+    
+    // Emotion colors mapping
+    const emotionColorMap = {
+        'crying': 'bg-danger',
+        'laughing': 'bg-success',
+        'babbling': 'bg-info',
+        'silence': 'bg-secondary',
+        'happy': 'bg-success',
+        'sad': 'bg-danger',
+        'angry': 'bg-warning',
+        'neutral': 'bg-secondary',
+        'not_crying': 'bg-success'
+    };
+    
     // Emotion detection buffer
     const EMOTION_BUFFER_SIZE = 5;
-    let emotionBuffer = {
-        crying: [],
-        laughing: [],
-        babbling: [],
-        silence: []
-    };
+    let emotionBuffer = {};
     let emotionBufferCount = 0;
     
     socket.on('connect', function() {
         console.log('Connected to server');
         socketConnected = true;
         addAlert('info', 'Connected to baby monitor server');
+        
+        // Request camera list
+        fetchCameraList();
+        
+        // Request system info to get model details
+        fetchSystemInfo();
     });
     
     socket.on('disconnect', function() {
         console.log('Disconnected from server');
         socketConnected = false;
         addAlert('danger', 'Disconnected from baby monitor server');
+    });
+    
+    // Handler for emotion model changes
+    socket.on('emotion_model_changed', function(modelInfo) {
+        console.log('Emotion model changed:', modelInfo);
+        
+        // Update current model info
+        currentModel = modelInfo;
+        
+        // Update model display
+        updateModelDisplay();
+        
+        // Regenerate emotion progress bars for new model
+        generateEmotionProgressBars();
+        
+        // Reset emotion buffer for new model emotions
+        resetEmotionBuffer();
+        
+        // Add to alert history
+        addAlertToHistory('info', `Emotion model changed to ${modelInfo.name}`);
     });
 
     // Update emotion overlay and progress bars
@@ -457,21 +563,25 @@
         const confidences = data.confidences;
         
         // Add new emotion data to buffer
-        emotionBuffer.crying.push(confidences.crying);
-        emotionBuffer.laughing.push(confidences.laughing);
-        emotionBuffer.babbling.push(confidences.babbling);
-        emotionBuffer.silence.push(confidences.silence);
+        for (const [emotionKey, value] of Object.entries(confidences)) {
+            if (!emotionBuffer[emotionKey]) {
+                emotionBuffer[emotionKey] = [];
+            }
+            emotionBuffer[emotionKey].push(value);
+        }
         emotionBufferCount++;
         
-        // Only update UI and send alerts after collecting 5 instances
+        // Only update UI and send alerts after collecting enough instances
         if (emotionBufferCount >= EMOTION_BUFFER_SIZE) {
             // Calculate averages
-            const averages = {
-                crying: emotionBuffer.crying.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
-                laughing: emotionBuffer.laughing.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
-                babbling: emotionBuffer.babbling.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE,
-                silence: emotionBuffer.silence.reduce((a, b) => a + b, 0) / EMOTION_BUFFER_SIZE
-            };
+            const averages = {};
+            for (const emotionKey of currentModel.emotions) {
+                if (emotionBuffer[emotionKey] && emotionBuffer[emotionKey].length > 0) {
+                    averages[emotionKey] = emotionBuffer[emotionKey].reduce((a, b) => a + b, 0) / emotionBuffer[emotionKey].length;
+                } else {
+                    averages[emotionKey] = 0;
+                }
+            }
             
             // Find the dominant emotion
             const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b)[0];
@@ -481,18 +591,21 @@
             overlay.className = 'emotion-overlay';
             
             let icon = 'emoji-neutral';
-            if (dominantEmotion === 'crying') {
+            if (dominantEmotion === 'crying' || dominantEmotion === 'sad') {
                 overlay.classList.add('emotion-crying');
                 icon = 'emoji-frown';
-            } else if (dominantEmotion === 'laughing') {
+            } else if (dominantEmotion === 'laughing' || dominantEmotion === 'happy') {
                 overlay.classList.add('emotion-laughing');
                 icon = 'emoji-smile';
             } else if (dominantEmotion === 'babbling') {
                 overlay.classList.add('emotion-babbling');
                 icon = 'emoji-laughing';
+            } else if (dominantEmotion === 'angry') {
+                overlay.classList.add('emotion-crying');
+                icon = 'emoji-angry';
             }
             
-            overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${dominantEmotion} (${(averages[dominantEmotion] * 100).toFixed(1)}%)`;
+            overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${capitalizeFirstLetter(dominantEmotion)} (${(averages[dominantEmotion] * 100).toFixed(1)}%)`;
             
             // Update progress bars with averages
             for (const [emotion, value] of Object.entries(averages)) {
@@ -511,25 +624,125 @@
             lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
             
             // Add alert for crying if average confidence is high
-            if (dominantEmotion === 'crying' && averages.crying > 0.7) {
+            if ((dominantEmotion === 'crying' || dominantEmotion === 'sad') && averages[dominantEmotion] > 0.7) {
                 addAlert('warning', 'Baby is crying with high confidence!');
                 addAlertToHistory('warning', 'Baby is crying with high confidence!');
             }
             
             // Reset buffer
-            emotionBuffer = {
-                crying: [],
-                laughing: [],
-                babbling: [],
-                silence: []
-            };
-            emotionBufferCount = 0;
+            resetEmotionBuffer();
         }
     });
     
-    // Update system status
-    socket.on('system_info', function(data) {
-        document.getElementById('uptime').textContent = data.uptime;
+    // Function to reset emotion buffer
+    function resetEmotionBuffer() {
+        emotionBuffer = {};
+        currentModel.emotions.forEach(emotion => {
+            emotionBuffer[emotion] = [];
+        });
+        emotionBufferCount = 0;
+    }
+    
+    // Function to fetch system info and update model display
+    function fetchSystemInfo() {
+        fetch('/api/system_info')
+            .then(response => response.json())
+            .then(data => {
+                console.log('System info:', data);
+                
+                // Update model info if available
+                if (data.emotion_model) {
+                    currentModel = data.emotion_model;
+                    updateModelDisplay();
+                    generateEmotionProgressBars();
+                    resetEmotionBuffer();
+                }
+                
+                // Also update system status from this call
+                updateSystemStatus(data);
+            })
+            .catch(error => {
+                console.error('Error fetching system info:', error);
+                addAlert('danger', 'Error fetching system info');
+            });
+    }
+    
+    // Function to update model display
+    function updateModelDisplay() {
+        const modelNameElement = document.getElementById('currentModelName');
+        if (modelNameElement) {
+            modelNameElement.textContent = currentModel.name || 'Unknown Model';
+        }
+    }
+    
+    // Function to generate emotion progress bars
+    function generateEmotionProgressBars() {
+        const container = document.getElementById('emotionProgressContainer');
+        if (!container) return;
+        
+        // Clear container
+        container.innerHTML = '';
+        
+        // Add progress bar for each emotion
+        currentModel.emotions.forEach(emotion => {
+            const emotionDiv = document.createElement('div');
+            emotionDiv.className = 'position-relative';
+            
+            // Get color class for this emotion
+            const colorClass = emotionColorMap[emotion] || 'bg-secondary';
+            
+            emotionDiv.innerHTML = `
+                <div class="progress emotion-progress">
+                    <div id="${emotion}Progress" class="progress-bar ${colorClass}" role="progressbar" style="width: 0%"></div>
+                    <div class="emotion-label">${capitalizeFirstLetter(emotion)}: <span id="${emotion}Value">0%</span></div>
+                </div>
+            `;
+            
+            container.appendChild(emotionDiv);
+        });
+        
+        // Re-attach model switch button click handler
+        attachModelSwitchButtonHandler();
+    }
+    
+    // Function to attach click handler to model switch button
+    function attachModelSwitchButtonHandler() {
+        const modelSwitchBtn = document.getElementById('modelSwitchBtn');
+        if (modelSwitchBtn) {
+            modelSwitchBtn.addEventListener('click', function() {
+                // Redirect to repair tools page
+                window.location.href = '/repair';
+            });
+        }
+    }
+    
+    // Add document ready handler to initialize UI
+    document.addEventListener('DOMContentLoaded', function() {
+        // Attach model switch button click handler
+        attachModelSwitchButtonHandler();
+        
+        // Add click handler for clearing alerts
+        const clearAlertsBtn = document.getElementById('clearAlerts');
+        if (clearAlertsBtn) {
+            clearAlertsBtn.addEventListener('click', function() {
+                const alertHistory = document.getElementById('alertHistoryContainer');
+                if (alertHistory) {
+                    // Keep only the first alert (system started)
+                    while (alertHistory.children.length > 1) {
+                        alertHistory.removeChild(alertHistory.lastChild);
+                    }
+                }
+            });
+        }
+    });
+    
+    // Function to update system status from data
+    function updateSystemStatus(data) {
+        // Update uptime
+        const uptimeElement = document.getElementById('uptime');
+        if (uptimeElement && data.uptime) {
+            uptimeElement.textContent = data.uptime;
+        }
         
         // Update camera status
         const cameraStatus = document.getElementById('cameraStatus');
@@ -555,10 +768,10 @@
             emotionDetectorStatus.className = getStatusClass(status);
         }
         
-        // Update CPU and memory bars
+        // Update CPU usage
         const cpuBar = document.getElementById('cpuUsage');
-        if (cpuBar) {
-            const cpuUsage = data.cpu_usage || 0;
+        if (cpuBar && data.cpu_usage !== undefined) {
+            const cpuUsage = data.cpu_usage;
             cpuBar.style.width = `${cpuUsage}%`;
             cpuBar.title = `${cpuUsage.toFixed(1)}%`;
             
@@ -572,9 +785,10 @@
             }
         }
         
+        // Update memory usage
         const memBar = document.getElementById('memoryUsage');
-        if (memBar) {
-            const memUsage = data.memory_usage || 0;
+        if (memBar && data.memory_usage !== undefined) {
+            const memUsage = data.memory_usage;
             memBar.style.width = `${memUsage}%`;
             memBar.title = `${memUsage.toFixed(1)}%`;
             
@@ -587,6 +801,11 @@
                 memBar.className = 'progress-bar bg-danger';
             }
         }
+    }
+
+    // Update system status
+    socket.on('system_info', function(data) {
+        updateSystemStatus(data);
     });
     
     // Listen for alert events from server
@@ -676,15 +895,6 @@
         }
     }
     
-    // Clear alerts button
-    document.getElementById('clearAlerts').addEventListener('click', function() {
-        const alertHistory = document.getElementById('alertHistoryContainer');
-        if (alertHistory) {
-            alertHistory.innerHTML = '';
-            addAlertToHistory('info', 'Alert history cleared');
-        }
-    });
-    
     // Export alerts button
     document.getElementById('exportAlerts').addEventListener('click', function() {
         const alertHistory = document.getElementById('alertHistoryContainer');
@@ -736,6 +946,157 @@
         const hours = String(date.getHours()).padStart(2, '0');
         const minutes = String(date.getMinutes()).padStart(2, '0');
         return `${year}-${month}-${day}_${hours}-${minutes}`;
+    }
+
+    // Camera selection
+    function fetchCameraList() {
+        fetch('/api/cameras')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch cameras: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                updateCameraSelector(data.cameras || []);
+            })
+            .catch(error => {
+                console.error('Error fetching cameras:', error);
+            });
+    }
+    
+    function updateCameraSelector(cameras) {
+        const selectorContainer = document.querySelector('.camera-selector-overlay');
+        const selector = document.getElementById('cameraSelector');
+        if (!selectorContainer || !selector) return;
+        
+        // If there's only one camera, replace the dropdown with a simple label
+        if (cameras && cameras.length === 1) {
+            // Create a static camera label instead of dropdown
+            const cameraLabel = document.createElement('div');
+            cameraLabel.className = 'camera-label';
+            cameraLabel.innerHTML = `<i class="bi bi-camera-video"></i> Camera 1`;
+            cameraLabel.style.color = 'white';
+            cameraLabel.style.background = 'rgba(0, 0, 0, 0.7)';
+            cameraLabel.style.padding = '5px 10px';
+            cameraLabel.style.borderRadius = '4px';
+            cameraLabel.style.fontSize = '0.8rem';
+            
+            // Replace the selector with the label
+            selectorContainer.innerHTML = '';
+            selectorContainer.appendChild(cameraLabel);
+            
+            // Automatically activate the single camera if needed
+            if (!cameras[0].active) {
+                switchCamera(cameras[0].id);
+            }
+            
+            return;
+        }
+        
+        // Normal case with multiple cameras - use dropdown
+        // Clear existing options
+        selector.innerHTML = '';
+        
+        // Add options for each camera
+        if (cameras && cameras.length > 0) {
+            // Add option to view all cameras
+            if (cameras.length > 1) {
+                const allOption = document.createElement('option');
+                allOption.value = "all";
+                allOption.textContent = "View All Cameras";
+                selector.appendChild(allOption);
+            }
+            
+            cameras.forEach((camera, index) => {
+                const option = document.createElement('option');
+                option.value = camera.id;
+                // Use "Camera 1", "Camera 2", etc. if no name is provided
+                option.textContent = camera.name || `Camera ${index + 1}`;
+                if (camera.active) {
+                    option.selected = true;
+                }
+                selector.appendChild(option);
+            });
+            
+            // Add event listener for camera switching
+            selector.addEventListener('change', function() {
+                const selectedValue = this.value;
+                
+                if (selectedValue === "all") {
+                    showAllCameras(cameras);
+                } else {
+                    switchCamera(selectedValue);
+                }
+            });
+        } else {
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No cameras available";
+            selector.appendChild(option);
+        }
+    }
+    
+    function switchCamera(cameraId) {
+        if (!cameraId) return;
+        
+        fetch('/api/cameras/activate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ camera_id: cameraId })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Failed to switch camera: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Camera switched:', data);
+            // Update the video feed
+            const videoFeed = document.querySelector('.video-feed');
+            if (videoFeed) {
+                // Force reload the video feed by updating the src with a timestamp
+                const timestamp = new Date().getTime();
+                videoFeed.src = `${videoFeed.src.split('?')[0]}?t=${timestamp}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error switching camera:', error);
+            addAlert('danger', `Error switching camera: ${error.message}`);
+        });
+    }
+    
+    function showAllCameras(cameras) {
+        // Find the main video container
+        const mainContainer = document.querySelector('.video-container');
+        if (!mainContainer) return;
+        
+        // Create grid layout for multiple cameras
+        const multiCameraLayout = document.createElement('div');
+        multiCameraLayout.className = 'multi-camera-layout';
+        
+        // Add all cameras to the grid
+        cameras.forEach(camera => {
+            const cameraItem = document.createElement('div');
+            cameraItem.className = 'camera-item';
+            cameraItem.innerHTML = `
+                <img src="/api/cameras/${camera.id}/feed" class="camera-feed" alt="${camera.name}">
+                <div class="camera-name">${camera.name}</div>
+            `;
+            multiCameraLayout.appendChild(cameraItem);
+            
+            // Add click handler to switch to this camera
+            cameraItem.addEventListener('click', function() {
+                document.getElementById('cameraSelector').value = camera.id;
+                switchCamera(camera.id);
+            });
+        });
+        
+        // Replace the main video container with the grid
+        mainContainer.parentNode.replaceChild(multiCameraLayout, mainContainer);
     }
     </script>
 {% endblock %} 

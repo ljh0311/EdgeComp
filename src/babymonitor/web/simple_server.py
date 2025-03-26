@@ -94,6 +94,10 @@ class SimpleBabyMonitorWeb:
             'total_detections': 0,
         }
         
+        # Initialize emotion distribution with supported emotions
+        if emotion_detector and hasattr(emotion_detector, 'emotions'):
+            self.metrics['history']['emotions'] = {emotion: 0 for emotion in emotion_detector.emotions}
+        
         # System status
         self.system_status = {
             'uptime': '00:00:00',
@@ -103,6 +107,10 @@ class SimpleBabyMonitorWeb:
             'person_detector_status': 'running' if self.person_detector else 'stopped',
             'emotion_detector_status': 'running' if self.emotion_detector else 'stopped',
         }
+        
+        # Activity log for emotion events
+        self.emotion_log = []
+        self.max_log_entries = 50  # Keep last 50 entries
         
         # Running flag
         self.running = False
@@ -136,12 +144,12 @@ class SimpleBabyMonitorWeb:
             """Main page"""
             if self.mode == "dev":
                 return redirect(url_for('metrics'))
-            return render_template('index.html', mode=self.mode)
+            return render_template('index.html', mode=self.mode, dev_mode=self.mode == "dev")
         
         @self.app.route('/metrics')
         def metrics():
             """Metrics page"""
-            return render_template('metrics.html', mode=self.mode)
+            return render_template('metrics.html', mode=self.mode, dev_mode=self.mode == "dev")
         
         @self.app.route('/video_feed')
         def video_feed():
@@ -152,6 +160,30 @@ class SimpleBabyMonitorWeb:
         @self.app.route('/api/metrics')
         def api_metrics():
             """API endpoint for metrics"""
+            # Get time range from query parameter
+            time_range = request.args.get('time_range', '1h')
+            
+            # Get emotion history from detector if available
+            emotion_history = {}
+            emotion_percentages = {}
+            emotion_timeline = []
+            supported_emotions = []
+            
+            if self.emotion_detector and hasattr(self.emotion_detector, 'get_emotion_history'):
+                try:
+                    history_data = self.emotion_detector.get_emotion_history(time_range)
+                    emotion_percentages = history_data.get('percentages', {})
+                    emotion_timeline = history_data.get('emotions', [])
+                    supported_emotions = self.emotion_detector.emotions
+                except Exception as e:
+                    logger.error(f"Error getting emotion history: {str(e)}")
+            else:
+                # Use current simple metrics as fallback
+                if hasattr(self, 'metrics') and 'history' in self.metrics:
+                    emotion_counts = self.metrics['history'].get('emotions', {})
+                    total = sum(emotion_counts.values()) or 1  # Avoid division by zero
+                    emotion_percentages = {k: (v / total * 100) for k, v in emotion_counts.items()}
+            
             # Enhanced metrics structure to match what the metrics.js expects
             metrics_data = {
                 'current': {
@@ -160,7 +192,11 @@ class SimpleBabyMonitorWeb:
                     'emotion': self.metrics['current'].get('emotion', 'unknown'),
                     'emotion_confidence': self.metrics['current'].get('emotion_confidence', 0.0),
                 },
-                'history': self.metrics['history'],
+                'history': {
+                    'emotions': emotion_percentages
+                },
+                'emotion_timeline': emotion_timeline,
+                'supported_emotions': supported_emotions,
                 'detection_types': self.metrics['detection_types'],
                 'total_detections': self.metrics.get('total_detections', 0),
                 # Add YOLOv8 specific metrics
@@ -192,18 +228,78 @@ class SimpleBabyMonitorWeb:
                         confidence_sum = sum(d.get('confidence', 0) for d in detections)
                         if len(detections) > 0:
                             metrics_data['detection_confidence_avg'] = confidence_sum / len(detections)
+                            
+            # Add model info if emotion detector is available
+            if self.emotion_detector:
+                metrics_data['emotion_model'] = {
+                    'id': getattr(self.emotion_detector, 'model_id', 'unknown'),
+                    'name': getattr(self.emotion_detector, 'model_info', {}).get('name', 'Unknown Model'),
+                    'emotions': getattr(self.emotion_detector, 'emotions', ['unknown']),
+                }
+                
+            # Add recent emotion log entries
+            metrics_data['emotion_log'] = self.emotion_log[-10:]  # Last 10 entries
             
             return jsonify(metrics_data)
+        
+        @self.app.route('/api/emotion_history')
+        def api_emotion_history():
+            """API endpoint for detailed emotion history"""
+            time_range = request.args.get('time_range', '1h')
+            
+            if self.emotion_detector and hasattr(self.emotion_detector, 'get_emotion_history'):
+                try:
+                    history_data = self.emotion_detector.get_emotion_history(time_range)
+                    return jsonify({
+                        'status': 'success',
+                        'history': history_data
+                    })
+                except Exception as e:
+                    logger.error(f"Error getting emotion history: {str(e)}")
+                    return jsonify({
+                        'status': 'error',
+                        'message': str(e)
+                    }), 500
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Emotion detector not available or does not support history'
+                }), 404
+        
+        @self.app.route('/api/emotion_log')
+        def api_emotion_log():
+            """API endpoint for emotion event log"""
+            return jsonify({
+                'status': 'success',
+                'log': self.emotion_log
+            })
         
         @self.app.route('/api/system_info')
         def api_system_info():
             """API endpoint for system info"""
-            return jsonify(self.system_status)
+            info = self.system_status.copy()
+            
+            # Add emotion model info if available
+            if self.emotion_detector:
+                info['emotion_model'] = {
+                    'id': getattr(self.emotion_detector, 'model_id', 'unknown'),
+                    'name': getattr(self.emotion_detector, 'model_info', {}).get('name', 'Unknown Model'),
+                    'emotions': getattr(self.emotion_detector, 'emotions', ['unknown']),
+                }
+                
+                # Add available models if the method exists
+                if hasattr(self.emotion_detector, 'get_available_models'):
+                    try:
+                        info['available_emotion_models'] = self.emotion_detector.get_available_models()
+                    except Exception as e:
+                        logger.error(f"Error getting available emotion models: {str(e)}")
+            
+            return jsonify(info)
         
         @self.app.route('/repair')
         def repair_tools():
             """Repair tools page"""
-            return render_template('repair_tools.html', mode=self.mode)
+            return render_template('repair_tools.html', mode=self.mode, dev_mode=self.mode == "dev")
         
         @self.app.route('/repair/run', methods=['POST'])
         def repair_run():
@@ -235,20 +331,110 @@ class SimpleBabyMonitorWeb:
                         self.person_detector.reset()
                     return jsonify({'status': 'success', 'message': 'System restarted successfully'})
                 
+                elif tool == 'switch_emotion_model':
+                    model_id = request.form.get('model_id')
+                    if not model_id:
+                        return jsonify({'status': 'error', 'message': 'No model ID provided'})
+                        
+                    if self.emotion_detector and hasattr(self.emotion_detector, 'switch_model'):
+                        try:
+                            result = self.emotion_detector.switch_model(model_id)
+                            # Update metrics to reflect new emotion set
+                            if 'model_info' in result and 'emotions' in result['model_info']:
+                                self.metrics['history']['emotions'] = {emotion: 0 for emotion in result['model_info']['emotions']}
+                                
+                            # Emit model change event
+                            self.socketio.emit('emotion_model_changed', result['model_info'])
+                            
+                            return jsonify({
+                                'status': 'success', 
+                                'message': f"Switched to model: {result['model_info']['name']}",
+                                'model_info': result['model_info']
+                            })
+                        except Exception as e:
+                            logger.error(f"Error switching emotion model: {str(e)}")
+                            return jsonify({'status': 'error', 'message': str(e)})
+                    return jsonify({'status': 'error', 'message': 'Emotion detector not initialized or does not support model switching'})
+                
                 return jsonify({'status': 'error', 'message': 'Invalid repair tool'})
             except Exception as e:
                 return jsonify({'status': 'error', 'message': str(e)})
+        
+        # Endpoint for emotion model actions
+        @self.app.route('/api/emotion/models', methods=['GET'])
+        def get_emotion_models():
+            """Get available emotion models"""
+            if self.emotion_detector and hasattr(self.emotion_detector, 'get_available_models'):
+                try:
+                    models_data = self.emotion_detector.get_available_models()
+                    return jsonify(models_data)
+                except Exception as e:
+                    logger.error(f"Error getting emotion models: {str(e)}")
+                    return jsonify({'error': str(e)}), 500
+            return jsonify({'error': 'Emotion detector not initialized or does not support model listing'}), 404
+        
+        @self.app.route('/api/emotion/switch_model', methods=['POST'])
+        def switch_emotion_model():
+            """Switch to a different emotion model"""
+            if not self.emotion_detector or not hasattr(self.emotion_detector, 'switch_model'):
+                return jsonify({'error': 'Emotion detector not initialized or does not support model switching'}), 404
+                
+            try:
+                data = request.get_json()
+                if not data or 'model_id' not in data:
+                    return jsonify({'error': 'No model ID provided'}), 400
+                    
+                model_id = data.get('model_id')
+                result = self.emotion_detector.switch_model(model_id)
+                
+                # Update metrics to reflect new emotion set
+                if 'model_info' in result and 'emotions' in result['model_info']:
+                    self.metrics['history']['emotions'] = {emotion: 0 for emotion in result['model_info']['emotions']}
+                    
+                # Emit model change event
+                self.socketio.emit('emotion_model_changed', result['model_info'])
+                
+                # Log the model change
+                self._add_to_emotion_log({
+                    'type': 'model_changed',
+                    'model': result['model_info']['name'],
+                    'timestamp': time.time()
+                })
+                
+                return jsonify({
+                    'status': 'success', 
+                    'message': f"Switched to model: {result['model_info']['name']}",
+                    'model_info': result['model_info']
+                })
+            except Exception as e:
+                logger.error(f"Error switching emotion model: {str(e)}")
+                return jsonify({'status': 'error', 'message': str(e)}), 500
+        
+        # Socket.io events
+        @self.socketio.on('request_metrics')
+        def handle_request_metrics(data):
+            """Handle request for metrics data"""
+            time_range = data.get('timeRange', '1h')
+            
+            # Get emotion history from detector
+            if self.emotion_detector and hasattr(self.emotion_detector, 'get_emotion_history'):
+                try:
+                    history_data = self.emotion_detector.get_emotion_history(time_range)
+                    # Emit history data
+                    self.socketio.emit('emotion_history', history_data)
+                except Exception as e:
+                    logger.error(f"Error getting emotion history: {str(e)}")
         
         if self.mode == "dev":
             @self.app.route('/dev/tools')
             def dev_tools():
                 """Developer tools page"""
-                return render_template('dev_tools.html')
+                return render_template('dev_tools.html', mode=self.mode, dev_mode=True)
             
             @self.app.route('/dev/logs')
             def dev_logs():
                 """Logs page"""
-                return render_template('logs.html')
+                return render_template('logs.html', mode=self.mode, dev_mode=True)
     
     def _generate_frames(self):
         """Generate video frames for streaming"""
@@ -281,6 +467,13 @@ class SimpleBabyMonitorWeb:
                 logger.error(traceback.format_exc())
                 time.sleep(0.1)
     
+    def _add_to_emotion_log(self, entry):
+        """Add an entry to the emotion log"""
+        self.emotion_log.append(entry)
+        # Trim log if it gets too big
+        if len(self.emotion_log) > self.max_log_entries:
+            self.emotion_log = self.emotion_log[-self.max_log_entries:]
+    
     def _process_frames(self):
         """Process frames from camera"""
         import cv2
@@ -290,6 +483,9 @@ class SimpleBabyMonitorWeb:
         max_history = 5
         last_fps_time = time.time()
         frame_count = 0
+        
+        # Set initial emotion timestamp
+        last_emotion_log_time = time.time()
         
         while self.running:
             try:
@@ -319,19 +515,43 @@ class SimpleBabyMonitorWeb:
                     try:
                         emotion_results = self.emotion_detector.get_current_state()
                         if emotion_results:
+                            current_emotion = emotion_results['emotion']
+                            confidence = emotion_results['confidence']
+                            
+                            # Only log emotion changes or high confidence emissions
+                            should_log = False
+                            
+                            # Log emotion changes
+                            if current_emotion != self.metrics['current'].get('emotion', 'unknown'):
+                                should_log = True
+                                
+                            # Log high confidence emotions periodically
+                            elif confidence > 0.7 and (current_time - last_emotion_log_time) > 60:  # Log once per minute
+                                should_log = True
+                                last_emotion_log_time = current_time
+                            
                             # Update current emotion metrics
-                            self.metrics['current']['emotion'] = emotion_results['emotion']
-                            self.metrics['current']['emotion_confidence'] = emotion_results['confidence']
+                            self.metrics['current']['emotion'] = current_emotion
+                            self.metrics['current']['emotion_confidence'] = confidence
                             
                             # Update emotion history
-                            emotion = emotion_results['emotion']
-                            if emotion in self.metrics['history']['emotions']:
-                                self.metrics['history']['emotions'][emotion] += 1
+                            if current_emotion in self.metrics['history']['emotions']:
+                                self.metrics['history']['emotions'][current_emotion] += 1
+                            
+                            # Add to emotion log if needed
+                            if should_log:
+                                log_entry = {
+                                    'timestamp': current_time,
+                                    'emotion': current_emotion,
+                                    'confidence': confidence,
+                                    'message': self._get_emotion_message(current_emotion, confidence)
+                                }
+                                self._add_to_emotion_log(log_entry)
                             
                             # Emit emotion update via Socket.IO
                             self.socketio.emit('emotion_update', {
-                                'emotion': emotion_results['emotion'],
-                                'confidence': emotion_results['confidence'],
+                                'emotion': current_emotion,
+                                'confidence': confidence,
                                 'confidences': emotion_results['confidences']
                             })
                     except Exception as e:
@@ -386,6 +606,27 @@ class SimpleBabyMonitorWeb:
                 logger.error(traceback.format_exc())
                 time.sleep(0.1)
     
+    def _get_emotion_message(self, emotion, confidence):
+        """Get a human-readable message for an emotion detection"""
+        if emotion == 'crying':
+            if confidence > 0.85:
+                return "Baby is crying loudly! Needs immediate attention."
+            elif confidence > 0.7:
+                return "Baby is crying. May need attention."
+            else:
+                return "Baby might be starting to cry."
+        elif emotion == 'laughing':
+            if confidence > 0.8:
+                return "Baby is happily laughing!"
+            else:
+                return "Baby is making happy sounds."
+        elif emotion == 'babbling':
+            return "Baby is babbling or talking."
+        elif emotion == 'silence':
+            return "Baby is quiet."
+        else:
+            return f"Detected {emotion}."
+    
     def _update_system_status(self):
         """Update system status information"""
         while self.running:
@@ -397,8 +638,8 @@ class SimpleBabyMonitorWeb:
                 
                 # Get emotion state
                 current_emotion = "Unknown"
-                if self.emotion_detector and hasattr(self.emotion_detector, 'current_emotion'):
-                    current_emotion = self.emotion_detector.current_emotion
+                if self.emotion_detector:
+                    current_emotion = self.metrics['current'].get('emotion', 'unknown')
                 
                 # Track peak detections
                 current_detections = self.metrics['current'].get('detections', 0)
@@ -435,7 +676,12 @@ class SimpleBabyMonitorWeb:
                         'cpu_usage': self.system_status['cpu_usage'],
                         'memory_usage': self.system_status['memory_usage'],
                         'fps': self.system_status['fps'],
-                        'detection_count': current_detections
+                        'detection_count': current_detections,
+                        'emotion': current_emotion,
+                        'emotion_confidence': self.metrics['current'].get('emotion_confidence', 0.0)
+                    },
+                    'history': {
+                        'emotions': self.metrics['history']['emotions']
                     }
                 })
                 
