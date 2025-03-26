@@ -29,6 +29,7 @@ pip install -r requirements.txt
 ### Easy Start (Recommended)
 
 For Windows users, simply double-click the `auto_connect.bat` file. The tool will:
+
 1. Scan your network for the baby monitor server
 2. Automatically connect if found
 3. Allow you to enter server details manually if not found
@@ -66,4 +67,4 @@ If you encounter issues:
 - Check that the IP address and port are correct
 - Verify that your network allows connections to the specified port
 - Check that all dependencies are properly installed
-- Try the auto-connect tool which can automatically find the server on your network 
+- Try the auto-connect tool which can automatically find the server on your network
