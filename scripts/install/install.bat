@@ -102,16 +102,17 @@ echo @echo off
 echo call venv\Scripts\activate.bat
 echo set PYTHONPATH=.
 echo set EVENTLET_NO_GREENDNS=yes
-echo python run_monitor.py --mode dev --camera_id 0 --debug
+echo python main.py --mode normal
 echo pause
-) > start_monitor.bat
+) > start.bat
 
 echo.
 echo Installation completed successfully!
 echo.
 echo You can now start the Baby Monitor System using:
-echo 1. Run: start_monitor.bat
-echo 2. Open http://localhost:5000 in your web browser
+echo 1. Run: python main.py --mode normal
+echo 2. Or use the generated start.bat file
+echo 3. Open http://localhost:5000 in your web browser
 echo.
 echo For more information, see README.md
 echo.

@@ -137,7 +137,7 @@ If you encounter issues during installation:
 1. Check that you have Python 3.8-3.11 installed
 2. Check the logs in the `logs` directory
 3. Try running with the `--mode dev` option for more verbose output
-4. For camera issues, use `--camera_id 1` or other numbers to try different cameras
+4. For camera issues, use `--camera_id 0` or other numbers to try different cameras
 
 ## For Developers
 

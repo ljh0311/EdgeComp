@@ -128,21 +128,22 @@ fi
 
 # Create start script
 echo -e "\n${YELLOW}Creating start script...${NC}"
-cat > start_monitor.sh << 'EOF'
+cat > start.sh << 'EOF'
 #!/bin/bash
 source venv/bin/activate
 export PYTHONPATH=.
 export EVENTLET_NO_GREENDNS=yes
-python run_monitor.py --mode dev --camera_id 0 --debug
+python main.py --mode normal
 EOF
 
-chmod +x start_monitor.sh
-chmod +x run_monitor.py
+chmod +x start.sh
+chmod +x main.py
 
 echo -e "\n${GREEN}Installation completed successfully!${NC}"
 echo
 echo "You can now start the Baby Monitor System using:"
-echo "1. Run: ./start_monitor.sh"
-echo "2. Open http://localhost:5000 in your web browser"
+echo "1. Run: python main.py --mode normal"
+echo "2. Or use the generated start script: ./start.sh"
+echo "3. Open http://localhost:5000 in your web browser"
 echo
 echo "For more information, see README.md" 

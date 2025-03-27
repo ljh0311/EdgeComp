@@ -35,9 +35,20 @@ The `/install/` directory contains comprehensive installation scripts:
 - `install.sh` - Linux-specific installation wrapper
 - `install_pi.sh` - Raspberry Pi optimized installation
 
+## Starting the Application
+
+The Baby Monitor System should be started using the main.py script in the root directory:
+
+```bash
+python main.py --mode normal  # For regular users
+python main.py --mode dev     # For developers
+```
+
+**Note about start scripts:** The repository includes several start scripts (`start_monitor.bat`, `start.bat`, `start.sh`, `start_pi.sh`) which provide platform-specific ways to launch the application. While these scripts work, it's recommended to use `main.py` directly for consistency across platforms.
+
 ## Utility Scripts
 
-- `run.py` - Main script for running the Baby Monitor System
+- `run.py` - Utility script for running components of the Baby Monitor System
 - `scripts_manager.bat` / `scripts_manager.sh` - Script management utilities for different platforms
 - `scripts_manager_gui.py` - Graphical interface for script management
 - `scripts_manager_pi.sh` - Raspberry Pi optimized script management
