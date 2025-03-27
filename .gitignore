@@ -109,6 +109,9 @@ archive.zip
 *.wav
 *.mp3
 
+# Backup files
+src/backup_*
+
 # Keep only necessary model files
 Model/*
 !Model/README.md 
