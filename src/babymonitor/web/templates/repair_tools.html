@@ -689,6 +689,45 @@
                             </small>
                         </div>
                     </div>
+                    
+                    <!-- Microphone Selection -->
+                    <div class="mb-3">
+                        <label class="form-label">
+                            {% if mode == "normal" %}
+                            Microphone
+                            {% else %}
+                            Audio Input Device
+                            {% endif %}
+                        </label>
+                        <select class="form-select" name="microphone_select" id="microphoneSelect">
+                            <option value="">Loading microphones...</option>
+                        </select>
+                        <div id="microphoneInfo" class="mt-2">
+                            <small class="text-muted">Select the microphone you want to use for sound detection</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Sound Quality Tips Toggle -->
+                    <div class="mb-3">
+                        <a class="text-info" data-bs-toggle="collapse" href="#soundQualityTips" role="button" aria-expanded="false">
+                            <i class="bi bi-info-circle"></i> Sound Quality Tips
+                        </a>
+                        <div class="collapse mt-2" id="soundQualityTips">
+                            <div class="card bg-dark">
+                                <div class="card-body">
+                                    <h6 class="text-info">Improving Sound Detection Quality:</h6>
+                                    <ul class="small text-muted mb-0">
+                                        <li>Position the microphone closer to the sound source</li>
+                                        <li>Reduce background noise in the environment</li>
+                                        <li>Use a higher quality microphone if available</li>
+                                        <li>Ensure microphone is not obstructed or covered</li>
+                                        <li>Adjust system volume levels if detection is too sensitive</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <button class="btn btn-primary w-100 mb-2" onclick="applyEmotionModel()">
                         <i class="bi bi-check2-circle"></i> 
                         {% if mode == "normal" %}
@@ -696,6 +735,9 @@
                         {% else %}
                         Apply Model
                         {% endif %}
+                    </button>
+                    <button class="btn btn-info w-100 mb-2" onclick="applyMicrophoneSelection()">
+                        <i class="bi bi-mic"></i> Apply Microphone Selection
                     </button>
                     <button class="btn btn-info w-100 mb-2" onclick="testAudio()">
                         <i class="bi bi-play-circle"></i> Test Audio
@@ -890,9 +932,40 @@
 
 {% block extra_js %}
 <script>
+// API endpoints for our functions
+if (typeof API === 'undefined') {
+    // Only declare API if it doesn't already exist
+    window.API = {
+        cameras: {
+            list: '/api/cameras/list',
+            add: '/api/cameras/add',
+            remove: '/api/cameras/remove',
+            activate: '/api/cameras/activate'
+        },
+        emotion: {
+            models: '/api/emotion/models',
+            modelInfo: '/api/emotion/model',
+            switchModel: '/api/emotion/switch_model',
+            testAudio: '/api/emotion/test_audio',
+            restartAudio: '/api/emotion/restart_audio'
+        },
+        audio: {
+            microphones: '/api/audio/microphones',
+            setMicrophone: '/api/audio/set_microphone'
+        },
+        system: {
+            check: '/api/system/check',
+            info: '/api/system/info',
+            restart: '/api/system/restart',
+            stop: '/api/system/stop'
+        }
+    };
+}
+
 // Initialize the page
 let socket = io();
 let currentModelId = null;
+let currentMicrophoneId = null;
 
 // Initialize when document is ready
 document.addEventListener('DOMContentLoaded', function() {
@@ -901,6 +974,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize model select
     fetchAvailableModels();
+    
+    // Initialize microphone select
+    fetchAvailableMicrophones();
     
     // Request initial camera list
     fetchCameras();
@@ -932,6 +1008,11 @@ socket.on('system_status', (data) => {
 socket.on('emotion_model_changed', (data) => {
     addLogEntry('info', `Switched to model: ${data.name}`);
     updateModelInfo(data);
+});
+
+socket.on('microphone_changed', (data) => {
+    addLogEntry('info', `Switched to microphone: ${data.name}`);
+    updateMicrophoneInfo(data);
 });
 
 socket.on('camera_added', (data) => {
@@ -1246,7 +1327,224 @@ function getModelTypeClass(type) {
     }
 }
 
-// Apply selected emotion model
+// Fetch available microphones
+function fetchAvailableMicrophones() {
+    addLogEntry('info', 'Loading available microphones...');
+    
+    // Clear microphone select and show loading state
+    const microphoneSelect = document.getElementById('microphoneSelect');
+    if (microphoneSelect) {
+        microphoneSelect.innerHTML = '<option value="">Loading microphones...</option>';
+        microphoneSelect.disabled = true;
+    }
+    
+    // Update microphone info to show loading
+    const microphoneInfo = document.getElementById('microphoneInfo');
+    if (microphoneInfo) {
+        microphoneInfo.innerHTML = '<small class="text-muted"><i class="bi bi-hourglass-split"></i> Detecting microphones...</small>';
+    }
+    
+    fetch(API.audio.microphones)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Failed to fetch microphones: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            populateMicrophoneSelect(data);
+            addLogEntry('success', 'Successfully loaded microphone list');
+            
+            // Enable the select
+            if (microphoneSelect) {
+                microphoneSelect.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching microphones:', error);
+            addLogEntry('error', `Error loading microphones: ${error.message}`);
+            
+            // Update microphone info to show error
+            const microphoneInfo = document.getElementById('microphoneInfo');
+            if (microphoneInfo) {
+                microphoneInfo.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Error Loading Microphones</h6>
+                        <p class="mb-0">Could not load available microphones. Please check audio drivers and system permissions.</p>
+                    </div>
+                `;
+            }
+            
+            // Enable the select but show error option
+            if (microphoneSelect) {
+                microphoneSelect.innerHTML = '<option value="">Error loading microphones</option>';
+                microphoneSelect.disabled = false;
+            }
+        });
+}
+
+// Populate microphone select dropdown
+function populateMicrophoneSelect(data) {
+    const microphoneSelect = document.getElementById('microphoneSelect');
+    if (!microphoneSelect) return;
+    
+    // Clear existing options
+    microphoneSelect.innerHTML = '<option value="">Select a microphone...</option>';
+    
+    // Add options for each available microphone
+    if (data.microphones && Array.isArray(data.microphones)) {
+        data.microphones.forEach(mic => {
+            const option = document.createElement('option');
+            option.value = mic.id;
+            option.textContent = mic.name;
+            
+            if (!mic.is_available) {
+                option.disabled = true;
+                option.textContent += ' - Not Available';
+            }
+            
+            if (data.current_microphone && data.current_microphone.id === mic.id) {
+                option.selected = true;
+                currentMicrophoneId = mic.id;
+                
+                // Update microphone info
+                updateMicrophoneInfo(mic);
+            }
+            
+            microphoneSelect.appendChild(option);
+        });
+    }
+}
+
+// Update microphone info display
+function updateMicrophoneInfo(microphone) {
+    const microphoneInfoDiv = document.getElementById('microphoneInfo');
+    if (!microphoneInfoDiv) return;
+    
+    let qualityBadge = '';
+    if (microphone.quality) {
+        let badgeClass = 'bg-secondary';
+        switch(microphone.quality.toLowerCase()) {
+            case 'high': badgeClass = 'bg-success'; break;
+            case 'medium': badgeClass = 'bg-info'; break;
+            case 'low': badgeClass = 'bg-warning'; break;
+            default: badgeClass = 'bg-secondary';
+        }
+        qualityBadge = `<span class="badge ${badgeClass} ms-2">${microphone.quality}</span>`;
+    }
+    
+    microphoneInfoDiv.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">Device: ${microphone.name}</small>
+            ${qualityBadge}
+        </div>
+        <small class="text-muted d-block">Sample Rate: ${microphone.sample_rate || 'Default'}</small>
+    `;
+}
+
+// Apply microphone selection function
+function applyMicrophoneSelection() {
+    const microphoneSelect = document.getElementById('microphoneSelect');
+    const selectedMicrophone = microphoneSelect?.value;
+    
+    if (!selectedMicrophone) {
+        addLogEntry('warning', 'Please select a microphone first');
+        return;
+    }
+    
+    // Disable the button and microphone select during application
+    const applyButton = document.querySelector('button[onclick="applyMicrophoneSelection()"]');
+    if (applyButton) {
+        applyButton.disabled = true;
+        applyButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Applying...';
+    }
+    if (microphoneSelect) {
+        microphoneSelect.disabled = true;
+    }
+    
+    addLogEntry('info', `Applying microphone selection: ${selectedMicrophone}...`);
+    
+    fetch(API.audio.setMicrophone, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ microphone_id: selectedMicrophone })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.message || `Server error: ${response.status}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        addLogEntry('success', data.message || 'Microphone applied successfully');
+        
+        if (data.microphone_info) {
+            updateMicrophoneInfo(data.microphone_info);
+            currentMicrophoneId = selectedMicrophone;
+        }
+        
+        // Re-enable controls
+        if (applyButton) {
+            applyButton.disabled = false;
+            applyButton.innerHTML = '<i class="bi bi-mic"></i> Apply Microphone Selection';
+        }
+        if (microphoneSelect) {
+            microphoneSelect.disabled = false;
+        }
+        
+        // Test the microphone after applying
+        setTimeout(() => {
+            testAudio();
+        }, 1000);
+    })
+    .catch(error => {
+        console.error('Error applying microphone:', error);
+        addLogEntry('error', `Error applying microphone: ${error.message}`);
+        
+        // Re-enable controls
+        if (applyButton) {
+            applyButton.disabled = false;
+            applyButton.innerHTML = '<i class="bi bi-mic"></i> Apply Microphone Selection';
+        }
+        if (microphoneSelect) {
+            microphoneSelect.disabled = false;
+        }
+    });
+}
+
+// Handle microphone selection change
+document.addEventListener('DOMContentLoaded', function() {
+    const microphoneSelect = document.getElementById('microphoneSelect');
+    if (microphoneSelect) {
+        microphoneSelect.addEventListener('change', function() {
+            const selectedMicrophoneId = this.value;
+            if (!selectedMicrophoneId) return;
+            
+            fetch(`${API.audio.microphones}/${selectedMicrophoneId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch microphone info: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.microphone_info) {
+                        updateMicrophoneInfo(data.microphone_info);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching microphone info:', error);
+                    addLogEntry('error', `Error fetching microphone info: ${error.message}`);
+                });
+        });
+    }
+});
+
+// Also update the applyEmotionModel function to apply microphone selection too
 function applyEmotionModel() {
     const modelSelect = document.getElementById('modelSelect');
     const selectedModel = modelSelect?.value;
@@ -1256,13 +1554,18 @@ function applyEmotionModel() {
         return;
     }
     
+    // Also check for microphone
+    const microphoneSelect = document.getElementById('microphoneSelect');
+    const selectedMicrophone = microphoneSelect?.value;
+    
     addLogEntry('info', `Applying model: ${selectedModel}...`);
     
+    // First apply the model
     fetch(API.emotion.switchModel, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ model_id: selectedModel })
     })
     .then(response => {
@@ -1280,10 +1583,41 @@ function applyEmotionModel() {
             updateModelInfo(data.model_info);
             currentModelId = selectedModel;
         }
+        
+        // Now apply the microphone if selected
+        if (selectedMicrophone) {
+            return fetch(API.audio.setMicrophone, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ microphone_id: selectedMicrophone })
+            });
+        }
+    })
+    .then(response => {
+        if (!response || !selectedMicrophone) return null;
+        
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.message || `Server error: ${response.status}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (!data || !selectedMicrophone) return;
+        
+        addLogEntry('success', data.message || 'Microphone applied successfully');
+        
+        if (data.microphone_info) {
+            updateMicrophoneInfo(data.microphone_info);
+            currentMicrophoneId = selectedMicrophone;
+        }
     })
     .catch(error => {
-        console.error('Error applying model:', error);
-        addLogEntry('error', `Error applying model: ${error.message}`);
+        console.error('Error applying settings:', error);
+        addLogEntry('error', `Error applying settings: ${error.message}`);
     });
 }
 
@@ -1319,6 +1653,13 @@ document.addEventListener('DOMContentLoaded', function() {
 function testAudio() {
     addLogEntry('info', 'Testing audio system...');
     
+    // Disable the button during test
+    const testButton = document.querySelector('button[onclick="testAudio()"]');
+    if (testButton) {
+        testButton.disabled = true;
+        testButton.innerHTML = '<i class="bi bi-mic"></i> Testing...';
+    }
+    
     fetch(API.emotion.testAudio, {
         method: 'POST'
     })
@@ -1331,11 +1672,71 @@ function testAudio() {
         return response.json();
     })
     .then(data => {
-        addLogEntry('success', data.message || 'Audio test initiated successfully');
+        // Check if test was successful
+        if (data.success === false) {
+            addLogEntry('warning', data.message || 'Audio test completed with warnings');
+            
+            // Show a detailed message with what went wrong
+            const microphoneInfo = document.getElementById('microphoneInfo');
+            if (microphoneInfo) {
+                microphoneInfo.innerHTML = `
+                    <div class="alert alert-warning">
+                        <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Audio Test Warning</h6>
+                        <p class="mb-0">${data.message || 'Could not detect audio properly. Please check your microphone.'}</p>
+                    </div>
+                `;
+            }
+        } else {
+            addLogEntry('success', data.message || 'Audio test initiated successfully');
+            
+            // If we have test results, display them
+            if (data.results) {
+                const results = data.results;
+                const microphoneInfo = document.getElementById('microphoneInfo');
+                if (microphoneInfo && results.signal_detected) {
+                    const signalStrength = Math.round(results.signal_strength * 100);
+                    const noiseLevel = Math.round(results.background_noise * 100);
+                    
+                    microphoneInfo.innerHTML += `
+                        <div class="mt-2 p-2 bg-dark rounded">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small class="text-muted">Signal Strength:</small>
+                                <small class="${signalStrength > 50 ? 'text-success' : 'text-warning'}">${signalStrength}%</small>
+                            </div>
+                            <div class="progress bg-secondary mb-2" style="height: 5px;">
+                                <div class="progress-bar ${signalStrength > 50 ? 'bg-success' : 'bg-warning'}" 
+                                     style="width: ${signalStrength}%"></div>
+                            </div>
+                            
+                            <div class="d-flex justify-content-between mb-1">
+                                <small class="text-muted">Background Noise:</small>
+                                <small class="${noiseLevel < 30 ? 'text-success' : 'text-warning'}">${noiseLevel}%</small>
+                            </div>
+                            <div class="progress bg-secondary" style="height: 5px;">
+                                <div class="progress-bar ${noiseLevel < 30 ? 'bg-success' : 'bg-warning'}" 
+                                     style="width: ${noiseLevel}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        // Re-enable the button
+        if (testButton) {
+            testButton.disabled = false;
+            testButton.innerHTML = '<i class="bi bi-play-circle"></i> Test Audio';
+        }
     })
     .catch(error => {
         console.error('Error testing audio:', error);
         addLogEntry('error', `Error testing audio: ${error.message}`);
+        
+        // Re-enable the button
+        if (testButton) {
+            testButton.disabled = false;
+            testButton.innerHTML = '<i class="bi bi-play-circle"></i> Test Audio';
+        }
     });
 }
 
@@ -1618,11 +2019,27 @@ function updateSystemInfo(data) {
         </tr>
         <tr>
             <td>Microphone Device:</td>
-                <td>${data.system_info.microphone_device || 'Unknown'}</td>
+            <td>${data.system_info.microphone_device || 'Unknown'}</td>
+        </tr>
+        <tr>
+            <td>Device Index:</td>
+            <td>${data.system_info.microphone_index !== undefined ? data.system_info.microphone_index : 'Default'}</td>
         </tr>
         <tr>
             <td>Sample Rate:</td>
-                <td>${data.system_info.audio_sample_rate || 'Unknown'}</td>
+            <td>${data.system_info.audio_sample_rate || 'Unknown'} Hz</td>
+        </tr>
+        <tr>
+            <td>Channels:</td>
+            <td>${data.system_info.audio_channels || 'Unknown'}</td>
+        </tr>
+        <tr>
+            <td>Bit Depth:</td>
+            <td>${data.system_info.audio_bit_depth || 'Default'} bit</td>
+        </tr>
+        <tr>
+            <td>Input Gain:</td>
+            <td>${data.system_info.audio_gain !== undefined ? data.system_info.audio_gain + ' dB' : 'Default'}</td>
         </tr>
         `;
     }
