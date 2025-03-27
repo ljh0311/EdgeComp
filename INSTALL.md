@@ -141,7 +141,7 @@ The Baby Monitor System supports the following configuration options:
 If you encounter camera access issues, try:
 
 ```
-python -m src.run_server --camera_id 1
+python main.py --camera_id 1
 ```
 
 Different camera IDs (0, 1, 2, etc.) can be tried if your default camera is not working.
@@ -157,7 +157,7 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
 Then specify a device:
 
 ```
-python -m src.run_server --input_device 1
+python main.py --input_device 1
 ```
 
 ### Installation Fails
@@ -175,8 +175,8 @@ After installation, you can start the Baby Monitor System using:
 
 1. The desktop shortcut (if created during installation)
 2. Command line:
-   - Windows: `venv\Scripts\python -m src.run_server --mode normal`
-   - Linux/Mac: `venv/bin/python -m src.run_server --mode normal`
+   - Windows: `python main.py --mode normal`
+   - Linux/Mac: `python main.py --mode normal`
 
 For more detailed information, please refer to the README.md file.
 
