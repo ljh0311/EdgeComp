@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Monitor Repair Tools</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        h1 {
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-right: -15px;
+            margin-left: -15px;
+        }
+        .col {
+            flex-basis: 0;
+            flex-grow: 1;
+            max-width: 100%;
+            padding-right: 15px;
+            padding-left: 15px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        select, input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .loading {
+            background-color: #e2f0fb;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Baby Monitor Repair Tools</h1>
+        <p>Use these tools to configure and troubleshoot the baby monitor system.</p>
+        
+        <div class="section">
+            <h2>Emotion Detection Models</h2>
+            <p>Select and configure the emotion detection model used for audio processing.</p>
+            
+            <div id="models-loading" class="status loading">Loading models...</div>
+            
+            <div id="models-content" style="display: none;">
+                <div class="row">
+                    <div class="col">
+                        <label for="model-select">Select Model:</label>
+                        <select id="model-select">
+                            <!-- Models will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <div class="col">
+                        <button id="apply-model">Apply Model Selection</button>
+                        <button id="test-model">Test Current Model</button>
+                    </div>
+                </div>
+                <div id="model-status" class="status"></div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Sound Settings</h2>
+            <p>Configure microphone and audio processing parameters.</p>
+            
+            <div id="microphones-loading" class="status loading">Loading microphones...</div>
+            
+            <div id="microphones-content" style="display: none;">
+                <div class="row">
+                    <div class="col">
+                        <label for="microphone-select">Select Microphone:</label>
+                        <select id="microphone-select">
+                            <!-- Microphones will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <div class="col">
+                        <button id="apply-microphone">Apply Microphone Selection</button>
+                        <button id="test-audio">Test Audio</button>
+                        <button id="restart-audio">Restart Audio System</button>
+                    </div>
+                </div>
+                <div id="microphone-status" class="status"></div>
+                
+                <h3>Sound Quality Improvement Tips</h3>
+                <ul>
+                    <li>Position the microphone closer to the sound source</li>
+                    <li>Reduce background noise in the environment</li>
+                    <li>Use a higher quality microphone if available</li>
+                    <li>Ensure the microphone is not obstructed or covered</li>
+                    <li>Adjust system volume levels if detection is too sensitive</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>System Information</h2>
+            <p>View system status and information.</p>
+            
+            <div id="system-loading" class="status loading">Loading system information...</div>
+            
+            <div id="system-content" style="display: none;">
+                <div class="row">
+                    <div class="col">
+                        <h3>System Details</h3>
+                        <div id="system-details">
+                            <!-- System details will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <div class="col">
+                        <h3>Performance</h3>
+                        <div id="system-performance">
+                            <!-- Performance metrics will be populated by JavaScript -->
+                        </div>
+                        <button id="restart-system">Restart System</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Base URL for API endpoints
+        const API_BASE_URL = 'http://localhost:5001/api';
+        
+        // Function to make API requests
+        async function fetchAPI(endpoint, method = 'GET', data = null) {
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            if (data && (method === 'POST' || method === 'PUT')) {
+                options.body = JSON.stringify(data);
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+                const result = await response.json();
+                return result;
+            } catch (error) {
+                console.error(`API Error (${endpoint}):`, error);
+                return { status: 'error', message: error.message };
+            }
+        }
+        
+        // Load Models
+        async function loadModels() {
+            const modelsLoading = document.getElementById('models-loading');
+            const modelsContent = document.getElementById('models-content');
+            const modelSelect = document.getElementById('model-select');
+            
+            try {
+                const result = await fetchAPI('/emotion/models');
+                
+                if (result.status === 'success' && result.models) {
+                    // Clear the select options
+                    modelSelect.innerHTML = '';
+                    
+                    // Add options for each model
+                    result.models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.text = model.name;
+                        option.selected = model.is_active;
+                        modelSelect.appendChild(option);
+                    });
+                    
+                    // Show the content
+                    modelsLoading.style.display = 'none';
+                    modelsContent.style.display = 'block';
+                } else {
+                    throw new Error(result.message || 'Failed to load models');
+                }
+            } catch (error) {
+                modelsLoading.textContent = `Error: ${error.message}`;
+                modelsLoading.className = 'status error';
+            }
+        }
+        
+        // Load Microphones
+        async function loadMicrophones() {
+            const microphonesLoading = document.getElementById('microphones-loading');
+            const microphonesContent = document.getElementById('microphones-content');
+            const microphoneSelect = document.getElementById('microphone-select');
+            
+            try {
+                const result = await fetchAPI('/audio/microphones');
+                
+                if (result.status === 'success' && result.microphones) {
+                    // Clear the select options
+                    microphoneSelect.innerHTML = '';
+                    
+                    // Add options for each microphone
+                    result.microphones.forEach(mic => {
+                        const option = document.createElement('option');
+                        option.value = mic.id;
+                        option.text = mic.name;
+                        option.selected = mic.is_active;
+                        microphoneSelect.appendChild(option);
+                    });
+                    
+                    // Show the content
+                    microphonesLoading.style.display = 'none';
+                    microphonesContent.style.display = 'block';
+                } else {
+                    throw new Error(result.message || 'Failed to load microphones');
+                }
+            } catch (error) {
+                microphonesLoading.textContent = `Error: ${error.message}`;
+                microphonesLoading.className = 'status error';
+            }
+        }
+        
+        // Load System Information
+        async function loadSystemInfo() {
+            const systemLoading = document.getElementById('system-loading');
+            const systemContent = document.getElementById('system-content');
+            const systemDetails = document.getElementById('system-details');
+            const systemPerformance = document.getElementById('system-performance');
+            
+            try {
+                const result = await fetchAPI('/system/info');
+                
+                if (result.status === 'success' && result.system_info) {
+                    const info = result.system_info;
+                    
+                    // Format system details
+                    systemDetails.innerHTML = `
+                        <p><strong>Platform:</strong> ${info.platform} ${info.platform_version}</p>
+                        <p><strong>Python Version:</strong> ${info.python_version}</p>
+                        <p><strong>Hostname:</strong> ${info.hostname}</p>
+                        <p><strong>Audio System:</strong> ${info.audio_system}</p>
+                        <p><strong>Current Model:</strong> ${info.current_model || 'Not set'}</p>
+                        <p><strong>Current Microphone:</strong> ${info.current_microphone || 'Not set'}</p>
+                        <p><strong>Uptime:</strong> ${formatSeconds(info.uptime_seconds)}</p>
+                    `;
+                    
+                    // Format performance metrics
+                    systemPerformance.innerHTML = `
+                        <p><strong>CPU Cores:</strong> ${info.cpu_count}</p>
+                        <p><strong>CPU Usage:</strong> ${info.cpu_usage}%</p>
+                        <p><strong>Memory:</strong> ${formatBytes(info.memory_available)} / ${formatBytes(info.memory_total)} available</p>
+                        <p><strong>Disk Space:</strong> ${formatBytes(info.disk_free)} / ${formatBytes(info.disk_total)} free</p>
+                    `;
+                    
+                    // Show the content
+                    systemLoading.style.display = 'none';
+                    systemContent.style.display = 'block';
+                } else {
+                    throw new Error(result.message || 'Failed to load system information');
+                }
+            } catch (error) {
+                systemLoading.textContent = `Error: ${error.message}`;
+                systemLoading.className = 'status error';
+            }
+        }
+        
+        // Helper function to format bytes
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Helper function to format seconds into human-readable uptime
+        function formatSeconds(seconds) {
+            const days = Math.floor(seconds / (3600 * 24));
+            seconds -= days * 3600 * 24;
+            
+            const hours = Math.floor(seconds / 3600);
+            seconds -= hours * 3600;
+            
+            const minutes = Math.floor(seconds / 60);
+            seconds -= minutes * 60;
+            
+            let result = '';
+            if (days > 0) result += days + ' days, ';
+            if (hours > 0 || days > 0) result += hours + ' hours, ';
+            if (minutes > 0 || hours > 0 || days > 0) result += minutes + ' minutes, ';
+            result += seconds + ' seconds';
+            
+            return result;
+        }
+        
+        // Apply model selection
+        async function applyModel() {
+            const modelSelect = document.getElementById('model-select');
+            const modelStatus = document.getElementById('model-status');
+            
+            const selectedModel = modelSelect.value;
+            
+            modelStatus.textContent = 'Applying model...';
+            modelStatus.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/emotion/switch_model', 'POST', {
+                    model_id: selectedModel
+                });
+                
+                if (result.status === 'success') {
+                    modelStatus.textContent = result.message;
+                    modelStatus.className = 'status success';
+                } else {
+                    throw new Error(result.message || 'Failed to apply model');
+                }
+            } catch (error) {
+                modelStatus.textContent = `Error: ${error.message}`;
+                modelStatus.className = 'status error';
+            }
+        }
+        
+        // Test current model
+        async function testModel() {
+            const modelStatus = document.getElementById('model-status');
+            
+            modelStatus.textContent = 'Testing model...';
+            modelStatus.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/emotion/test_audio', 'POST', {
+                    duration: 5
+                });
+                
+                if (result.status === 'success') {
+                    const details = result.results ? 
+                        `Signal: ${result.results.signal_strength * 100}%, Noise: ${result.results.background_noise * 100}%` :
+                        '';
+                    
+                    modelStatus.textContent = `${result.message} ${details}`;
+                    modelStatus.className = 'status success';
+                } else {
+                    throw new Error(result.message || 'Test failed');
+                }
+            } catch (error) {
+                modelStatus.textContent = `Error: ${error.message}`;
+                modelStatus.className = 'status error';
+            }
+        }
+        
+        // Apply microphone selection
+        async function applyMicrophone() {
+            const microphoneSelect = document.getElementById('microphone-select');
+            const microphoneStatus = document.getElementById('microphone-status');
+            
+            const selectedMicrophone = microphoneSelect.value;
+            
+            microphoneStatus.textContent = 'Applying microphone settings...';
+            microphoneStatus.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/audio/set_microphone', 'POST', {
+                    microphone_id: selectedMicrophone
+                });
+                
+                if (result.status === 'success') {
+                    microphoneStatus.textContent = result.message;
+                    microphoneStatus.className = 'status success';
+                } else {
+                    throw new Error(result.message || 'Failed to apply microphone settings');
+                }
+            } catch (error) {
+                microphoneStatus.textContent = `Error: ${error.message}`;
+                microphoneStatus.className = 'status error';
+            }
+        }
+        
+        // Test audio
+        async function testAudio() {
+            const microphoneStatus = document.getElementById('microphone-status');
+            
+            microphoneStatus.textContent = 'Testing audio input...';
+            microphoneStatus.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/emotion/test_audio', 'POST');
+                
+                if (result.status === 'success') {
+                    microphoneStatus.textContent = result.message;
+                    microphoneStatus.className = 'status success';
+                } else {
+                    throw new Error(result.message || 'Test failed');
+                }
+            } catch (error) {
+                microphoneStatus.textContent = `Error: ${error.message}`;
+                microphoneStatus.className = 'status error';
+            }
+        }
+        
+        // Restart audio system
+        async function restartAudio() {
+            const microphoneStatus = document.getElementById('microphone-status');
+            
+            microphoneStatus.textContent = 'Restarting audio system...';
+            microphoneStatus.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/emotion/restart_audio', 'POST');
+                
+                if (result.status === 'success') {
+                    microphoneStatus.textContent = result.message;
+                    microphoneStatus.className = 'status success';
+                    
+                    // Reload microphones after restart
+                    await loadMicrophones();
+                } else {
+                    throw new Error(result.message || 'Restart failed');
+                }
+            } catch (error) {
+                microphoneStatus.textContent = `Error: ${error.message}`;
+                microphoneStatus.className = 'status error';
+            }
+        }
+        
+        // Restart system
+        async function restartSystem() {
+            const systemLoading = document.getElementById('system-loading');
+            
+            if (!confirm('Are you sure you want to restart the system?')) {
+                return;
+            }
+            
+            systemLoading.textContent = 'Restarting system...';
+            systemLoading.style.display = 'block';
+            systemLoading.className = 'status loading';
+            
+            try {
+                const result = await fetchAPI('/system/restart', 'POST');
+                
+                if (result.status === 'success') {
+                    systemLoading.textContent = 'System restarting... Page will reload in 5 seconds.';
+                    systemLoading.className = 'status success';
+                    
+                    // Reload the page after a delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 5000);
+                } else {
+                    throw new Error(result.message || 'Restart failed');
+                }
+            } catch (error) {
+                systemLoading.textContent = `Error: ${error.message}`;
+                systemLoading.className = 'status error';
+            }
+        }
+        
+        // Initialize the page
+        async function initialize() {
+            // Load data
+            loadModels();
+            loadMicrophones();
+            loadSystemInfo();
+            
+            // Set up event listeners
+            document.getElementById('apply-model').addEventListener('click', applyModel);
+            document.getElementById('test-model').addEventListener('click', testModel);
+            document.getElementById('apply-microphone').addEventListener('click', applyMicrophone);
+            document.getElementById('test-audio').addEventListener('click', testAudio);
+            document.getElementById('restart-audio').addEventListener('click', restartAudio);
+            document.getElementById('restart-system').addEventListener('click', restartSystem);
+        }
+        
+        // Start initialization when the page loads
+        window.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html>
