@@ -13,6 +13,7 @@ Options:
     --no-gui         Run installation without GUI
     --skip-models    Skip downloading models
     --skip-shortcut  Skip creating desktop shortcut
+    --mode [normal|dev]  Set the operation mode (normal for regular users, dev for developers)
     --help          Show this help message
 """
 
@@ -147,6 +148,9 @@ def run_gui_installer():
             
             if self.options.get('skip_shortcut', False):
                 cmd.append("--skip-shortcut")
+                
+            if 'mode' in self.options:
+                cmd.extend(["--mode", self.options['mode']])
             
             self.update_signal.emit(f"Running command: {' '.join(cmd)}")
             self.progress_signal.emit(30)
@@ -272,6 +276,16 @@ def run_gui_installer():
             type_layout.addWidget(self.install_type_combo)
             options_layout.addLayout(type_layout)
             
+            # Operation mode
+            mode_layout = QHBoxLayout()
+            mode_label = QLabel("Operation Mode:")
+            mode_layout.addWidget(mode_label)
+            
+            self.mode_combo = QComboBox()
+            self.mode_combo.addItems(["Normal Mode", "Developer Mode"])
+            mode_layout.addWidget(self.mode_combo)
+            options_layout.addLayout(mode_layout)
+            
             # Options
             self.skip_models_checkbox = QCheckBox("Skip downloading detection models (faster installation)")
             options_layout.addWidget(self.skip_models_checkbox)
@@ -368,6 +382,12 @@ def run_gui_installer():
 <li><b>Minimal Installation:</b> Installs only the essential components.</li>
 </ul>
 
+<p><b>Operation Modes:</b></p>
+<ul>
+<li><b>Normal Mode:</b> Standard interface for regular users.</li>
+<li><b>Developer Mode:</b> Advanced features and debugging options for developers.</li>
+</ul>
+
 <p><b>Options:</b></p>
 <ul>
 <li><b>Skip downloading models:</b> Don't download the detection models (faster installation but requires manual download later).</li>
@@ -413,10 +433,13 @@ def run_gui_installer():
         def start_installation(self):
             """Start the installation process."""
             # Get options
+            mode = "dev" if self.mode_combo.currentText() == "Developer Mode" else "normal"
+            
             options = {
-                'skip_gui': False,  # Always use GUI
+                'skip_gui': False,  # Always use GUI when launching from GUI
                 'skip_models': self.skip_models_checkbox.isChecked(),
-                'skip_shortcut': self.skip_shortcut_checkbox.isChecked()
+                'skip_shortcut': self.skip_shortcut_checkbox.isChecked(),
+                'mode': mode
             }
             
             # Adjust options based on installation type
@@ -477,6 +500,7 @@ def main():
     parser.add_argument("--no-gui", action="store_true", help="Run installation without GUI")
     parser.add_argument("--skip-models", action="store_true", help="Skip downloading models")
     parser.add_argument("--skip-shortcut", action="store_true", help="Skip creating desktop shortcut")
+    parser.add_argument("--mode", choices=["normal", "dev"], default="normal", help="Operation mode (normal or dev)")
     
     args = parser.parse_args()
     
@@ -491,20 +515,7 @@ def main():
     
     # If --no-gui is specified or we're in a non-interactive environment, use command line
     if args.no_gui or not sys.stdout.isatty():
-        if is_raspberry_pi():
-            print("Detected Raspberry Pi hardware")
-            
-            # For Raspberry Pi, use the specialized script if GUI is not requested
-            print("Running Raspberry Pi installation script...")
-            try:
-                subprocess.run(["bash", str(Path(__file__).parent.parent / "install_pi.sh")], check=True)
-                print("Raspberry Pi installation completed successfully!")
-                return 0
-            except subprocess.CalledProcessError as e:
-                print(f"Error during Raspberry Pi installation: {e}")
-                return 1
-        
-        # For all other cases, use the setup.py script
+        # For all platforms, use the setup.py script directly
         cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "setup.py")]
         
         if args.no_gui:
@@ -515,6 +526,9 @@ def main():
         
         if args.skip_shortcut:
             cmd.append("--skip-shortcut")
+            
+        if args.mode:
+            cmd.extend(["--mode", args.mode])
         
         print(f"Running setup: {' '.join(cmd)}")
         
@@ -525,9 +539,9 @@ def main():
             # Print next steps
             print("\nNext steps:")
             if system == "Windows":
-                print("1. Run 'scripts\\fix_windows.bat' to start the application")
+                print(f"1. Run 'venv\\Scripts\\python -m src.run_server --mode {args.mode}' to start the application")
             else:
-                print("1. Run 'python run_monitor.py' to start the application")
+                print(f"1. Run 'venv/bin/python -m src.run_server --mode {args.mode}' to start the application")
             print("2. Open http://localhost:5000 in your web browser")
             print("3. Check the README.md file for more information")
             
@@ -540,7 +554,7 @@ def main():
             return 1
     else:
         # Launch the GUI installer
-        return run_gui_installer()
+        return launch_gui()
 
 if __name__ == "__main__":
     sys.exit(main()) 

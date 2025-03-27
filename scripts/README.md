@@ -9,15 +9,31 @@ This directory contains utility scripts for the Baby Monitor System.
 - `*.sh` - Linux/Mac shell scripts
 - `*.py` - Python utility scripts
 
+## Installation
+
+The installation process has been simplified. You can now install the Baby Monitor System using:
+
+```bash
+# From the project root
+python setup.py
+
+# Or directly
+python scripts/install/install.py
+```
+
+The installer automatically detects your platform and launches the appropriate installer script.
+
+For detailed installation instructions, see [INSTALL.md](../INSTALL.md) in the project root.
+
 ## Installation Scripts
 
 The `/install/` directory contains comprehensive installation scripts:
 
 - `install.py` - Main installation script with GUI interface
+- `setup.py` - Core setup functionality
 - `install.bat` - Windows-specific installation wrapper
 - `install.sh` - Linux-specific installation wrapper
 - `install_pi.sh` - Raspberry Pi optimized installation
-- `setup.py` - Core setup functionality
 
 ## Utility Scripts
 

@@ -1,64 +1,103 @@
 """
 Baby Monitor System
 ==================
-Main setup script that redirects to the comprehensive installer.
+Main setup script that detects the platform and runs the appropriate installer.
 """
 
 import sys
 import os
+import platform
 from pathlib import Path
 
-# Redirect to comprehensive installer
-if __name__ == "__main__":
+def is_raspberry_pi():
+    """Check if the system is a Raspberry Pi."""
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            return any("Raspberry Pi" in line for line in f)
+    except:
+        return False
+
+def main():
+    """Main entry point that detects platform and runs appropriate installer."""
     print("Baby Monitor System - Installation")
     print("===================================")
-    print("Redirecting to comprehensive installer...")
     
-    # Check if the install script exists
-    install_script = Path("scripts/install/setup.py")
-    if install_script.exists():
-        # Execute the comprehensive installer
-        print("Found comprehensive installer at scripts/install/setup.py")
-        print("Executing comprehensive installer...\n")
-        # Get the same arguments that were passed to this script
-        args = sys.argv[1:]
-        arg_str = " ".join(args)
-        os.system(f"python {install_script} {arg_str}")
+    install_dir = Path("scripts/install")
+    
+    # Check if installation scripts exist
+    if not install_dir.exists():
+        print("Error: Installation scripts not found.")
+        print("Please make sure you are running this script from the project root directory.")
+        sys.exit(1)
+    
+    # Get command line arguments to pass to the installer
+    args = sys.argv[1:]
+    args_str = " ".join(args)
+    
+    # Detect platform and run appropriate installer
+    system = platform.system()
+    print(f"Detected platform: {system}")
+    
+    if system == "Windows":
+        # Use Windows batch file
+        installer = install_dir / "install.bat"
+        if installer.exists():
+            print("Running Windows installer...")
+            os.system(f"{installer} {args_str}")
+        else:
+            # Fallback to Python installer
+            print("Windows-specific installer not found, using generic installer...")
+            python_installer = install_dir / "install.py"
+            os.system(f"python {python_installer} {args_str}")
+    
+    elif system == "Linux":
+        # Check if it's a Raspberry Pi
+        if is_raspberry_pi():
+            # Use Raspberry Pi installer
+            installer = install_dir / "install_pi.sh"
+            if installer.exists():
+                print("Detected Raspberry Pi, running specialized installer...")
+                os.system(f"bash {installer} {args_str}")
+            else:
+                # Fallback to Linux installer
+                installer = install_dir / "install.sh"
+                if installer.exists():
+                    print("Running Linux installer...")
+                    os.system(f"bash {installer} {args_str}")
+                else:
+                    # Fallback to Python installer
+                    print("Linux-specific installer not found, using generic installer...")
+                    python_installer = install_dir / "install.py"
+                    os.system(f"python {python_installer} {args_str}")
+        else:
+            # Use Linux installer
+            installer = install_dir / "install.sh"
+            if installer.exists():
+                print("Running Linux installer...")
+                os.system(f"bash {installer} {args_str}")
+            else:
+                # Fallback to Python installer
+                print("Linux-specific installer not found, using generic installer...")
+                python_installer = install_dir / "install.py"
+                os.system(f"python {python_installer} {args_str}")
+    
+    elif system == "Darwin":  # macOS
+        # Use Linux/Mac installer
+        installer = install_dir / "install.sh"
+        if installer.exists():
+            print("Running macOS installer...")
+            os.system(f"bash {installer} {args_str}")
+        else:
+            # Fallback to Python installer
+            print("macOS-specific installer not found, using generic installer...")
+            python_installer = install_dir / "install.py"
+            os.system(f"python {python_installer} {args_str}")
+    
     else:
-        # Fall back to simplified setup
-        print("Comprehensive installer not found, falling back to basic setup...")
-        from setuptools import setup, find_packages
+        # Unknown platform, use Python installer
+        print(f"Unknown platform: {system}, using generic installer...")
+        python_installer = install_dir / "install.py"
+        os.system(f"python {python_installer} {args_str}")
 
-        setup(
-            name="babymonitor",
-            version="1.0.0",
-            packages=find_packages(where="src"),
-            package_dir={"": "src"},
-            include_package_data=True,
-            install_requires=[
-                "flask>=2.3.3",
-                "flask-socketio>=5.3.6",
-                "opencv-python-headless>=4.8.1.78",
-                "numpy>=1.24.3",
-                "torch>=1.13.1",
-                "sounddevice>=0.4.6",
-                "python-dotenv>=1.0.0",
-                "psutil>=5.9.5",
-                "eventlet>=0.33.3",
-                "werkzeug>=2.3.7",
-                "jsonschema>=4.17.3"
-            ],
-            entry_points={
-                "console_scripts": [
-                    "babymonitor=src.babymonitor.core.main:main",
-                ],
-            },
-            author="Your Name",
-            author_email="your.email@example.com",
-            description="A baby monitoring system with person detection and emotion recognition",
-            python_requires=">=3.8.0,<3.12.0",
-        )
-        
-        print("\nBasic setup completed. For a more comprehensive setup with GUI installer,")
-        print("models downloading, and configuration, please run:")
-        print("python scripts/install/install.py")
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,12 @@
 Baby Monitor System - Unified Setup
 ==================================
 Handles package installation, system configuration, and provides a GUI installer.
+
+This script can be run directly without any arguments:
+    python setup.py
+
+Or with specific options:
+    python setup.py --no-gui --skip-models --mode dev
 """
 
 from setuptools import setup, find_packages
@@ -983,12 +989,19 @@ def main():
     check_python_version()
     
     parser = argparse.ArgumentParser(description="Baby Monitor System Setup")
-    parser.add_argument("--no-gui", action="store_true", help="Run setup without GUI")
-    parser.add_argument("--skip-models", action="store_true", help="Skip downloading models")
-    parser.add_argument("--skip-shortcut", action="store_true", help="Skip creating desktop shortcut")
-    parser.add_argument("--mode", choices=["normal", "dev"], default="normal", help="Setup mode (normal or dev)")
+    parser.add_argument("--no-gui", action="store_true", help="Run setup without GUI (default: False)")
+    parser.add_argument("--skip-models", action="store_true", help="Skip downloading models (default: False)")
+    parser.add_argument("--skip-shortcut", action="store_true", help="Skip creating desktop shortcut (default: False)")
+    parser.add_argument("--mode", choices=["normal", "dev"], default="normal", help="Setup mode (normal or dev) (default: normal)")
     
     args = parser.parse_args()
+    
+    # Print selected options
+    logger.info(f"Running setup with options:")
+    logger.info(f"  - GUI: {'Disabled' if args.no_gui else 'Enabled'}")
+    logger.info(f"  - Download models: {'Skipped' if args.skip_models else 'Enabled'}")
+    logger.info(f"  - Create shortcut: {'Skipped' if args.skip_shortcut else 'Enabled'}")
+    logger.info(f"  - Mode: {args.mode}")
     
     # Create necessary directories
     for directory in [MODELS_DIR, LOGS_DIR, CONFIG_DIR, DATA_DIR, SCRIPTS_DIR]:
@@ -1004,6 +1017,8 @@ def main():
         if not args.skip_models:
             logger.info("Setting up detection models...")
             setup_models()
+        else:
+            logger.info("Skipping model setup (--skip-models specified)")
         
         # Setup camera management
         logger.info("Setting up camera management system...")
@@ -1029,6 +1044,8 @@ def main():
         if not args.skip_shortcut:
             logger.info("Creating desktop shortcut...")
             create_desktop_shortcut()
+        else:
+            logger.info("Skipping shortcut creation (--skip-shortcut specified)")
         
         # Create the babymonitor_logs directory in user's home
         logs_dir = Path(os.path.expanduser('~')) / 'babymonitor_logs'
@@ -1043,9 +1060,9 @@ def main():
         print("="*50)
         print("\nTo start the system, run:")
         if platform.system() == "Windows":
-            print("    venv\\Scripts\\python -m src.run_server --mode", args.mode)
+            print(f"    venv\\Scripts\\python -m src.run_server --mode {args.mode}")
         else:
-            print("    venv/bin/python -m src.run_server --mode", args.mode)
+            print(f"    venv/bin/python -m src.run_server --mode {args.mode}")
         print("\nThe web interface will be available at: http://localhost:5000")
         print("="*50 + "\n")
         
@@ -1057,53 +1074,7 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1 or sys.argv[1] != "install":
-        # Run the setup script
-        main()
-    else:
-        # Run setuptools setup when 'install' argument is provided
-        setup(
-            name="babymonitor",
-            version="1.0.0",
-            packages=find_packages(where="src"),
-            package_dir={"": "src"},
-            install_requires=[
-                f"{pkg}=={ver}" for pkg, ver in REQUIRED_PACKAGES.items()
-            ],
-            python_requires=f">={'.'.join(map(str, MIN_PYTHON))},<={'.'.join(map(str, MAX_PYTHON))}",
-            entry_points={
-                "console_scripts": [
-                    "babymonitor=babymonitor.core.main:main",
-                ],
-            },
-            include_package_data=True,
-            package_data={
-                "babymonitor": [
-                    "detectors/models/*.pb",
-                    "detectors/models/*.pbtxt",
-                    "detectors/models/emotion/*.pt",
-                    "web/templates/*",
-                    "web/static/*",
-                ]
-            },
-            author="Your Name",
-            author_email="your.email@example.com",
-            description="A baby monitoring system with person detection and emotion recognition",
-            long_description=long_description,
-            long_description_content_type="text/markdown",
-            classifiers=[
-                "Development Status :: 3 - Alpha",
-                "Intended Audience :: End Users/Desktop",
-                "Topic :: Multimedia :: Video :: Capture",
-                "Programming Language :: Python :: 3.8",
-                "Programming Language :: Python :: 3.9",
-                "Programming Language :: Python :: 3.10",
-                "Programming Language :: Python :: 3.11",
-                "Programming Language :: Python :: 3.12",
-                "License :: OSI Approved :: MIT License",
-                "Operating System :: OS Independent",
-            ],
-        )
+    main()
 
 
 def setup_camera_management():

@@ -7,15 +7,20 @@ This document provides instructions for installing the Baby Monitor System on di
 For most users, the simplest way to install is to run:
 
 ```bash
-python scripts/install/install.py
+python setup.py
 ```
 
-This will launch the graphical installer, which will guide you through the installation process.
+This will automatically detect your platform and launch the appropriate installer. The installer will guide you through the installation process.
 
 ## Installation Options
 
-The installer supports several options:
+If you want more control over the installation process, you can use:
 
+```bash
+python scripts/install/install.py [options]
+```
+
+Options:
 - `--no-gui`: Run installation without the graphical interface
 - `--skip-models`: Skip downloading detection models
 - `--skip-shortcut`: Skip creating desktop shortcut
@@ -34,7 +39,7 @@ python scripts/install/install.py --no-gui --mode dev
 2. Clone or download this repository
 3. Run the installer:
    ```
-   python scripts/install/install.py
+   python setup.py
    ```
    Or use the Windows-specific batch file:
    ```
@@ -48,7 +53,7 @@ python scripts/install/install.py --no-gui --mode dev
 2. Clone or download this repository
 3. Run the installer:
    ```
-   python scripts/install/install.py
+   python setup.py
    ```
    Or use the Linux-specific shell script:
    ```
@@ -60,12 +65,12 @@ python scripts/install/install.py --no-gui --mode dev
 
 For Raspberry Pi devices, you have two options:
 
-#### Option 1: Graphical Installer
+#### Option 1: Automatic Installer (Recommended)
 ```
-python scripts/install/install.py
+python setup.py
 ```
 
-#### Option 2: Command-Line Installer
+#### Option 2: Raspberry Pi Specific Installer
 ```
 bash scripts/install/install_pi.sh
 ```
@@ -136,7 +141,7 @@ The Baby Monitor System supports the following configuration options:
 If you encounter camera access issues, try:
 
 ```
-python main.py --camera_id 1
+python -m src.run_server --camera_id 1
 ```
 
 Different camera IDs (0, 1, 2, etc.) can be tried if your default camera is not working.
@@ -152,7 +157,7 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
 Then specify a device:
 
 ```
-python main.py --input_device 1
+python -m src.run_server --input_device 1
 ```
 
 ### Installation Fails
