@@ -373,110 +373,6 @@
         font-size: 0.8rem;
         padding: 0.2em 0.5em;
     }
-
-    /* Emotion colors */
-    .bg-happy { background-color: #198754; }
-    .bg-sad { background-color: #dc3545; }
-    .bg-angry { background-color: #ffc107; }
-    .bg-neutral { background-color: #6c757d; }
-    .bg-crying { background-color: #dc3545; }
-    .bg-laughing { background-color: #198754; }
-    .bg-babbling { background-color: #0dcaf0; }
-    .bg-silence { background-color: #6c757d; }
-
-    /* Model info styles */
-    .model-info {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 15px;
-        padding: 10px;
-        background-color: rgba(0, 0, 0, 0.2);
-        border-radius: 4px;
-    }
-
-    .model-details {
-        display: flex;
-        flex-direction: column;
-    }
-
-    .model-name {
-        font-weight: bold;
-        color: #fff;
-    }
-
-    .model-mic {
-        font-size: 0.8rem;
-        color: #aaa;
-    }
-
-    .switch-model-btn {
-        padding: 4px 8px;
-        font-size: 0.8rem;
-        border-radius: 4px;
-        background-color: #0d6efd;
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: background-color 0.3s;
-    }
-
-    .switch-model-btn:hover {
-        background-color: #0b5ed7;
-    }
-
-    /* Add these styles to your existing CSS */
-    .emotion-overlay.no-data {
-        background-color: rgba(108, 117, 125, 0.8);
-        color: white;
-    }
-    
-    .emotion-overlay.error {
-        background-color: rgba(220, 53, 69, 0.8);
-        color: white;
-    }
-    
-    .emotion-overlay.buffering {
-        background-color: rgba(13, 202, 240, 0.8);
-        color: white;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    .emotion-overlay .bi-hourglass-split {
-        animation: spin 2s linear infinite;
-    }
-    
-    .emotion-overlay .bi-exclamation-circle {
-        animation: pulse 2s infinite;
-    }
-    
-    /* Update your existing progress bar styles */
-    .progress.emotion-progress {
-        position: relative;
-        height: 24px;
-        margin-bottom: 10px;
-        background-color: rgba(0, 0, 0, 0.2);
-        border-radius: 4px;
-        overflow: hidden;
-    }
-    
-    .progress.emotion-progress.no-data {
-        opacity: 0.5;
-    }
-    
-    .progress-bar {
-        transition: width 0.3s ease-in-out;
-        position: relative;
-    }
-    
-    .progress-bar.no-data {
-        background-color: #6c757d;
-        opacity: 0.5;
-    }
     </style>
 {% endblock %}
 
@@ -508,14 +404,12 @@
                 </div>
                 <div class="card-body">
                     <!-- Current model display -->
-                    <div class="model-info">
-                        <div class="model-details">
-                            <div class="model-name" id="currentModelName">Loading...</div>
-                            <div class="model-mic" id="currentMicName">Loading...</div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div><strong>Model:</strong> <span id="currentModelName">Loading...</span></div>
+                            <div class="text-muted small"><strong>Microphone:</strong> <span id="currentMicName">Loading...</span></div>
                         </div>
-                        <button class="switch-model-btn" id="modelSwitchBtn">
-                            <i class="bi bi-arrow-repeat"></i> Switch Model
-                        </button>
+                        <span id="modelSwitchBtn" class="badge bg-primary rounded-pill" style="cursor: pointer;">Switch Model</span>
                     </div>
                     
                     <!-- Dynamic emotion progress bars container -->
@@ -738,164 +632,92 @@
     });
 
     // Update emotion overlay and progress bars
-    socket.on('emotion_update', function(data) {
-        console.log('Emotion data received:', data);
-        updateEmotionDisplay(data);
-        
-        // Also update emotion history if available
-        if (data.emotion && data.confidence >= threshold) {
-            addEmotionToHistory(data);
-        }
-    });
-
-    // Also listen for the original 'emotion' event
     socket.on('emotion', function(data) {
-        console.log('Emotion data received (original):', data);
-        updateEmotionDisplay(data);
-    });
-
-    function updateEmotionDisplay(data) {
-        const emotionDisplay = document.getElementById('emotionDisplay');
-        const confidenceDisplay = document.getElementById('confidenceDisplay');
-        const emotionChart = document.getElementById('emotionChart');
+        console.log('Emotion data received:', data);
         
-        if (!emotionDisplay || !confidenceDisplay) return;
-        
-        // Update main emotion display
-        const emotion = data.emotion;
-        const confidence = (data.confidence * 100).toFixed(1);
-        
-        // Update emotion text and style
-        emotionDisplay.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
-        emotionDisplay.className = `emotion-text ${emotionClasses[emotion] || 'bg-secondary'}`;
-        
-        // Update confidence
-        confidenceDisplay.textContent = `${confidence}%`;
-        
-        // Update chart if it exists
-        if (emotionChart && data.emotions) {
-            updateEmotionChart(data.emotions);
+        // Update emotion overlay
+        const overlay = document.getElementById('emotionOverlay');
+        if (overlay) {
+            overlay.style.transition = 'all 0.3s ease';
+            overlay.className = 'emotion-overlay';
+            
+            let icon = 'emoji-neutral';
+            let overlayClass = '';
+            const emotion = data.emotion;
+            const confidence = data.confidence;
+            
+            switch(emotion) {
+                case 'crying':
+                case 'sad':
+                    overlayClass = 'emotion-crying';
+                    icon = confidence > 0.5 ? 'emoji-frown-fill' : 'emoji-frown';
+                    break;
+                case 'laughing':
+                case 'happy':
+                    overlayClass = 'emotion-laughing';
+                    icon = confidence > 0.5 ? 'emoji-smile-fill' : 'emoji-smile';
+                    break;
+                case 'babbling':
+                    overlayClass = 'emotion-babbling';
+                    icon = confidence > 0.5 ? 'emoji-laughing-fill' : 'emoji-laughing';
+                    break;
+                case 'angry':
+                    overlayClass = 'emotion-crying';
+                    icon = confidence > 0.5 ? 'emoji-angry-fill' : 'emoji-angry';
+                    break;
+                case 'silence':
+                    icon = 'emoji-neutral';
+                    break;
+            }
+            
+            overlay.classList.add(overlayClass);
+            overlay.innerHTML = `
+                <i class="bi bi-${icon}"></i> 
+                ${capitalizeFirstLetter(emotion)} 
+                <span class="badge bg-dark ms-1">${(confidence * 100).toFixed(1)}%</span>
+            `;
         }
         
-        // Update status indicators
-        updateStatusIndicators(data);
-    }
-
-    function updateEmotionChart(emotions) {
-        const ctx = document.getElementById('emotionChart').getContext('2d');
-        
-        if (!window.emotionChart) {
-            window.emotionChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: Object.keys(emotions),
-                    datasets: [{
-                        label: 'Confidence',
-                        data: Object.values(emotions).map(v => v * 100),
-                        backgroundColor: Object.keys(emotions).map(emotion => 
-                            getEmotionColor(emotion)
-                        )
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            title: {
-                                display: true,
-                                text: 'Confidence (%)'
-                            }
-                        }
-                    },
-                    animation: {
-                        duration: 500
+        // Update progress bars
+        if (data.confidences) {
+            Object.entries(data.confidences).forEach(([emotion, value]) => {
+                const progress = document.getElementById(`${emotion}Progress`);
+                const valueSpan = document.getElementById(`${emotion}Value`);
+                if (progress && valueSpan) {
+                    const percentage = (value * 100).toFixed(1);
+                    progress.style.transition = 'width 0.3s ease-in-out';
+                    progress.style.width = `${percentage}%`;
+                    valueSpan.textContent = `${percentage}%`;
+                    
+                    // Add pulsing effect for high confidence
+                    if (value > 0.5) {
+                        progress.classList.add('progress-bar-pulse');
+                    } else {
+                        progress.classList.remove('progress-bar-pulse');
                     }
                 }
             });
-        } else {
-            window.emotionChart.data.labels = Object.keys(emotions);
-            window.emotionChart.data.datasets[0].data = Object.values(emotions).map(v => v * 100);
-            window.emotionChart.data.datasets[0].backgroundColor = Object.keys(emotions).map(emotion => 
-                getEmotionColor(emotion)
-            );
-            window.emotionChart.update();
-        }
-    }
-
-    function getEmotionColor(emotion) {
-        const colors = {
-            'crying': '#dc3545',
-            'laughing': '#28a745',
-            'babbling': '#17a2b8',
-            'silence': '#6c757d',
-            'happy': '#ffc107',
-            'sad': '#6610f2',
-            'angry': '#fd7e14',
-            'neutral': '#20c997'
-        };
-        return colors[emotion] || '#6c757d';
-    }
-
-    function showNoDataState() {
-        const emotionDisplay = document.getElementById('emotionDisplay');
-        const confidenceDisplay = document.getElementById('confidenceDisplay');
-        
-        if (emotionDisplay) {
-            emotionDisplay.textContent = 'No Data';
-            emotionDisplay.className = 'emotion-text bg-secondary';
         }
         
-        if (confidenceDisplay) {
-            confidenceDisplay.textContent = '0%';
+        // Update last update time
+        const lastUpdate = document.getElementById('lastUpdate');
+        if (lastUpdate) {
+            const now = new Date();
+            lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
         }
         
-        if (window.emotionChart) {
-            window.emotionChart.data.datasets[0].data = [];
-            window.emotionChart.update();
-        }
-    }
-
-    function showErrorState(message) {
-        const emotionDisplay = document.getElementById('emotionDisplay');
-        const confidenceDisplay = document.getElementById('confidenceDisplay');
-        
-        if (emotionDisplay) {
-            emotionDisplay.textContent = 'Error';
-            emotionDisplay.className = 'emotion-text bg-danger';
-        }
-        
-        if (confidenceDisplay) {
-            confidenceDisplay.textContent = message || 'Error occurred';
-        }
-        
-        if (window.emotionChart) {
-            window.emotionChart.data.datasets[0].data = [];
-            window.emotionChart.update();
-        }
-    }
-
-    function updateStatusIndicators(data) {
-        const audioLevel = document.getElementById('audioLevel');
-        const processingStatus = document.getElementById('processingStatus');
-        
-        if (audioLevel && data.audio_level !== undefined) {
-            const level = Math.max(-60, Math.min(0, data.audio_level));
-            const percentage = ((level + 60) / 60) * 100;
-            audioLevel.style.width = `${percentage}%`;
-        }
-        
-        if (processingStatus) {
-            const status = data.status || 'unknown';
-            const statusClasses = {
-                'success': 'bg-success',
-                'error': 'bg-danger',
-                'buffering': 'bg-warning',
-                'no_data': 'bg-secondary'
-            };
-            processingStatus.className = `status-indicator ${statusClasses[status] || 'bg-secondary'}`;
+        // Add alert for crying
+        if ((data.emotion === 'crying' || data.emotion === 'sad') && data.confidence > 0.5) {
+            const alertMessage = `Baby is ${data.emotion} with ${(data.confidence * 100).toFixed(1)}% confidence`;
+            addAlert('warning', alertMessage);
+            addAlertToHistory('warning', alertMessage);
+            
+            // Trigger visual feedback
+            const videoContainer = document.querySelector('.video-container');
+            if (videoContainer) {
+                videoContainer.classList.add('alert-flash');
+                setTimeout(() => videoContainer.classList.remove('alert-flash'), 1000);
+            }
         }
     }
 
@@ -1041,40 +863,26 @@
         container.innerHTML = '';
         
         // Add progress bar for each emotion
-        if (currentModel && Array.isArray(currentModel.emotions)) {
-            currentModel.emotions.forEach(emotion => {
-                if (typeof emotion !== 'string') {
-                    console.warn('Invalid emotion type:', emotion);
-                    return;
-                }
-                
-                const emotionDiv = document.createElement('div');
-                emotionDiv.className = 'position-relative mb-2';
-                
-                // Get color class for this emotion
-                const colorClass = emotionColorMap[emotion] || 'bg-secondary';
-                
-                emotionDiv.innerHTML = `
-                    <div class="progress emotion-progress">
-                        <div id="${emotion}Progress" class="progress-bar ${colorClass}" role="progressbar" style="width: 0%">
-                            <div class="emotion-label">
-                                ${capitalizeFirstLetter(emotion)}: <span id="${emotion}Value">0%</span>
-                            </div>
-                        </div>
+        currentModel.emotions.forEach(emotion => {
+            const emotionDiv = document.createElement('div');
+            emotionDiv.className = 'position-relative mb-2';
+            
+            // Get color class for this emotion
+            const colorClass = emotionColorMap[emotion] || 'bg-secondary';
+            
+            emotionDiv.innerHTML = `
+                <div class="progress emotion-progress">
+                    <div id="${emotion}Progress" class="progress-bar ${colorClass}" role="progressbar" style="width: 0%">
+                        <div class="emotion-label">${capitalizeFirstLetter(emotion)}: <span id="${emotion}Value">0%</span></div>
                     </div>
-                `;
-                
-                container.appendChild(emotionDiv);
-            });
-        } else {
-            console.warn('Invalid or missing emotions in currentModel:', currentModel);
-            container.innerHTML = `
-                <div class="alert alert-warning">
-                    <i class="bi bi-exclamation-triangle"></i>
-                    No emotion data available
                 </div>
             `;
-        }
+            
+            container.appendChild(emotionDiv);
+        });
+        
+        // Re-attach model switch button click handler
+        attachModelSwitchButtonHandler();
     }
     
     // Function to attach click handler to model switch button

@@ -1,5 +1,5 @@
-from flask import Flask, jsonify, render_template, request
-from api_routes import api_bp
+from flask import Flask, jsonify, render_template
+from src.babymonitor.web.routes import audio
 import logging
 import os
 
@@ -18,27 +18,23 @@ def create_app():
                 static_folder=static_dir)
     
     # Register blueprints
-    app.register_blueprint(api_bp)  # This includes all API routes
+    app.register_blueprint(audio.bp, url_prefix='/api/audio')
     
     @app.route('/')
     def home():
-        return render_template('index.html', mode="normal", dev_mode=False)
+        return render_template('repair_tools.html', mode="normal", dev_mode=False)
     
-    @app.route('/repair')
+    @app.route('/repair_tools')
     def repair_tools():
         return render_template('repair_tools.html', mode="normal", dev_mode=False)
     
     @app.errorhandler(404)
     def not_found_error(error):
-        if request.path.startswith('/api/'):
-            return jsonify({'error': 'Not Found', 'path': request.path}), 404
-        return render_template('404.html'), 404
+        return jsonify({'error': 'Not Found'}), 404
     
     @app.errorhandler(500)
     def internal_error(error):
-        if request.path.startswith('/api/'):
-            return jsonify({'error': 'Internal Server Error'}), 500
-        return render_template('500.html'), 500
+        return jsonify({'error': 'Internal Server Error'}), 500
     
     return app
 
@@ -46,6 +42,6 @@ if __name__ == '__main__':
     app = create_app()
     try:
         logger.info("Starting Baby Monitor web server...")
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=5001, debug=True)
     except Exception as e:
         logger.error(f"Error starting server: {str(e)}") 

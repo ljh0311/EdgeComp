@@ -76,37 +76,13 @@ def run_normal_mode(args):
     """
     logger.info("Starting Baby Monitor System in NORMAL mode")
 
-    components = {}
     try:
         # Initialize camera
         logger.info("Initializing system...")
-        try:
-            camera = Camera(args.camera_id)
-            components['camera'] = camera
-        except Exception as e:
-            logger.error(f"Failed to initialize camera: {e}")
-            raise
-
-        try:
-            audio_processor = AudioProcessor(device=args.input_device)
-            components['audio_processor'] = audio_processor
-        except Exception as e:
-            logger.error(f"Failed to initialize audio processor: {e}")
-            raise
-
-        try:
-            person_detector = PersonDetector(threshold=args.threshold)
-            components['person_detector'] = person_detector
-        except Exception as e:
-            logger.error(f"Failed to initialize person detector: {e}")
-            raise
-
-        try:
-            emotion_detector = EmotionDetector(threshold=args.threshold)
-            components['emotion_detector'] = emotion_detector
-        except Exception as e:
-            logger.error(f"Failed to initialize emotion detector: {e}")
-            raise
+        camera = Camera(args.camera_id)
+        audio_processor = AudioProcessor(device=args.input_device)
+        person_detector = PersonDetector(threshold=args.threshold)
+        emotion_detector = EmotionDetector(threshold=args.threshold)
 
         # Start web interface
         logger.info("Starting web interface...")
@@ -119,7 +95,6 @@ def run_normal_mode(args):
             mode="normal",
             debug=args.debug,
         )
-        components['web_interface'] = web_interface
 
         # Print access information
         print("\n" + "=" * 80)
@@ -143,37 +118,69 @@ def run_normal_mode(args):
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        # Cleanup components in reverse order
-        for name in reversed(list(components.keys())):
-            component = components[name]
-            try:
-                if name == 'web_interface':
-                    component.stop()
-                elif name in ['person_detector', 'emotion_detector'] and hasattr(component, 'stop'):
-                    component.stop()
-                elif name == 'camera':
-                    component.release()
-                elif name == 'audio_processor':
-                    component.stop()
-            except Exception as e:
-                logger.error(f"Error stopping {name}: {e}")
+        try:
+            if "web_interface" in locals():
+                web_interface.stop()
+        except Exception as e:
+            logger.error(f"Error stopping web interface: {e}")
+
+        try:
+            if "person_detector" in locals() and hasattr(person_detector, "stop"):
+                person_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping person detector: {e}")
+
+        try:
+            if "emotion_detector" in locals() and hasattr(emotion_detector, "stop"):
+                emotion_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping emotion detector: {e}")
+
+        try:
+            if "camera" in locals():
+                camera.release()
+        except Exception as e:
+            logger.error(f"Error releasing camera: {e}")
+
+        try:
+            if "audio_processor" in locals():
+                audio_processor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping audio processor: {e}")
 
     return 0
 
 
 def run_dev_mode(args):
-    """Start the Baby Monitor in developer mode with debug tools enabled."""
+    """
+    Start the Baby Monitor in developer mode.
+
+    This mode provides access to all development tools and metrics,
+    and is intended for developers and testers.
+    """
     logger.info("Starting Baby Monitor System in DEVELOPER mode")
+
+    # Set logging level to DEBUG in dev mode
     logger.setLevel(logging.DEBUG)
 
     try:
         # Initialize components
         camera = Camera(args.camera_id)
+
+        # Initialize audio processor
+        logger.info("Initializing audio processor...")
         audio_processor = AudioProcessor(device=args.input_device)
+
+        # Initialize person detector
+        logger.info("Initializing person detector...")
         person_detector = PersonDetector(threshold=args.threshold)
+
+        # Initialize emotion detector
+        logger.info("Initializing emotion detector...")
         emotion_detector = EmotionDetector(threshold=args.threshold)
 
-        # Start web interface
+        # Start web interface in dev mode
+        logger.info("Starting web interface in developer mode...")
         web_interface = SimpleBabyMonitorWeb(
             camera=camera,
             person_detector=person_detector,
@@ -181,19 +188,25 @@ def run_dev_mode(args):
             host=args.host,
             port=args.port,
             mode="dev",
-            debug=True
+            debug=True,  # Always enable debug in dev mode
         )
 
-        # Print access info
-        host_display = 'localhost' if args.host == '0.0.0.0' else args.host
+        # Print access information
         print("\n" + "=" * 80)
-        print("Baby Monitor Web Interface is running in DEVELOPER mode!")
-        print(f"Access the web interface at: http://{host_display}:{args.port}")
-        print(f"Developer tools at: http://{host_display}:{args.port}/dev/tools")
+        print(f"Baby Monitor Web Interface is running in DEVELOPER mode!")
+        print(
+            f"Access the web interface at: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}"
+        )
+        print(
+            f"Developer tools are available at: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}/dev/tools"
+        )
         print("Press Ctrl+C to stop the server")
         print("=" * 80 + "\n")
 
+        # Start the web interface in the main thread
         web_interface.run()
+
+        # This code will only be reached when the web interface is stopped
         logger.info("Web interface stopped")
 
     except KeyboardInterrupt:
@@ -202,38 +215,66 @@ def run_dev_mode(args):
         logger.error(f"Error in developer mode: {e}")
         raise
     finally:
-        # Cleanup components
-        components = {
-            'web_interface': lambda x: x.stop(),
-            'person_detector': lambda x: x.stop() if hasattr(x, 'stop') else None,
-            'emotion_detector': lambda x: x.stop() if hasattr(x, 'stop') else None,
-            'camera': lambda x: x.release(),
-            'audio_processor': lambda x: x.stop()
-        }
+        logger.info("Shutting down Baby Monitor System...")
+        try:
+            if "web_interface" in locals():
+                web_interface.stop()
+        except Exception as e:
+            logger.error(f"Error stopping web interface: {e}")
 
-        for name, cleanup_fn in components.items():
-            try:
-                if name in locals():
-                    cleanup_fn(locals()[name])
-            except Exception as e:
-                logger.error(f"Error stopping {name}: {e}")
+        try:
+            if "person_detector" in locals() and hasattr(person_detector, "stop"):
+                person_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping person detector: {e}")
+
+        try:
+            if "emotion_detector" in locals() and hasattr(emotion_detector, "stop"):
+                emotion_detector.stop()
+        except Exception as e:
+            logger.error(f"Error stopping emotion detector: {e}")
+
+        try:
+            if "camera" in locals():
+                camera.release()
+        except Exception as e:
+            logger.error(f"Error releasing camera: {e}")
+
+        try:
+            if "audio_processor" in locals():
+                audio_processor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping audio processor: {e}")
 
     return 0
 
 
 def run_local_mode(args):
-    """Start the Baby Monitor in local GUI mode using PyQt5."""
+    """
+    Start the Baby Monitor in local GUI mode.
+
+    This mode runs the local GUI version of the baby monitor using PyQt5.
+    """
     logger.info("Starting Baby Monitor System in LOCAL mode")
 
     try:
-        from PyQt5.QtWidgets import QApplication
-        from babymonitor.gui.main_gui import launch_main_gui
-    except ImportError as e:
-        logger.error(f"Failed to import GUI components: {e}")
-        logger.error("Make sure PyQt5 is installed: pip install PyQt5")
-        return 1
+        # Import GUI components
+        try:
+            from PyQt5.QtWidgets import QApplication
+            from babymonitor.gui.main_gui import launch_main_gui
+        except ImportError as e:
+            logger.error(f"Failed to import GUI components: {e}")
+            logger.error("Make sure PyQt5 is installed: pip install PyQt5")
+            return 1
 
-    return launch_main_gui()
+        # Launch the main GUI
+        logger.info("Starting local GUI...")
+        return launch_main_gui()
+
+    except Exception as e:
+        logger.error(f"Error in local mode: {e}")
+        raise
+
 
 def main():
     """Parse command line arguments and start the appropriate mode."""
