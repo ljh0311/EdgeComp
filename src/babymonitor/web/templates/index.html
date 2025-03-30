@@ -590,9 +590,18 @@
     });
 
     // Update emotion overlay and progress bars
-    socket.on('emotion', function(data) {
+    socket.on('emotion_update', function(data) {
         console.log('Emotion data received:', data);
-        
+        updateEmotionDisplay(data);
+    });
+
+    // Also listen for the original 'emotion' event
+    socket.on('emotion', function(data) {
+        console.log('Emotion data received (original):', data);
+        updateEmotionDisplay(data);
+    });
+
+    function updateEmotionDisplay(data) {
         // Update emotion overlay
         const overlay = document.getElementById('emotionOverlay');
         if (overlay) {
@@ -624,6 +633,7 @@
                     icon = confidence > 0.5 ? 'emoji-angry-fill' : 'emoji-angry';
                     break;
                 case 'silence':
+                case 'neutral':
                     icon = 'emoji-neutral';
                     break;
             }
@@ -637,25 +647,24 @@
         }
         
         // Update progress bars
-        if (data.confidences) {
-            Object.entries(data.confidences).forEach(([emotion, value]) => {
-                const progress = document.getElementById(`${emotion}Progress`);
-                const valueSpan = document.getElementById(`${emotion}Value`);
-                if (progress && valueSpan) {
-                    const percentage = (value * 100).toFixed(1);
-                    progress.style.transition = 'width 0.3s ease-in-out';
-                    progress.style.width = `${percentage}%`;
-                    valueSpan.textContent = `${percentage}%`;
-                    
-                    // Add pulsing effect for high confidence
-                    if (value > 0.5) {
-                        progress.classList.add('progress-bar-pulse');
-                    } else {
-                        progress.classList.remove('progress-bar-pulse');
-                    }
+        const confidences = data.emotions || data.confidences || {};
+        Object.entries(confidences).forEach(([emotion, value]) => {
+            const progress = document.getElementById(`${emotion}Progress`);
+            const valueSpan = document.getElementById(`${emotion}Value`);
+            if (progress && valueSpan) {
+                const percentage = (value * 100).toFixed(1);
+                progress.style.transition = 'width 0.3s ease-in-out';
+                progress.style.width = `${percentage}%`;
+                valueSpan.textContent = `${percentage}%`;
+                
+                // Add pulsing effect for high confidence
+                if (value > 0.5) {
+                    progress.classList.add('progress-bar-pulse');
+                } else {
+                    progress.classList.remove('progress-bar-pulse');
                 }
-            });
-        }
+            }
+        });
         
         // Update last update time
         const lastUpdate = document.getElementById('lastUpdate');
@@ -664,7 +673,7 @@
             lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
         }
         
-        // Add alert for crying
+        // Add alert for crying or sad emotions
         if ((data.emotion === 'crying' || data.emotion === 'sad') && data.confidence > 0.5) {
             const alertMessage = `Baby is ${data.emotion} with ${(data.confidence * 100).toFixed(1)}% confidence`;
             addAlert('warning', alertMessage);
@@ -677,7 +686,7 @@
                 setTimeout(() => videoContainer.classList.remove('alert-flash'), 1000);
             }
         }
-    });
+    }
     
     // Function to reset emotion buffer
     function resetEmotionBuffer() {

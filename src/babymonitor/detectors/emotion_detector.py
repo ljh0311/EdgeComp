@@ -35,61 +35,35 @@ class EmotionDetector(BaseDetector):
     
     # Model definitions with detailed information
     AVAILABLE_MODELS = {
-        'wav2vec2': {
-            'name': 'Wav2Vec2 Emotion Model',
-            'description': 'Advanced speech recognition model for emotion detection',
-            'file': 'model.safetensors',
-            'config_file': 'config.json',
-            'type': 'wav2vec2',
-            'emotions': ['crying', 'laughing', 'babbling', 'silence', 'noise'],
-            'path': 'models/emotion/wav2vec2',
-            'min_confidence': 0.6,
-            'supported_formats': ['.safetensors'],
-            'features': ['noise_resistant', 'high_accuracy']
-        },
-        'speechbrain': {
-            'name': 'SpeechBrain Model',
-            'description': 'Neural speech processing model with advanced features',
-            'file': 'best_emotion_model.pt',
-            'config_file': 'config.json',
-            'type': 'speechbrain',
-            'emotions': ['crying', 'laughing', 'babbling', 'silence', 'noise', 'speech'],
-            'path': 'models/emotion/speechbrain',
-            'min_confidence': 0.65,
-            'supported_formats': ['.pt'],
-            'features': ['speech_recognition', 'noise_filtering'],
-            'variants': {
-                'base': 'emotion_model.pt',
-                'hubert': 'hubert-base-ls960_emotion.pt',
-                'best': 'best_emotion_model.pt'
-            }
-        },
         'emotion2': {
             'name': 'Enhanced Emotion Model',
-            'description': 'Advanced emotion detection with TFLite format',
             'file': 'baby_cry_classifier_enhanced.tflite',
-            'label_file': 'label_encoder_enhanced.pkl',
-            'type': 'emotion2',
-            'emotions': ['crying', 'laughing', 'babbling', 'silence', 'coughing', 'sneezing'],
-            'path': 'models/emotion/emotion2',
-            'min_confidence': 0.6,
-            'supported_formats': ['.tflite'],
-            'features': ['enhanced_detection', 'mobile_optimized']
+            'type': 'advanced',
+            'emotions': ['happy', 'sad', 'angry', 'neutral', 'crying', 'laughing'],
+            'path': 'models/emotion/emotion2'
         },
         'cry_detection': {
-            'name': 'Cry Detection Model',
-            'description': 'Specialized model for cry detection',
+            'name': 'Cry Detection',
             'file': 'cry_detection_model.pth',
-            'config_file': 'config.json',
-            'type': 'cry_detection',
+            'type': 'binary',
             'emotions': ['crying', 'not_crying'],
-            'path': 'models/emotion/cry_detection',
-            'min_confidence': 0.7,
-            'supported_formats': ['.pth'],
-            'features': ['specialized_crying']
+            'path': 'models/emotion/cry_detection'
+        },
+        'speechbrain': {
+            'name': 'SpeechBrain Emotion',
+            'file': 'emotion_model.pt',
+            'type': 'speechbrain',
+            'emotions': ['happy', 'sad', 'angry', 'neutral'],
+            'path': 'models/emotion/speechbrain'
+        },
+        'basic_emotion': {
+            'name': 'Basic Emotion',
+            'file': 'best_emotion_model.pt',
+            'type': 'basic',
+            'emotions': ['crying', 'laughing', 'babbling', 'silence'],
+            'path': 'models/emotion/speechbrain'
         }
-    }
-    
+    }    
     def __init__(self, 
                  model_id: Optional[str] = None,
                  threshold: float = 0.5,
@@ -386,6 +360,7 @@ class EmotionDetector(BaseDetector):
                     'fps': float(self.fps),
                     'timestamp': time.time()
                 }
+                print(result)
                 
                 # Record in history if confidence exceeds threshold
                 if confidence >= self.threshold:
