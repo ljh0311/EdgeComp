@@ -149,6 +149,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## New Features
 
 ### Microphone Selection
+
 The application now supports selecting different microphones for sound/emotion detection. Here's how to use this feature:
 
 1. Go to the "Repair Tools" page
@@ -157,6 +158,7 @@ The application now supports selecting different microphones for sound/emotion d
 4. Click the "Apply Microphone Selection" button to use the selected microphone
 
 ### Sound Quality Improvement Tips
+
 To improve sound quality for better emotion recognition:
 
 1. Position the microphone closer to the sound source
@@ -170,6 +172,7 @@ To improve sound quality for better emotion recognition:
 The application now provides the following API endpoints:
 
 ### Emotion Model Endpoints
+
 - `GET /api/emotion/models` - Get available emotion models
 - `GET /api/emotion/model/<model_id>` - Get info about a specific model
 - `POST /api/emotion/switch_model` - Switch to a different model
@@ -177,11 +180,13 @@ The application now provides the following API endpoints:
 - `POST /api/emotion/restart_audio` - Restart audio system
 
 ### Audio Microphone Endpoints
+
 - `GET /api/audio/microphones` - Get available microphones
 - `GET /api/audio/microphones/<microphone_id>` - Get info about a specific microphone
 - `POST /api/audio/set_microphone` - Set the active microphone
 
 ### System Endpoints
+
 - `GET /api/system/check` - Check system status
 - `GET /api/system/info` - Get detailed system information
 - `POST /api/system/restart` - Restart the system
@@ -201,10 +206,13 @@ These folders contain copies of the system's state at the time specified in thei
 
 - **Keep** at least the 3 most recent backups for recovery purposes
 - **Delete** older backups by running the cleanup script:
+
   ```
   python tools/cleanup_backups.py --keep 3
   ```
+
 - **Restore** from a backup if needed:
+
   ```
   python tools/restore_backup.py --backup backup_20250327_011217
   ```

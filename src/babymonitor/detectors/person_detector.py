@@ -1,7 +1,7 @@
 """
 Person Detector Module
 ===================
-Efficient person detection using YOLOv8 for accurate person detection.
+Efficient person detection using YOLOv8 for accurate person detection and state tracking.
 """
 
 import cv2
@@ -28,7 +28,8 @@ class PersonDetector(BaseDetector):
         force_cpu: bool = False,
         max_retries: int = 3,
         frame_skip: int = 0,
-        process_resolution: Tuple[int, int] = None
+        process_resolution: Tuple[int, int] = None,
+        state_history_size: int = 10  # Number of frames to keep for state detection
     ):
         """Initialize the person detector.
 
@@ -40,6 +41,7 @@ class PersonDetector(BaseDetector):
             max_retries: Maximum number of retries for model loading
             frame_skip: Number of frames to skip between detections
             process_resolution: Resolution for processing frames
+            state_history_size: Number of frames to keep for state detection
         """
         super().__init__(threshold=threshold)
 
@@ -50,6 +52,15 @@ class PersonDetector(BaseDetector):
         self.frame_skip = frame_skip
         self.frame_count = 0
         self.process_resolution = process_resolution
+        
+        # State tracking
+        self.state_history_size = state_history_size
+        self.position_history = []
+        self.last_positions = []
+        self.current_state = 'unknown'
+        self.state_confidence = 0.0
+        self.movement_threshold = 20  # Pixels
+        self.lying_aspect_ratio_threshold = 2.0  # Width/Height ratio for lying detection
         
         # Default model path if none provided
         if model_path is None:
@@ -129,15 +140,49 @@ class PersonDetector(BaseDetector):
             self.logger.error(f"Error initializing detector: {str(e)}")
             raise
 
-    def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
-        """Process a frame to detect people.
-
+    def _analyze_state(self, detection: Dict) -> Tuple[str, float]:
+        """Analyze the state of a detected person based on their position and movement.
+        
         Args:
-            frame: Input frame
-
+            detection: Dictionary containing detection information
+            
         Returns:
-            Dict containing processed frame and detections
+            Tuple of (state, confidence)
         """
+        x, y, w, h = detection['box']
+        
+        # Calculate aspect ratio for lying detection
+        aspect_ratio = w / h if h > 0 else 0
+        
+        # Add current position to history
+        self.last_positions.append((x + w/2, y + h/2))
+        if len(self.last_positions) > self.state_history_size:
+            self.last_positions.pop(0)
+            
+        # Calculate movement
+        movement = 0
+        if len(self.last_positions) > 1:
+            for i in range(1, len(self.last_positions)):
+                prev_x, prev_y = self.last_positions[i-1]
+                curr_x, curr_y = self.last_positions[i]
+                movement += ((curr_x - prev_x)**2 + (curr_y - prev_y)**2)**0.5
+                
+        avg_movement = movement / len(self.last_positions) if self.last_positions else 0
+        
+        # Determine state
+        if aspect_ratio > self.lying_aspect_ratio_threshold:
+            state = 'lying'
+            confidence = min(1.0, aspect_ratio / self.lying_aspect_ratio_threshold)
+        elif avg_movement > self.movement_threshold:
+            state = 'moving'
+            confidence = min(1.0, avg_movement / self.movement_threshold)
+        else:
+            state = 'seated'
+            confidence = 1.0 - (avg_movement / self.movement_threshold)
+            
+        return state, confidence
+
+    def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         if frame is None:
             return {"frame": frame, "detections": [], "fps": self.fps}
 
@@ -149,11 +194,8 @@ class PersonDetector(BaseDetector):
             # Implement frame skipping for better performance
             self.frame_count += 1
             
-            # Only process every (frame_skip + 1) frames
             if self.frame_skip > 0 and self.frame_count % (self.frame_skip + 1) != 0:
-                # If we have a previous result, return it
                 if self.last_result is not None:
-                    # Update the frame in the previous result
                     self.last_result["frame"] = frame_with_detections
                     return self.last_result
             
@@ -166,31 +208,33 @@ class PersonDetector(BaseDetector):
             # Run YOLOv8 inference
             results = self.model(input_frame, verbose=False)
             
-            # Process results
             if results and len(results) > 0:
-                result = results[0]  # Get the first result (first image)
-                
-                # Get bounding boxes, confidence scores, and class IDs
+                result = results[0]
                 boxes = result.boxes.data.cpu().numpy()
                 
                 for box in boxes:
                     x1, y1, x2, y2, conf, class_id = box
                     
-                    # Only consider person class (class 0 in COCO dataset)
                     if int(class_id) == self.person_class_id and conf >= self.threshold:
-                        # Create detection result
+                        # Create detection with box coordinates
                         detection = {
-                            "box": (int(x1), int(y1), int(x2), int(y2)),
+                            "box": (int(x1), int(y1), int(x2-x1), int(y2-y1)),
                             "confidence": float(conf),
                             "class": "person"
                         }
+                        
+                        # Analyze state
+                        state, state_conf = self._analyze_state(detection)
+                        detection["state"] = state
+                        detection["state_confidence"] = state_conf
+                        
                         detections.append(detection)
                         
-                        # Draw the detection
+                        # Draw the detection with state information
                         self._draw_detection(
                             frame_with_detections,
-                            (int(x1), int(y1), int(x2-x1), int(y2-y1)),
-                            f"Person: {conf:.2f}",
+                            detection["box"],
+                            f"Person ({state}): {conf:.2f}",
                             (0, 255, 0)  # Green color for person
                         )
             
@@ -198,7 +242,6 @@ class PersonDetector(BaseDetector):
             end_time = time.time()
             elapsed_time = end_time - start_time
             
-            # Update FPS using exponential moving average
             if elapsed_time > 0:
                 current_fps = 1.0 / elapsed_time
                 self.fps = 0.9 * self.fps + 0.1 * current_fps if self.fps > 0 else current_fps
@@ -215,7 +258,7 @@ class PersonDetector(BaseDetector):
                 cv2.LINE_AA
             )
             
-            # Store the result for web interface
+            # Store the result
             self.last_result = {
                 "frame": frame_with_detections,
                 "detections": detections,
@@ -223,25 +266,10 @@ class PersonDetector(BaseDetector):
                 "timestamp": time.time()
             }
             
-            # Update detection history with new detections
-            if detections:
-                self.detection_history.append({
-                    "time": time.time(),
-                    "count": len(detections)
-                })
-                
-                # Keep history at max size
-                if len(self.detection_history) > self.max_history_size:
-                    self.detection_history.pop(0)
-                
-                # Update last detection time
-                self.last_detection_time = time.time()
-            
             return self.last_result
             
         except Exception as e:
             self.logger.error(f"Error in process_frame: {str(e)}")
-            # Return empty results in case of error
             return {
                 "frame": frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8),
                 "detections": [],
@@ -250,14 +278,6 @@ class PersonDetector(BaseDetector):
             }
     
     def _draw_detection(self, frame, bbox, label, color):
-        """Draw detection bounding box and label on frame.
-        
-        Args:
-            frame: Frame to draw on
-            bbox: Bounding box (x, y, w, h)
-            label: Label to display
-            color: Color for the bounding box and label
-        """
         x, y, w, h = bbox
         
         # Draw rectangle

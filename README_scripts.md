@@ -31,6 +31,7 @@ scripts\fix_emotion_models.bat
 ```
 
 This will:
+
 1. Verify your Python installation
 2. Run the setup_models.py script to copy all emotion models
 3. Verify the emotion model installation
@@ -102,4 +103,4 @@ baby_monitor_system/
 
 - Always run these scripts from the project root directory
 - Windows batch files (.bat) are Windows-specific and won't work on other operating systems
-- Use the Python module notation (`python -m src.babymonitor.utils.script_name`) to ensure proper path resolution 
+- Use the Python module notation (`python -m src.babymonitor.utils.script_name`) to ensure proper path resolution

@@ -536,14 +536,8 @@ class BabyMonitorWeb:
                 self.connected_clients.discard(request.sid)
             self.logger.info(f"Client disconnected: {request.sid}")
 
-        @self.socketio.on('request_metrics')
-        def handle_request_metrics():
-            """Handle client request for current metrics."""
-            with self.metrics_lock:
-                self.socketio.emit('metrics_update', self.metrics_history)
-
-        @self.socketio.on('get_cameras')
-        def handle_get_cameras(data=None):
+        @self.socketio.on("request_camera_list")
+        def handle_request_camera_list(data=None):
             try:
                 if not self.monitor_system:
                     return {'success': False, 'error': 'Monitor system not initialized'}
@@ -692,62 +686,6 @@ class BabyMonitorWeb:
                 except Exception as e:
                     self.logger.error(f"Error toggling audio: {str(e)}")
                     self.emit_alert("error", f"Failed to toggle audio: {str(e)}")
-
-        @self.socketio.on('run_test')
-        def handle_run_test(data):
-            """Handle test execution requests."""
-            try:
-                test_type = data.get('type')
-                if not test_type:
-                    return {'success': False, 'error': 'No test type specified'}
-
-                # Emit test started event
-                self.socketio.emit('test_started', {'type': test_type})
-
-                # Import test module
-                from babymonitor.tests.test_camera_performance import test_camera_only, test_motion_detection
-
-                # Run the requested test
-                if test_type == 'camera':
-                    # Run in a separate thread to not block
-                    thread = threading.Thread(target=test_camera_only)
-                    thread.daemon = True
-                    thread.start()
-                    return {'success': True, 'message': 'Camera test started'}
-                
-                elif test_type == 'motion':
-                    thread = threading.Thread(target=test_motion_detection)
-                    thread.daemon = True
-                    thread.start()
-                    return {'success': True, 'message': 'Motion detection test started'}
-                
-                elif test_type == 'full':
-                    def run_full_test():
-                        test_camera_only()
-                        time.sleep(1)  # Brief pause between tests
-                        test_motion_detection()
-                    
-                    thread = threading.Thread(target=run_full_test)
-                    thread.daemon = True
-                    thread.start()
-                    return {'success': True, 'message': 'Full performance test started'}
-                
-                elif test_type == 'debug':
-                    # Toggle debug mode
-                    self.dev_mode = not self.dev_mode
-                    return {
-                        'success': True,
-                        'message': f'Debug mode {"enabled" if self.dev_mode else "disabled"}',
-                        'dev_mode': self.dev_mode
-                    }
-                
-                else:
-                    return {'success': False, 'error': f'Unknown test type: {test_type}'}
-
-            except Exception as e:
-                self.logger.error(f"Error running test: {str(e)}")
-                self.socketio.emit('test_error', {'error': str(e)})
-                return {'success': False, 'error': str(e)}
 
     def emit_frame(self, frame):
         """Queue frame for emission to connected clients."""

@@ -8,8 +8,6 @@ import logging
 from enum import Enum
 from typing import Dict, Any, Optional
 from .person_detector import PersonDetector
-from .person_tracker import PersonTracker
-from .motion_detector import MotionDetector
 from .emotion_detector import EmotionDetector
 
 # Configure logging
@@ -19,8 +17,6 @@ class DetectorType(Enum):
     """Supported detector types."""
     PERSON = "person"
     YOLOV8 = "yolov8"
-    PERSON_TRACKER = "person_tracker"
-    MOTION = "motion"
     EMOTION = "emotion"
 
 class DetectorFactory:
@@ -28,11 +24,11 @@ class DetectorFactory:
     
     @staticmethod
     def create_detector(detector_type: str = "person",
-                        model_path: Optional[str] = None,
-                        threshold: float = 0.5,
-                        force_cpu: bool = False,
-                        config: Optional[Dict[str, Any]] = None,
-                        **kwargs) -> PersonDetector:
+                       model_path: Optional[str] = None,
+                       threshold: float = 0.5,
+                       force_cpu: bool = False,
+                       config: Optional[Dict[str, Any]] = None,
+                       **kwargs) -> PersonDetector:
         """Create a detector instance.
         
         Args:
@@ -70,41 +66,6 @@ class DetectorFactory:
             )
         else:
             raise ValueError(f"Unsupported detector type: {detector_type}")
-
-    @staticmethod
-    def create_person_tracker(detector: PersonDetector, config: Dict[str, Any]) -> PersonTracker:
-        """Create a person tracker instance.
-        
-        Args:
-            detector: PersonDetector instance
-            config: Configuration for the person tracker
-            
-        Returns:
-            PersonTracker instance
-        """
-        return PersonTracker(
-            detector=detector,
-            threshold=config.get("threshold", 0.5),
-            max_history=config.get("max_history", 30)
-        )
-
-    @staticmethod
-    def create_motion_detector(config: Dict[str, Any]) -> MotionDetector:
-        """Create a motion detector instance.
-        
-        Args:
-            config: Configuration for the motion detector
-            
-        Returns:
-            MotionDetector instance
-        """
-        return MotionDetector(
-            motion_threshold=config.get("motion_threshold", 0.02),
-            fall_threshold=config.get("fall_threshold", 0.15),
-            history=config.get("history", 500),
-            var_threshold=config.get("var_threshold", 16),
-            detect_shadows=config.get("detect_shadows", False)
-        )
 
     @staticmethod
     def create_emotion_detector(config: Dict[str, Any]) -> EmotionDetector:
@@ -145,31 +106,6 @@ class DetectorFactory:
                     threshold=config.get("threshold", 0.5),
                     force_cpu=config.get("force_cpu", False),
                     max_retries=config.get("max_retries", 3)
-                )
-                
-            elif detector_type == DetectorType.PERSON_TRACKER.value:
-                # Create person detector first if not provided
-                person_detector = config.get("detector")
-                if not person_detector:
-                    person_detector = PersonDetector(
-                        model_path=config.get("model_path"),
-                        threshold=config.get("threshold", 0.5),
-                        force_cpu=config.get("force_cpu", False)
-                    )
-                
-                return PersonTracker(
-                    detector=person_detector,
-                    threshold=config.get("threshold", 0.5),
-                    max_history=config.get("max_history", 30)
-                )
-                
-            elif detector_type == DetectorType.MOTION.value:
-                return MotionDetector(
-                    motion_threshold=config.get("motion_threshold", 0.02),
-                    fall_threshold=config.get("fall_threshold", 0.15),
-                    history=config.get("history", 500),
-                    var_threshold=config.get("var_threshold", 16),
-                    detect_shadows=config.get("detect_shadows", False)
                 )
                 
             elif detector_type == DetectorType.EMOTION.value:

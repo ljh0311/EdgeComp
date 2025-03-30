@@ -1,8 +1,7 @@
 """
 Baby Monitor Package
 ==================
-A comprehensive baby monitoring system with emotion recognition, 
-camera monitoring, and other features.
+Main package for the Baby Monitor application.
 """
 
 # Version information

@@ -37,6 +37,7 @@ python scripts/download_tflite_model.py
 ```
 
 This script will:
+
 - Download a pre-trained MobileNet SSD v1 model from TensorFlow
 - Save it to your models directory as person_detection_model.tflite
 - Create a person_labels.txt file
@@ -50,6 +51,7 @@ python scripts/convert_to_cpu_model.py
 ```
 
 This script will:
+
 - Create a simple MobileNetV2-based model
 - Convert it to TFLite format
 - Save it to your models directory
@@ -232,4 +234,4 @@ detector = DetectorFactory.create_detector(detector_type)
 
 ## Credits
 
-The lightweight detection system is inspired by the BirdRepeller project and uses TensorFlow Lite for efficient inference. 
+The lightweight detection system is inspired by the BirdRepeller project and uses TensorFlow Lite for efficient inference.

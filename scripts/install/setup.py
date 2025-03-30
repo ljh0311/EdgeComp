@@ -985,54 +985,79 @@ def run_configuration_wizard():
 
 
 def run_gui_configuration():
-    """Run just the configuration page of the GUI installer."""
     try:
-        from PyQt5.QtWidgets import QApplication, QWizard, QVBoxLayout, QDialog
-        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton
         from scripts.install.gui_installer import ConfigurationPage
         
-        app = QApplication(sys.argv)
+        # Create application if one doesn't exist
+        app = QApplication.instance() or QApplication(sys.argv)
         
         dialog = QDialog()
         dialog.setWindowTitle("Baby Monitor System Configuration")
-        dialog.setMinimumSize(600, 400)
+        dialog.setMinimumSize(800, 600)  # Larger size for better usability
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowMaximizeButtonHint)
         
         layout = QVBoxLayout()
         config_page = ConfigurationPage()
         
-        # Add the configuration page to the dialog
+        # Add save/cancel buttons
+        button_layout = QVBoxLayout()
+        save_button = QPushButton("Save Configuration")
+        cancel_button = QPushButton("Cancel")
+        
+        save_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        
+        # Add widgets to main layout
         layout.addWidget(config_page)
+        layout.addLayout(button_layout)
         dialog.setLayout(layout)
         
         # Show the dialog
         if dialog.exec_() == QDialog.Accepted:
-            # Apply configuration
-            mode = config_page.get_mode()
-            camera_id = config_page.field("camera_id")
-            resolution = config_page.field("resolution")
-            web_port = config_page.field("web_port")
-            detection_threshold = config_page.field("detection_threshold")
-            
-            # Update .env file
-            create_env_file(
-                mode=mode,
-                camera_id=camera_id,
-                resolution=resolution,
-                web_port=web_port,
-                detection_threshold=detection_threshold,
-                force=True
-            )
-            
-            logger.info("Configuration updated successfully")
+            try:
+                # Get configuration values
+                mode = config_page.get_mode()
+                camera_id = config_page.field("camera_id") 
+                resolution = config_page.field("resolution")
+                web_port = config_page.field("web_port")
+                detection_threshold = config_page.field("detection_threshold")
+                
+                # Validate values
+                if not web_port or not str(web_port).isdigit():
+                    raise ValueError("Invalid web port specified")
+                    
+                if not camera_id and camera_id != 0:
+                    raise ValueError("Camera ID is required")
+                
+                # Update .env file
+                create_env_file(
+                    mode=mode,
+                    camera_id=camera_id,
+                    resolution=resolution,
+                    web_port=web_port,
+                    detection_threshold=detection_threshold,
+                    force=True
+                )
+                
+                logger.info("Configuration updated successfully")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error saving configuration: {e}")
+                return False
         else:
-            logger.info("Configuration cancelled")
+            logger.info("Configuration cancelled by user")
+            return False
             
     except Exception as e:
         logger.error(f"Error launching configuration dialog: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return False
-
 
 def setup_camera_management(force_rescan=False):
     """Setup camera management system."""

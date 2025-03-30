@@ -28,30 +28,20 @@ class EmotionDataset(Dataset):
     """Custom dataset for emotion recognition."""
     
     def __init__(self, tsv_file, audio_dir, processor, max_length=16000):
-        """Initialize dataset.
-        
-        Args:
-            tsv_file: Path to TSV file with annotations
-            audio_dir: Directory containing audio files
-            processor: Wav2Vec2 processor for feature extraction
-            max_length: Maximum length of audio in samples
-        """
+        """Initialize dataset."""
         self.df = pd.read_csv(tsv_file, sep='\t')
         self.audio_dir = Path(audio_dir)
         self.processor = processor
         self.max_length = max_length
         
-        # Create label mapping for both full words and single letters
+        # Simple emotion label mapping
         self.label2id = {
-            'angry': 0, 'a': 0,
-            'happy': 1, 'h': 1,
-            'neutral': 2, 'n': 2,
-            'sad': 3, 's': 3
+            'angry': 0, 'happy': 1, 
+            'neutral': 2, 'sad': 3
         }
         
-        # Verify all labels are in our mapping
-        unique_labels = self.df['label'].str.lower().unique()
-        for label in unique_labels:
+        # Check for unknown labels
+        for label in self.df['label'].str.lower().unique():
             if label not in self.label2id:
                 logger.warning(f"Found unknown label: {label}")
         
