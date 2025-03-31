@@ -20,6 +20,10 @@ Options:
     --debug                 Enable debug mode
 """
 
+# Apply eventlet monkey patching at the very beginning
+import eventlet
+eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
+
 import os
 import sys
 import time
@@ -78,10 +82,6 @@ def run_normal_mode(args):
         logger.info("Initializing camera...")
         camera = Camera(args.camera_id)
         
-        # Initialize audio processor
-        logger.info("Initializing audio processor...")
-        audio_processor = AudioProcessor(device=args.input_device)
-        
         # Initialize person detector
         logger.info("Initializing person detector...")
         person_detector = PersonDetector(
@@ -93,6 +93,20 @@ def run_normal_mode(args):
         emotion_detector = EmotionDetector(
             threshold=args.threshold
         )
+        
+        # Initialize audio processor with emotion detector
+        logger.info("Initializing audio processor...")
+        audio_processor = AudioProcessor(
+            device=args.input_device,
+            emotion_detector=emotion_detector
+        )
+        
+        # Set up emotion callback to send updates to web interface
+        def emotion_callback(result):
+            if 'web_interface' in locals():
+                web_interface.emit_emotion_update(result)
+        
+        audio_processor.set_emotion_callback(emotion_callback)
         
         # Start web interface
         logger.info("Starting web interface...")
@@ -175,10 +189,6 @@ def run_dev_mode(args):
         logger.info("Initializing camera...")
         camera = Camera(args.camera_id)
         
-        # Initialize audio processor
-        logger.info("Initializing audio processor...")
-        audio_processor = AudioProcessor(device=args.input_device)
-        
         # Initialize person detector
         logger.info("Initializing person detector...")
         person_detector = PersonDetector(
@@ -190,6 +200,20 @@ def run_dev_mode(args):
         emotion_detector = EmotionDetector(
             threshold=args.threshold
         )
+        
+        # Initialize audio processor with emotion detector
+        logger.info("Initializing audio processor...")
+        audio_processor = AudioProcessor(
+            device=args.input_device,
+            emotion_detector=emotion_detector
+        )
+        
+        # Set up emotion callback to send updates to web interface
+        def emotion_callback(result):
+            if 'web_interface' in locals():
+                web_interface.emit_emotion_update(result)
+        
+        audio_processor.set_emotion_callback(emotion_callback)
         
         # Start web interface in dev mode
         logger.info("Starting web interface in developer mode...")
@@ -282,8 +306,151 @@ def run_local_mode(args):
         logger.error(f"Error in local mode: {e}")
         raise
 
-def main():
-    """Parse command line arguments and start the appropriate mode."""
+def main(args):
+    # Set debug level if requested
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        # Also set debug level for audio processor and emotion detector
+        logging.getLogger('AudioProcessor').setLevel(logging.INFO)
+        logging.getLogger('babymonitor.detectors.emotion_detector').setLevel(logging.INFO)
+        
+    # Initialize camera first
+    logger.info("Initializing camera...")
+    camera = Camera(args.camera_id)
+    if not camera or not camera.is_opened():
+        logger.error("Failed to initialize camera")
+        return 1
+
+    # Initialize detectors
+    logger.info("Initializing detectors...")
+    person_detector = PersonDetector(threshold=args.threshold)
+    emotion_detector = EmotionDetector(threshold=args.threshold)
+    
+    # Initialize web interface
+    logger.info("Initializing web interface...")
+    web = SimpleBabyMonitorWeb(
+        camera=camera,  # Pass the initialized camera
+        person_detector=person_detector,
+        emotion_detector=emotion_detector,
+        host=args.host,
+        port=args.port,
+        mode=args.mode,
+        debug=args.debug
+    )
+    
+    # Initialize audio processor with emotion detector
+    logger.info("Initializing audio processor...")
+    audio_processor = AudioProcessor(
+        device=args.input_device,
+        emotion_detector=emotion_detector
+    )
+    
+    # Set up emotion callback
+    audio_processor.set_emotion_callback(web.emit_emotion_update)
+    
+    # Import the global message queue
+    from babymonitor.audio import global_message_queue
+    
+    # Create a greenlet to process messages from the global queue
+    def process_message_queue():
+        # Add error handling wrapper around entire function
+        try:
+            logger.info("Starting message queue processor")
+            message_count = 0
+            last_stats_time = time.time()
+            processed_batch_ids = set()  # Track already processed batch IDs
+            
+            while True:
+                try:
+                    # Check if we should stop
+                    if not web.running:
+                        logger.info("Web interface stopped, stopping message queue processor")
+                        break
+                    
+                    # Use a non-blocking get with short timeout to allow for cooperative multitasking
+                    try:
+                        message_type, callback, data = global_message_queue.get(timeout=0.1)
+                        message_count += 1
+                        
+                        # Log statistics periodically
+                        current_time = time.time()
+                        if current_time - last_stats_time > 30:
+                            logger.debug(f"Message queue stats: processed {message_count} messages in the last 30 seconds")
+                            message_count = 0
+                            last_stats_time = current_time
+                            # Also clean up old batch IDs to prevent set from growing too large
+                            processed_batch_ids = set()
+                        
+                        # Process message based on type
+                        if message_type == 'emotion':
+                            try:
+                                if data:
+                                    # Check for duplicate batch_id to avoid processing the same audio chunk multiple times
+                                    batch_id = data.get('batch_id', 'unknown')
+                                    
+                                    # Only process if we haven't seen this batch_id before
+                                    if batch_id not in processed_batch_ids:
+                                        processed_batch_ids.add(batch_id)
+                                        
+                                        # Log message details at debug level
+                                        emotion = data.get('emotion', 'unknown')
+                                        confidence = data.get('confidence', 0.0)
+                                        
+                                        logger.debug(f"Processing emotion message: {emotion} ({confidence:.4f}) [batch: {batch_id}]")
+                                        
+                                        # Send to web interface - we're in the same eventlet context as the web server
+                                        web.emit_emotion_update(data)
+                                        
+                                    else:
+                                        logger.debug(f"Skipping duplicate emotion batch: {batch_id}")
+                                else:
+                                    logger.warning("Received empty emotion data")
+                            except Exception as e:
+                                logger.error(f"Error processing emotion update: {str(e)}")
+                                import traceback
+                                logger.error(traceback.format_exc())
+                    except eventlet.queue.Empty:
+                        # Queue is empty, just yield to other greenlets
+                        eventlet.sleep(0.05)
+                        continue
+                    
+                    # Always yield to other greenlets after processing a message
+                    # This is crucial for eventlet cooperative multitasking
+                    eventlet.sleep(0)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing message queue: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    eventlet.sleep(0.5)  # Sleep longer after an error
+        except Exception as e:
+            logger.error(f"Message queue processor crashed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    logger.info("Starting message queue processor...")
+    queue_processor = eventlet.spawn(process_message_queue)
+    
+    try:
+        # Start audio processing explicitly
+        logger.info("Starting audio processing...")
+        audio_processor.start()
+        
+        # Start web interface (this will block)
+        web.run()
+        
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    except Exception as e:
+        logger.error(f"Error in main: {str(e)}")
+    finally:
+        logger.info("Cleaning up...")
+        audio_processor.stop()
+        web.stop()
+        camera.release()
+
+def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Baby Monitor System')
     
     # Mode selection
@@ -305,18 +472,8 @@ def main():
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode')
     
-    args = parser.parse_args()
-    
-    # Start the appropriate mode
-    if args.mode == 'normal':
-        return run_normal_mode(args)
-    elif args.mode == 'dev':
-        return run_dev_mode(args)
-    elif args.mode == 'local':
-        return run_local_mode(args)
-    else:
-        logger.error(f"Unknown mode: {args.mode}")
-        return 1
+    return parser.parse_args()
 
 if __name__ == '__main__':
-    sys.exit(main())
+    args = parse_args()
+    main(args)

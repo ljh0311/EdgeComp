@@ -12,11 +12,11 @@ import socket
 import threading
 import logging
 import eventlet
-eventlet.monkey_patch()  # Patch standard library for eventlet compatibility
 from datetime import datetime
 from flask import Flask, render_template, Response, jsonify, redirect, url_for, request
 from flask_socketio import SocketIO
 import numpy as np
+import cv2
 import psutil
 
 # Configure logging
@@ -38,44 +38,68 @@ class SimpleBabyMonitorWeb:
     """
     Simplified web interface for the Baby Monitor System
     """
-    def __init__(self, camera=None, person_detector=None, emotion_detector=None, host='0.0.0.0', port=5000, debug=False, mode="normal"):
-        """
-        Initialize the web server
-        
-        Args:
-            camera: Camera instance
-            person_detector: Person detector instance
-            emotion_detector: Emotion detector instance
-            host: Host to bind to
-            port: Port to bind to
-            debug: Enable debug mode
-            mode: Web interface mode ('normal' or 'dev')
-        """
-        self.host = host
-        self.port = find_free_port(port)  # Find an available port
-        self.debug = debug
-        self.mode = mode
+    def __init__(self, camera=None, person_detector=None, emotion_detector=None, host='0.0.0.0', port=5000, mode='normal', debug=False):
+        """Initialize the web interface"""
         self.camera = camera
         self.person_detector = person_detector
         self.emotion_detector = emotion_detector
-        
-        # Create Flask app and Socket.IO
+        self.host = host
+        self.port = port
+        self.mode = mode
+        self.debug = debug
         self.app = Flask(__name__, 
-                        template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
-                        static_folder=os.path.join(os.path.dirname(__file__), 'static'))
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='eventlet')
+                         static_folder=os.path.join(os.path.dirname(__file__), 'static'),
+                         template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
+        
+        # Add throttling for emotion updates
+        self.last_emotion_update = {
+            'emotion': None,
+            'confidence': 0.0,
+            'timestamp': 0,
+            'emitted': False
+        }
+        self.emotion_update_interval = 0.5  # Minimum seconds between emotion updates
+        
+        # Initialize metrics
+        self._setup_metrics()
+        
+        # Configure logging
+        self._configure_logging()
+        
+        # Initialize Socket.IO
+        self._init_socketio()
+        
+        # Initialize routes
+        self._setup_routes()
+        
+        # Running flag
+        self.running = True
         
         # Frame buffer
         self.frame_buffer = None
         self.frame_lock = threading.Lock()
         
-        # Metrics
+        # Create a blank frame for when no camera feed is available
+        self.blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(self.blank_frame, "No camera feed available", (120, 240), 
+                  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        _, self.blank_buffer = cv2.imencode('.jpg', self.blank_frame)
+        self.blank_bytes = self.blank_buffer.tobytes()
+        
+        # Start time
+        self.start_time = time.time()
+        
+    def _setup_metrics(self):
+        """Initialize metrics"""
         self.metrics = {
             'current': {
-                'fps': 0,
-                'detections': 0,
                 'emotion': 'unknown',
                 'emotion_confidence': 0.0,
+                'person_detected': False,
+                'person_confidence': 0.0,
+                'fps': 0.0,
+                'audio_level': 0.0,
+                'detections': 0
             },
             'history': {
                 'emotions': {
@@ -84,26 +108,42 @@ class SimpleBabyMonitorWeb:
                     'babbling': 0,
                     'silence': 0,
                     'unknown': 0
-                }
+                },
+                'person_detections': 0,
+                'alerts': 0
+            },
+            'settings': {
+                'emotion_threshold': 0.5,
+                'person_threshold': 0.5,
+                'alert_timeout': 60,
+                'alert_on_crying': True,
+                'alert_on_person': True
             },
             'detection_types': {
                 'face': 0,
                 'upper_body': 0,
                 'full_body': 0
             },
-            'total_detections': 0,
+            'total_detections': 0
         }
         
+        # Initialize emotion log
+        self.emotion_log = []
+        self.max_log_entries = 100
+        
+        # Initialize alerts
+        self.alerts = []
+        
         # Initialize emotion distribution with supported emotions
-        if emotion_detector and hasattr(emotion_detector, 'emotions'):
-            self.metrics['history']['emotions'] = {emotion: 0 for emotion in emotion_detector.emotions}
+        if self.emotion_detector and hasattr(self.emotion_detector, 'emotions'):
+            self.metrics['history']['emotions'] = {emotion: 0 for emotion in self.emotion_detector.emotions}
         
         # System status
         self.system_status = {
             'uptime': '00:00:00',
             'cpu_usage': 0,
             'memory_usage': 0,
-            'camera_status': 'connected' if self.camera else 'disconnected',
+            'camera_status': 'connected' if self.camera and self.camera.is_opened() else 'disconnected',
             'person_detector_status': 'running' if self.person_detector else 'stopped',
             'emotion_detector_status': 'running' if self.emotion_detector else 'stopped',
         }
@@ -112,33 +152,38 @@ class SimpleBabyMonitorWeb:
         self.emotion_log = []
         self.max_log_entries = 50  # Keep last 50 entries
         
-        # Running flag
-        self.running = False
-        
-        # Start time
-        self.start_time = time.time()
-        
-        # Setup routes
-        self._setup_routes()
-        
-        # Start processing thread
-        self.processing_thread = threading.Thread(target=self._process_frames)
-        self.processing_thread.daemon = True
-        
-        # Start system status update thread
-        self.status_thread = threading.Thread(target=self._update_system_status)
-        self.status_thread.daemon = True
-        
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
         # Initialize alerts list
         self.alerts = []
         
-    def _setup_routes(self):
-        """Setup Flask routes"""
+    def _configure_logging(self):
+        """Configure logging"""
+        # This method is now empty as the existing logging configuration is used
+        pass
+
+    def _init_socketio(self):
+        """Initialize Socket.IO"""
+        # Configure Socket.IO with more reliable settings
+        self.socketio = SocketIO(
+            self.app, 
+            cors_allowed_origins="*", 
+            async_mode='eventlet',
+            logger=True,
+            engineio_logger=True if self.debug else False,
+            ping_timeout=60,
+            ping_interval=25
+        )
         
+        # Set up Socket.IO connection event handlers
+        @self.socketio.on('connect')
+        def handle_connect():
+            logger.info(f"Client connected: {request.sid}")
+            
+        @self.socketio.on('disconnect')
+        def handle_disconnect():
+            logger.info(f"Client disconnected: {request.sid}")
+        
+    def _setup_routes(self):
+        """Initialize routes"""
         @self.app.route('/')
         def index():
             """Main page"""
@@ -438,34 +483,23 @@ class SimpleBabyMonitorWeb:
     
     def _generate_frames(self):
         """Generate video frames for streaming"""
-        import cv2
-        
-        # Create a blank frame for when no camera feed is available
-        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(blank_frame, "No camera feed available", (120, 240), 
-                  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        _, blank_buffer = cv2.imencode('.jpg', blank_frame)
-        blank_bytes = blank_buffer.tobytes()
-        
         while True:
             try:
                 with self.frame_lock:
                     if self.frame_buffer is None:
                         # If no frame is available, yield a blank frame
                         yield (b'--frame\r\n'
-                             b'Content-Type: image/jpeg\r\n\r\n' + blank_bytes + b'\r\n')
+                             b'Content-Type: image/jpeg\r\n\r\n' + self.blank_bytes + b'\r\n')
                     else:
                         # Yield the frame
                         yield (b'--frame\r\n'
                              b'Content-Type: image/jpeg\r\n\r\n' + self.frame_buffer + b'\r\n')
                 
                 # Sleep to control frame rate
-                time.sleep(0.03)  # ~30 FPS
+                eventlet.sleep(0.03)  # ~30 FPS
             except Exception as e:
-                logger.error(f"Error generating frames: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                time.sleep(0.1)
+                logger.error(f"Error generating frames: {str(e)}")
+                eventlet.sleep(0.1)
     
     def _add_to_emotion_log(self, entry):
         """Add an entry to the emotion log"""
@@ -476,24 +510,24 @@ class SimpleBabyMonitorWeb:
     
     def _process_frames(self):
         """Process frames from camera"""
-        import cv2
-        
-        # Initialize detection history for smoothing
-        detection_history = []
-        max_history = 5
-        last_fps_time = time.time()
         frame_count = 0
-        
-        # Set initial emotion timestamp
+        last_fps_time = time.time()
         last_emotion_log_time = time.time()
         
         while self.running:
             try:
+                if not self.camera or not self.camera.is_opened():
+                    # Update frame buffer with blank frame
+                    with self.frame_lock:
+                        self.frame_buffer = self.blank_bytes
+                    eventlet.sleep(0.1)
+                    continue
+                
                 # Capture frame
                 ret, frame = self.camera.read()
                 if not ret:
                     logger.warning("Failed to capture frame")
-                    time.sleep(0.1)
+                    eventlet.sleep(0.1)
                     continue
                 
                 # Calculate FPS
@@ -504,128 +538,24 @@ class SimpleBabyMonitorWeb:
                     frame_count = 0
                     last_fps_time = current_time
                 
-                # Process frame with person detector
-                results = self.person_detector.process_frame(frame)
-                
-                # Get the processed frame with bounding boxes and use it for display
-                processed_frame = results.get('frame', frame)
-                
-                # Get emotion detection results
-                if self.emotion_detector:
-                    try:
-                        emotion_results = self.emotion_detector.get_current_state()
-                        if emotion_results:
-                            current_emotion = emotion_results['emotion']
-                            confidence = emotion_results['confidence']
-                            
-                            # Only log emotion changes or high confidence emissions
-                            should_log = False
-                            
-                            # Log emotion changes
-                            if current_emotion != self.metrics['current'].get('emotion', 'unknown'):
-                                should_log = True
-                                
-                            # Log high confidence emotions periodically
-                            elif confidence > 0.7 and (current_time - last_emotion_log_time) > 60:  # Log once per minute
-                                should_log = True
-                                last_emotion_log_time = current_time
-                            
-                            # Update current emotion metrics
-                            self.metrics['current']['emotion'] = current_emotion
-                            self.metrics['current']['emotion_confidence'] = confidence
-                            
-                            # Update emotion history
-                            if current_emotion in self.metrics['history']['emotions']:
-                                self.metrics['history']['emotions'][current_emotion] += 1
-                            
-                            # Add to emotion log if needed
-                            if should_log:
-                                log_entry = {
-                                    'timestamp': current_time,
-                                    'emotion': current_emotion,
-                                    'confidence': confidence,
-                                    'message': self._get_emotion_message(current_emotion, confidence)
-                                }
-                                self._add_to_emotion_log(log_entry)
-                            
-                            # Emit emotion update via Socket.IO
-                            self.socketio.emit('emotion_update', {
-                                'emotion': current_emotion,
-                                'confidence': confidence,
-                                'confidences': emotion_results['confidences']
-                            })
-                    except Exception as e:
-                        logger.error(f"Error getting emotion state: {e}")
-                
-                # Update detection metrics and emit update
-                if 'detections' in results:
-                    detection_count = len(results['detections'])
-                    # Update metrics
-                    self.metrics['current']['detections'] = detection_count
-                    
-                    # Update detection types
-                    if detection_count > 0:
-                        # Increment full-body count for YOLOv8 detections
-                        self.metrics['detection_types']['full_body'] = self.metrics['detection_types'].get('full_body', 0) + detection_count
-                        
-                    # Emit detection update via Socket.IO
-                    self.socketio.emit('detection_update', {
-                        'count': detection_count,
-                        'fps': self.metrics['current']['fps'],
-                        'detections': results['detections']  # Include actual detection data
-                    })
-                
-                # Clean up old alerts
-                current_time = time.time()
-                self.alerts = [a for a in self.alerts if current_time - a['timestamp'] < 60]
-                
-                # Update alert and notification for crying
-                if self.metrics['current']['emotion'] == 'crying' and self.metrics['current']['emotion_confidence'] > 0.7:
-                    # Check if we need to add a new alert
-                    if not self.alerts or (current_time - self.alerts[-1]['timestamp'] > 10 and self.alerts[-1]['type'] != 'crying'):
-                        alert = {
-                            'message': 'Baby is crying with high confidence!',
-                            'type': 'crying',
-                            'timestamp': current_time
-                        }
-                        self.alerts.append(alert)
-                        self.socketio.emit('alert', alert)
+                # Process frame with person detector if available
+                if self.person_detector:
+                    results = self.person_detector.process_frame(frame)
+                    processed_frame = results.get('frame', frame)
+                else:
+                    processed_frame = frame
                 
                 # Encode and store frame
                 with self.frame_lock:
-                    # Encode the processed frame with bounding boxes
                     _, buffer = cv2.imencode('.jpg', processed_frame)
                     self.frame_buffer = buffer.tobytes()
                 
-                # Sleep to control CPU usage
-                time.sleep(0.02)  # 50 FPS maximum
+                # Sleep to control frame rate
+                eventlet.sleep(0.02)  # ~50 FPS maximum
                 
             except Exception as e:
-                logger.error(f"Error processing frame: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                time.sleep(0.1)
-    
-    def _get_emotion_message(self, emotion, confidence):
-        """Get a human-readable message for an emotion detection"""
-        if emotion == 'crying':
-            if confidence > 0.85:
-                return "Baby is crying loudly! Needs immediate attention."
-            elif confidence > 0.7:
-                return "Baby is crying. May need attention."
-            else:
-                return "Baby might be starting to cry."
-        elif emotion == 'laughing':
-            if confidence > 0.8:
-                return "Baby is happily laughing!"
-            else:
-                return "Baby is making happy sounds."
-        elif emotion == 'babbling':
-            return "Baby is babbling or talking."
-        elif emotion == 'silence':
-            return "Baby is quiet."
-        else:
-            return f"Detected {emotion}."
+                logger.error(f"Error processing frame: {str(e)}")
+                eventlet.sleep(0.1)
     
     def _update_system_status(self):
         """Update system status information"""
@@ -686,29 +616,26 @@ class SimpleBabyMonitorWeb:
                 })
                 
                 # Sleep for 1 second
-                time.sleep(1)
+                eventlet.sleep(1)
                 
             except Exception as e:
-                logger.error(f"Error updating system status: {e}")
-                time.sleep(1)
+                logger.error(f"Error updating system status: {str(e)}")
+                eventlet.sleep(1)
     
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        logger.info(f"Received signal {signum}")
-        self.stop()
-        
     def run(self):
-        """Run the web server in the current thread"""
+        """Run the web server"""
+        if not self.camera:
+            logger.error("No camera available")
+            return
+            
         self.running = True
         logger.info(f"Running Baby Monitor Web Server in {self.mode.upper()} mode on http://{self.host}:{self.port}")
         
-        # Start processing thread if not already running
-        if not self.processing_thread.is_alive():
-            self.processing_thread.start()
+        # Start frame processing in a separate greenlet
+        eventlet.spawn(self._process_frames)
         
-        # Start system status thread if not already running
-        if not self.status_thread.is_alive():
-            self.status_thread.start()
+        # Start system status updates in a separate greenlet
+        eventlet.spawn(self._update_system_status)
         
         try:
             # Run the Flask app with Socket.IO
@@ -717,13 +644,10 @@ class SimpleBabyMonitorWeb:
                 host=self.host,
                 port=self.port,
                 debug=self.debug,
-                use_reloader=False  # Disable reloader to prevent duplicate processes
+                use_reloader=False
             )
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt")
-            self.stop()
         except Exception as e:
-            logger.error(f"Error running web server: {e}")
+            logger.error(f"Error running web server: {str(e)}")
             self.stop()
     
     def stop(self):
@@ -735,32 +659,127 @@ class SimpleBabyMonitorWeb:
         logger.info("Stopping Baby Monitor Web Server")
         
         try:
-            # Stop Socket.IO
             if hasattr(self, 'socketio'):
                 self.socketio.stop()
-            
-            # Stop camera if it's running
-            if self.camera and hasattr(self.camera, 'release'):
-                self.camera.release()
-            
-            # Stop emotion detector if it's running
-            if self.emotion_detector and hasattr(self.emotion_detector, 'stop'):
-                self.emotion_detector.stop()
-            
-            # Stop person detector if it's running
-            if self.person_detector and hasattr(self.person_detector, 'stop'):
-                self.person_detector.stop()
-            
-            # Wait for threads to finish
-            if hasattr(self, 'processing_thread') and self.processing_thread.is_alive():
-                self.processing_thread.join(timeout=1.0)
-            
-            if hasattr(self, 'status_thread') and self.status_thread.is_alive():
-                self.status_thread.join(timeout=1.0)
-            
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
-            
+            logger.error(f"Error during shutdown: {str(e)}")
         finally:
             logger.info("Web server stopped")
-            os._exit(0)  # Force exit if normal shutdown fails 
+
+    def emit_emotion_update(self, emotion_data):
+        """
+        Emit emotion update to connected clients
+        
+        Args:
+            emotion_data (dict): Dictionary containing emotion data with keys:
+                - emotion (str): Detected emotion
+                - confidence (float): Confidence score
+        """
+        try:
+            if not isinstance(emotion_data, dict):
+                logger.warning(f"Invalid emotion_data format: {emotion_data}")
+                return
+                
+            emotion = emotion_data.get('emotion', 'unknown')
+            confidence = emotion_data.get('confidence', 0.0)
+            confidences = emotion_data.get('confidences', {})
+            
+            # Get current time
+            current_time = time.time()
+            
+            # Check if we should throttle this update
+            should_emit = False
+            
+            # Get the message queue ID for deduplication
+            batch_id = emotion_data.get('batch_id', None)
+            
+            # Only log and emit if:
+            # 1. The emotion has changed from the last emitted one
+            # 2. OR significant confidence change (>10%)
+            # 3. OR enough time has passed since last emission (at least 1 second)
+            # 4. OR we have a new batch ID (to avoid duplicate messages from same audio batch)
+            
+            # Check if emotion changed
+            if emotion != self.last_emotion_update['emotion']:
+                should_emit = True
+                logger.info(f"Emotion changed from {self.last_emotion_update['emotion']} to {emotion}")
+            # Check if confidence changed significantly
+            elif abs(confidence - self.last_emotion_update['confidence']) > 0.1:
+                should_emit = True
+                logger.info(f"Confidence changed significantly: {self.last_emotion_update['confidence']:.2f} -> {confidence:.2f}")
+            # Check time interval - increased to 1 second minimum between general updates
+            elif current_time - self.last_emotion_update['timestamp'] >= 1.0:
+                should_emit = True
+                # Only log occasional updates (every 5 seconds) to reduce noise
+                if current_time - self.last_emotion_update['timestamp'] >= 5.0:
+                    logger.info(f"Periodic emotion update: {emotion} ({confidence:.4f})")
+            # Check for duplicate batch IDs
+            elif batch_id and batch_id != getattr(self, '_last_batch_id', None):
+                setattr(self, '_last_batch_id', batch_id)
+                should_emit = True
+                logger.debug(f"New batch ID: {batch_id}")
+            
+            # Update the last emotion state regardless of whether we emit
+            self.last_emotion_update['emotion'] = emotion
+            self.last_emotion_update['confidence'] = confidence
+            self.last_emotion_update['timestamp'] = current_time
+            
+            # Update metrics (always do this regardless of emission)
+            self.metrics['current']['emotion'] = emotion
+            self.metrics['current']['emotion_confidence'] = confidence
+            
+            if emotion in self.metrics['history']['emotions']:
+                self.metrics['history']['emotions'][emotion] += 1
+            
+            # Skip emission if we shouldn't emit or if no clients connected
+            num_clients = len(self.socketio.server.manager.rooms.get('/', {}))
+            if not should_emit or num_clients == 0:
+                return
+                
+            # Mark as emitted
+            self.last_emotion_update['emitted'] = True
+            
+            # Create message for the log
+            message = self._get_emotion_message(emotion, confidence)
+            
+            # Add to emotion log
+            self._add_to_emotion_log({
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'emotion': emotion,
+                'confidence': confidence,
+                'message': message
+            })
+            
+            # Ensure confidences is included in the emit data
+            emit_data = {
+                'emotion': emotion,
+                'confidence': confidence,
+                'message': message,
+                'metrics': self.metrics,
+                'confidences': confidences  # Make sure this is included
+            }
+            
+            # Only log socket emission once per 10 seconds to reduce noise
+            static_log_interval = 10.0  # seconds
+            static_log_key = 'last_socket_log_time'
+            
+            if not hasattr(self, static_log_key) or current_time - getattr(self, static_log_key) >= static_log_interval:
+                logger.info(f"Socket.IO emit: emotion_update with {num_clients} clients connected")
+                setattr(self, static_log_key, current_time)
+            
+            # Emit to all connected clients
+            self.socketio.emit('emotion_update', emit_data, namespace='/')
+            
+        except Exception as e:
+            logger.error(f"Error emitting emotion update: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _get_emotion_message(self, emotion, confidence):
+        """Generate a human-readable message for the emotion update"""
+        if confidence < 0.3:
+            return f"Possible {emotion} detected (low confidence)"
+        elif confidence < 0.7:
+            return f"{emotion.capitalize()} detected"
+        else:
+            return f"Strong {emotion} detected" 

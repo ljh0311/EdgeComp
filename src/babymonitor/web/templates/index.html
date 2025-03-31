@@ -487,8 +487,19 @@
 
 {% block extra_js %}
     <script>
-    // Socket.IO connection
-    const socket = io();
+    // Socket.IO connection with explicit URL to avoid connection issues
+    const socket = io(window.location.origin, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+    });
+    
+    // Debug socket connection
+    socket.on('connect_error', function(err) {
+        console.error('Socket.IO connection error:', err);
+        document.getElementById('emotionOverlay').innerHTML = `<i class="bi bi-exclamation-triangle"></i> Connection error`;
+    });
     
     // Track connection status
     let socketConnected = false;
@@ -514,7 +525,7 @@
     };
     
     // Emotion detection buffer
-    const EMOTION_BUFFER_SIZE = 5;
+    const EMOTION_BUFFER_SIZE = 2; // Reduced from 5 to make updates more responsive
     let emotionBuffer = {};
     let emotionBufferCount = 0;
     
@@ -528,6 +539,9 @@
         
         // Request system info to get model details
         fetchSystemInfo();
+        
+        // For debugging - add a connection indicator to the page
+        document.getElementById('emotionOverlay').innerHTML = `<i class="bi bi-wifi"></i> Connected, waiting for emotions...`;
     });
     
     socket.on('disconnect', function() {
@@ -558,9 +572,17 @@
 
     // Update emotion overlay and progress bars
     socket.on('emotion_update', function(data) {
+        console.log('Received emotion update:', data);
+        
         const emotion = data.emotion;
         const confidence = data.confidence;
-        const confidences = data.confidences;
+        const confidences = data.confidences || {};
+        
+        // Debug log to see what's coming in
+        console.log(`Emotion: ${emotion}, Confidence: ${confidence}, Confidences:`, confidences);
+        
+        // Update emotion overlay immediately for better responsiveness
+        updateEmotionOverlay(emotion, confidence);
         
         // Add new emotion data to buffer
         for (const [emotionKey, value] of Object.entries(confidences)) {
@@ -583,40 +605,17 @@
                 }
             }
             
+            // Debug log for calculated averages
+            console.log('Calculated averages:', averages);
+            
             // Find the dominant emotion
-            const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b)[0];
+            const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b, [emotion, confidence])[0];
             
             // Update emotion overlay
-            const overlay = document.getElementById('emotionOverlay');
-            overlay.className = 'emotion-overlay';
-            
-            let icon = 'emoji-neutral';
-            if (dominantEmotion === 'crying' || dominantEmotion === 'sad') {
-                overlay.classList.add('emotion-crying');
-                icon = 'emoji-frown';
-            } else if (dominantEmotion === 'laughing' || dominantEmotion === 'happy') {
-                overlay.classList.add('emotion-laughing');
-                icon = 'emoji-smile';
-            } else if (dominantEmotion === 'babbling') {
-                overlay.classList.add('emotion-babbling');
-                icon = 'emoji-laughing';
-            } else if (dominantEmotion === 'angry') {
-                overlay.classList.add('emotion-crying');
-                icon = 'emoji-angry';
-            }
-            
-            overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${capitalizeFirstLetter(dominantEmotion)} (${(averages[dominantEmotion] * 100).toFixed(1)}%)`;
+            updateEmotionOverlay(dominantEmotion, averages[dominantEmotion] || confidence);
             
             // Update progress bars with averages
-            for (const [emotion, value] of Object.entries(averages)) {
-                const progress = document.getElementById(`${emotion}Progress`);
-                const valueSpan = document.getElementById(`${emotion}Value`);
-                if (progress && valueSpan) {
-                    const percentage = (value * 100).toFixed(1);
-                    progress.style.width = `${percentage}%`;
-                    valueSpan.textContent = `${percentage}%`;
-                }
-            }
+            updateProgressBars(averages);
             
             // Update last update time
             const lastUpdate = document.getElementById('lastUpdate');
@@ -633,6 +632,44 @@
             resetEmotionBuffer();
         }
     });
+    
+    // Function to update emotion overlay
+    function updateEmotionOverlay(emotion, confidence) {
+        const overlay = document.getElementById('emotionOverlay');
+        if (!overlay) return;
+        
+        overlay.className = 'emotion-overlay';
+        
+        let icon = 'emoji-neutral';
+        if (emotion === 'crying' || emotion === 'sad') {
+            overlay.classList.add('emotion-crying');
+            icon = 'emoji-frown';
+        } else if (emotion === 'laughing' || emotion === 'happy') {
+            overlay.classList.add('emotion-laughing');
+            icon = 'emoji-smile';
+        } else if (emotion === 'babbling') {
+            overlay.classList.add('emotion-babbling');
+            icon = 'emoji-laughing';
+        } else if (emotion === 'angry') {
+            overlay.classList.add('emotion-crying');
+            icon = 'emoji-angry';
+        }
+        
+        overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${capitalizeFirstLetter(emotion)} (${(confidence * 100).toFixed(1)}%)`;
+    }
+    
+    // Function to update progress bars
+    function updateProgressBars(emotionValues) {
+        for (const [emotion, value] of Object.entries(emotionValues)) {
+            const progress = document.getElementById(`${emotion}Progress`);
+            const valueSpan = document.getElementById(`${emotion}Value`);
+            if (progress && valueSpan) {
+                const percentage = (value * 100).toFixed(1);
+                progress.style.width = `${percentage}%`;
+                valueSpan.textContent = `${percentage}%`;
+            }
+        }
+    }
     
     // Function to reset emotion buffer
     function resetEmotionBuffer() {
