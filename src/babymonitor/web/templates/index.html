@@ -986,26 +986,31 @@
                     }
                     
                     // Handle different status cases
-                    if (data.status === 'error') {
-                        micNameElement.innerHTML = `<i class="bi bi-exclamation-circle text-warning"></i> ${data.error || 'Microphone Error'}`;
-                        addAlert('warning', 'Microphone error detected. Please check repair tools.');
-                        return;
+                    switch(data.status) {
+                        case 'ok':
+                            micNameElement.innerHTML = `<i class="bi bi-mic text-success"></i> ${data.name}`;
+                            startEmotionPolling();
+                            break;
+                        case 'initialized':
+                            micNameElement.innerHTML = `<i class="bi bi-mic text-warning"></i> ${data.name} (Initializing...)`;
+                            startEmotionPolling();
+                            break;
+                        case 'error':
+                            micNameElement.innerHTML = `<i class="bi bi-mic-mute text-danger"></i> ${data.name || 'Microphone Not Available'}`;
+                            addAlert('warning', 'Microphone not working. Please check repair tools.');
+                            stopEmotionPolling();
+                            break;
+                        default:
+                            micNameElement.innerHTML = `<i class="bi bi-mic-mute text-danger"></i> ${data.name || 'Unknown Status'}`;
+                            addAlert('warning', 'Unknown microphone status. Please check repair tools.');
+                            stopEmotionPolling();
                     }
                     
-                    if (!data.initialized) {
-                        micNameElement.innerHTML = `<i class="bi bi-mic-mute text-danger"></i> ${data.name || 'No Microphone'}`;
-                        addAlert('warning', 'Microphone not initialized. Please check repair tools.');
-                        return;
-                    }
-                    
-                    // Success case
-                    const muteIcon = data.is_muted ? 'mic-mute' : 'mic';
-                    const muteClass = data.is_muted ? 'text-danger' : 'text-success';
-                    micNameElement.innerHTML = `<i class="bi bi-${muteIcon} ${muteClass}"></i> ${data.name}`;
-                    
-                    // If microphone is working, start emotion polling
-                    if (!data.is_muted && data.initialized) {
-                        startEmotionPolling();
+                    // Update emotion polling based on microphone state
+                    if (data.status === 'ok' || data.status === 'initialized') {
+                        if (!emotionUpdateInterval) {
+                            startEmotionPolling();
+                        }
                     } else {
                         stopEmotionPolling();
                     }
@@ -1014,6 +1019,7 @@
                     console.warn('Error fetching microphone info:', error);
                     micNameElement.innerHTML = '<i class="bi bi-exclamation-circle text-danger"></i> Microphone Not Available';
                     addAlert('error', 'Could not access microphone. Please check repair tools.');
+                    stopEmotionPolling();
                 });
         }
     }
