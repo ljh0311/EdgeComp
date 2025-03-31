@@ -28,7 +28,9 @@ class PersonDetector(BaseDetector):
         force_cpu: bool = False,
         max_retries: int = 3,
         frame_skip: int = 0,
-        process_resolution: Tuple[int, int] = None
+        process_resolution: Tuple[int, int] = None,
+        keep_history: bool = True,
+        max_history: int = 100
     ):
         """Initialize the person detector.
 
@@ -40,6 +42,8 @@ class PersonDetector(BaseDetector):
             max_retries: Maximum number of retries for model loading
             frame_skip: Number of frames to skip between detections
             process_resolution: Resolution for processing frames
+            keep_history: Whether to keep detection history
+            max_history: Maximum number of history entries to keep
         """
         super().__init__(threshold=threshold)
 
@@ -50,6 +54,8 @@ class PersonDetector(BaseDetector):
         self.frame_skip = frame_skip
         self.frame_count = 0
         self.process_resolution = process_resolution
+        self.keep_history = keep_history
+        self.max_history = max_history
         
         # Default model path if none provided
         if model_path is None:
@@ -80,174 +86,211 @@ class PersonDetector(BaseDetector):
         self.last_result = None
 
     def _initialize_detector(self):
-        """Initialize the YOLOv8 detector."""
+        """Initialize the YOLOv8 model for person detection."""
+        self.logger.info("Initializing YOLOv8 detector")
+        
+        # Import YOLO only when needed to avoid loading at module import time
         try:
-            # Import YOLO here to avoid loading at module import time
             from ultralytics import YOLO
-            
-            # Retry mechanism for model loading
-            retries = 0
-            while retries < self.max_retries:
-                try:
-                    # Determine device
-                    device = 'cpu'
-                    if CUDA_AVAILABLE and not self.force_cpu:
-                        device = 0  # Use first CUDA device
-                        self.logger.info("CUDA is available, using GPU for inference")
-                    else:
-                        self.logger.info("Using CPU for inference")
-                    
-                    # Load the YOLOv8 model
-                    if self.model_path and os.path.exists(self.model_path):
-                        self.model = YOLO(self.model_path)
-                        self.model.to(device)
-                        self.logger.info(f"YOLOv8 model loaded from {self.model_path}")
-                    else:
-                        # Fall back to downloading the model if not found
-                        self.logger.warning(f"Model not found at {self.model_path}, loading from Ultralytics")
-                        self.model = YOLO('yolov8n.pt')
-                        self.model.to(device)
-                    
-                    # Set class names for filtering
-                    self.class_names = self.model.names
-                    self.person_class_id = 0  # In COCO dataset, 0 is person class
-                    
-                    self.logger.info("YOLOv8 detector initialized successfully")
-                    return
-                
-                except Exception as e:
-                    retries += 1
-                    self.logger.error(f"Error loading model (attempt {retries}/{self.max_retries}): {str(e)}")
-                    time.sleep(1)  # Wait before retrying
-            
-            raise RuntimeError(f"Failed to load YOLOv8 model after {self.max_retries} attempts")
-                
+            self.logger.info("Successfully imported YOLO from ultralytics")
         except ImportError as e:
-            self.logger.error(f"Error importing YOLO: {str(e)}. Please install the ultralytics package.")
-            raise
+            self.logger.error(f"Failed to import YOLO: {str(e)}")
+            self.logger.warning("YOLOv8 not available. Try installing with: pip install ultralytics")
+            self.model = None
+            return
+            
+        try:
+            # Check if model path exists
+            if not self.model_path:
+                self.logger.error("Model path is not set")
+                self.model = None
+                return
+                
+            if os.path.exists(self.model_path):
+                self.logger.info(f"Found model at path: {self.model_path}")
+                
+                # Try loading model with retries
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        self.logger.info(f"Loading YOLOv8 model (attempt {attempt}/{max_retries})")
+                        self.model = YOLO(self.model_path)
+                        
+                        # Validate model loaded correctly by trying a dummy prediction
+                        dummy_input = np.zeros((100, 100, 3), dtype=np.uint8)
+                        _ = self.model(dummy_input, verbose=False)
+                        
+                        # Log model information
+                        if hasattr(self.model, 'names'):
+                            self.logger.info(f"Model loaded successfully with classes: {self.model.names}")
+                        else:
+                            self.logger.warning("Model loaded but class names not found")
+                        
+                        break  # Successfully loaded
+                    except Exception as e:
+                        self.logger.error(f"Error loading model (attempt {attempt}/{max_retries}): {str(e)}")
+                        if attempt == max_retries:
+                            self.logger.error("Maximum retries reached. Failed to load model.")
+                            self.model = None
+                        else:
+                            time.sleep(1)  # Wait before retrying
+            else:
+                self.logger.warning(f"Model not found at path: {self.model_path}")
+                self.logger.info("Attempting to download pre-trained YOLOv8 model")
+                
+                try:
+                    # Use a pre-trained model as fallback
+                    self.model = YOLO("yolov8n.pt")
+                    self.logger.info("Downloaded pre-trained YOLOv8n model")
+                except Exception as e:
+                    self.logger.error(f"Failed to download pre-trained model: {str(e)}")
+                    self.model = None
         except Exception as e:
             self.logger.error(f"Error initializing detector: {str(e)}")
-            raise
+            self.model = None
+            
+        # Final check
+        if self.model is None:
+            self.logger.warning("Setting up dummy model. Person detection will not work correctly.")
+            # Create a dummy model for graceful degradation
+            class DummyModel:
+                def __init__(self):
+                    self.names = {0: "person"}
+                    
+                def __call__(self, *args, **kwargs):
+                    return []  # Return empty results
+                    
+            self.model = DummyModel()
 
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
-        """Process a frame to detect people.
+        """Process a frame to detect persons.
 
         Args:
-            frame: Input frame
+            frame: Input frame to process
 
         Returns:
-            Dict containing processed frame and detections
+            Dict with detection results including:
+                - person_detected (bool): Whether a person was detected
+                - confidence (float): Confidence score of the detection
+                - detections (list): List of detection information including bounding boxes
         """
-        if frame is None:
-            return {"frame": frame, "detections": [], "fps": self.fps}
+        # Check if frame is valid
+        if frame is None or frame.size == 0:
+            self.logger.warning("Invalid frame provided to person detector")
+            return {
+                'person_detected': False,
+                'confidence': 0.0,
+                'detections': []
+            }
+            
+        # Initialize response
+        result = {
+            'person_detected': False,
+            'confidence': 0.0,
+            'detections': [],
+            'processing_time': 0.0,
+            'detection_type': 'none'
+        }
 
         start_time = time.time()
-        frame_with_detections = frame.copy()
-        detections = []
-
+        
         try:
-            # Implement frame skipping for better performance
-            self.frame_count += 1
-            
-            # Only process every (frame_skip + 1) frames
-            if self.frame_skip > 0 and self.frame_count % (self.frame_skip + 1) != 0:
-                # If we have a previous result, return it
-                if self.last_result is not None:
-                    # Update the frame in the previous result
-                    self.last_result["frame"] = frame_with_detections
-                    return self.last_result
-            
-            # Resize frame if process_resolution is specified
-            if self.process_resolution:
-                input_frame = cv2.resize(frame, self.process_resolution, interpolation=cv2.INTER_AREA)
-            else:
-                input_frame = frame
-            
-            # Run YOLOv8 inference
-            results = self.model(input_frame, verbose=False)
+            # Skip if model not available
+            if self.model is None:
+                self.logger.warning("Person detection model not available")
+                return result
+                
+            # Run inference
+            detections = self.model(frame, verbose=False)
             
             # Process results
-            if results and len(results) > 0:
-                result = results[0]  # Get the first result (first image)
-                
-                # Get bounding boxes, confidence scores, and class IDs
-                boxes = result.boxes.data.cpu().numpy()
-                
-                for box in boxes:
-                    x1, y1, x2, y2, conf, class_id = box
-                    
-                    # Only consider person class (class 0 in COCO dataset)
-                    if int(class_id) == self.person_class_id and conf >= self.threshold:
-                        # Create detection result
-                        detection = {
-                            "box": (int(x1), int(y1), int(x2), int(y2)),
-                            "confidence": float(conf),
-                            "class": "person"
-                        }
-                        detections.append(detection)
-                        
-                        # Draw the detection
-                        self._draw_detection(
-                            frame_with_detections,
-                            (int(x1), int(y1), int(x2-x1), int(y2-y1)),
-                            f"Person: {conf:.2f}",
-                            (0, 255, 0)  # Green color for person
-                        )
-            
-            # Calculate FPS
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            # Update FPS using exponential moving average
-            if elapsed_time > 0:
-                current_fps = 1.0 / elapsed_time
-                self.fps = 0.9 * self.fps + 0.1 * current_fps if self.fps > 0 else current_fps
-            
-            # Draw FPS on frame
-            cv2.putText(
-                frame_with_detections,
-                f"FPS: {self.fps:.1f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2,
-                cv2.LINE_AA
-            )
-            
-            # Store the result for web interface
-            self.last_result = {
-                "frame": frame_with_detections,
-                "detections": detections,
-                "fps": self.fps,
-                "timestamp": time.time()
-            }
-            
-            # Update detection history with new detections
             if detections:
-                self.detection_history.append({
-                    "time": time.time(),
-                    "count": len(detections)
-                })
+                person_boxes = []
+                max_confidence = 0.0
                 
-                # Keep history at max size
-                if len(self.detection_history) > self.max_history_size:
-                    self.detection_history.pop(0)
+                for detection in detections:
+                    if hasattr(detection, 'boxes') and len(detection.boxes) > 0:
+                        self.logger.debug(f"Found {len(detection.boxes)} boxes in detection")
+                        
+                        # Process each box
+                        for i in range(len(detection.boxes)):
+                            # Get box data
+                            box = detection.boxes[i]
+                            
+                            # Extract class ID, confidence, and coordinates
+                            if hasattr(box, 'cls'):
+                                cls_id = int(box.cls[0].item() if hasattr(box.cls[0], 'item') else box.cls[0])
+                            else:
+                                self.logger.warning("Box missing class information")
+                                continue
+                                
+                            # Check if person class (typically 0 in COCO)
+                            if cls_id != 0:  # Not a person
+                                continue
+                                
+                            # Get confidence
+                            if hasattr(box, 'conf'):
+                                confidence = float(box.conf[0].item() if hasattr(box.conf[0], 'item') else box.conf[0])
+                            else:
+                                self.logger.warning("Box missing confidence information")
+                                continue
+                                
+                            # Skip low confidence detections
+                            if confidence < self.threshold:
+                                continue
+                                
+                            # Get coordinates
+                            if hasattr(box, 'xyxy'):
+                                # [x1, y1, x2, y2] format (top-left, bottom-right corners)
+                                coords = box.xyxy[0].cpu().numpy() if hasattr(box.xyxy[0], 'cpu') else box.xyxy[0]
+                                x1, y1, x2, y2 = map(int, coords)
+                            elif hasattr(box, 'xywh'):
+                                # [x, y, w, h] format (center x, center y, width, height)
+                                coords = box.xywh[0].cpu().numpy() if hasattr(box.xywh[0], 'cpu') else box.xywh[0]
+                                x, y, w, h = map(int, coords)
+                                x1, y1 = int(x - w/2), int(y - h/2)
+                                x2, y2 = int(x + w/2), int(y + h/2)
+                            else:
+                                self.logger.warning("Box missing coordinate information")
+                                continue
+                                
+                            # Save detection
+                            person_boxes.append({
+                                'bbox': [x1, y1, x2, y2],
+                                'confidence': confidence,
+                                'class_id': cls_id,
+                                'class_name': 'person'
+                            })
+                            
+                            # Update max confidence
+                            max_confidence = max(max_confidence, confidence)
                 
-                # Update last detection time
-                self.last_detection_time = time.time()
-            
-            return self.last_result
-            
+                # Add detections to result
+                if person_boxes:
+                    result['person_detected'] = True
+                    result['confidence'] = max_confidence
+                    result['detections'] = person_boxes
+                    result['detection_type'] = 'yolov8'
+                    
+                    # Add to detection history
+                    if self.keep_history:
+                        self.detection_history.append({
+                            'timestamp': time.time(),
+                            'confidence': max_confidence
+                        })
+                        # Trim history if needed
+                        if len(self.detection_history) > self.max_history:
+                            self.detection_history.pop(0)
         except Exception as e:
-            self.logger.error(f"Error in process_frame: {str(e)}")
-            # Return empty results in case of error
-            return {
-                "frame": frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8),
-                "detections": [],
-                "fps": self.fps,
-                "timestamp": time.time()
-            }
+            self.logger.error(f"Error detecting persons: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            
+        # Add processing time
+        processing_time = time.time() - start_time
+        result['processing_time'] = processing_time
+        
+        return result
     
     def _draw_detection(self, frame, bbox, label, color):
         """Draw detection bounding box and label on frame.
@@ -310,3 +353,134 @@ class PersonDetector(BaseDetector):
         self.last_result = None
         self.detection_history = []
         self.last_detection_time = time.time()
+
+    def check_model(self) -> Dict[str, Any]:
+        """Check if the YOLOv8 model is loaded and working properly.
+        
+        Returns:
+            Dict containing model status information
+        """
+        result = {
+            "status": "unknown",
+            "model_path": self.model_path,
+            "model_loaded": self.model is not None,
+            "cuda_available": CUDA_AVAILABLE,
+            "using_cuda": CUDA_AVAILABLE and not self.force_cpu,
+            "errors": []
+        }
+        
+        # Check if model path exists
+        if self.model_path:
+            if os.path.exists(self.model_path):
+                result["model_exists"] = True
+                result["model_size"] = os.path.getsize(self.model_path) / (1024 * 1024)  # Size in MB
+            else:
+                result["model_exists"] = False
+                result["errors"].append(f"Model file not found: {self.model_path}")
+        else:
+            result["model_exists"] = False
+            result["errors"].append("No model path specified")
+            
+        # Check if model is loaded
+        if self.model is not None:
+            # Check model classes
+            if hasattr(self.model, 'names') and self.model.names:
+                result["classes"] = self.model.names
+                if 0 in self.model.names and "person" in self.model.names[0].lower():
+                    result["has_person_class"] = True
+                else:
+                    result["has_person_class"] = False
+                    result["errors"].append("Model doesn't have 'person' class at index 0")
+            else:
+                result["has_person_class"] = False
+                result["errors"].append("Model doesn't have class names attribute")
+            
+            # Test model with dummy input
+            try:
+                dummy_input = np.zeros((100, 100, 3), dtype=np.uint8)
+                test_result = self.model(dummy_input, verbose=False)
+                result["model_test"] = "success"
+                
+                # Check if result has expected structure
+                if test_result and len(test_result) > 0:
+                    if hasattr(test_result[0], 'boxes'):
+                        result["result_structure"] = "valid"
+                    else:
+                        result["result_structure"] = "unexpected"
+                        result["errors"].append("Model results don't have expected structure")
+                else:
+                    result["result_structure"] = "empty"
+            except Exception as e:
+                result["model_test"] = "failed"
+                result["errors"].append(f"Error testing model: {str(e)}")
+        else:
+            result["model_test"] = "skipped"
+            result["errors"].append("Model not loaded")
+        
+        # Set overall status
+        if not result.get("model_exists", False):
+            result["status"] = "missing"
+        elif not result.get("model_loaded", False):
+            result["status"] = "not_loaded"
+        elif result.get("model_test") == "failed":
+            result["status"] = "not_working"
+        elif result.get("has_person_class", False) and result.get("result_structure") == "valid":
+            result["status"] = "working"
+        else:
+            result["status"] = "partial"
+            
+        # Add performance suggestion
+        if CUDA_AVAILABLE and self.force_cpu:
+            result["performance_suggestion"] = "CUDA is available but not being used. Consider enabling GPU acceleration."
+            
+        return result
+        
+    def reload_model(self) -> Dict[str, Any]:
+        """Reload the YOLOv8 model.
+        
+        Returns:
+            Dict containing reload status
+        """
+        self.logger.info("Attempting to reload YOLOv8 model")
+        
+        try:
+            # Save original state
+            original_model = self.model
+            
+            # Re-initialize detector
+            self._initialize_detector()
+            
+            # Check if model loaded successfully
+            if self.model is not None:
+                # Test model
+                try:
+                    dummy_input = np.zeros((100, 100, 3), dtype=np.uint8)
+                    _ = self.model(dummy_input, verbose=False)
+                    self.logger.info("Model reloaded and tested successfully")
+                    return {
+                        "status": "success",
+                        "message": "Model reloaded and tested successfully"
+                    }
+                except Exception as e:
+                    # Restore original model if test fails
+                    self.model = original_model
+                    self.logger.error(f"Reloaded model failed testing: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": f"Reloaded model failed testing: {str(e)}"
+                    }
+            else:
+                # Restore original model
+                self.model = original_model
+                self.logger.error("Failed to reload model")
+                return {
+                    "status": "error",
+                    "message": "Failed to reload model"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error reloading model: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error reloading model: {str(e)}"
+            }

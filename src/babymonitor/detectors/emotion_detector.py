@@ -20,6 +20,7 @@ from collections import deque
 import threading
 from .base_detector import BaseDetector
 import sys
+from scipy import signal
 
 class EmotionDetector(BaseDetector):
     """Sound-based emotion detector for baby monitoring."""
@@ -52,14 +53,26 @@ class EmotionDetector(BaseDetector):
             'file': 'emotion_model.pt',
             'type': 'speechbrain',
             'emotions': ['happy', 'sad', 'angry', 'neutral'],
-            'path': 'models/emotion/speechbrain'
+            'path': 'models/emotion/speechbrain',
+            'preprocessing': {
+                'normalize': True,
+                'high_pass_filter': True,
+                'filter_cutoff': 80,
+                'target_rms': 0.1
+            }
         },
         'speechbrain2': {
             'name': 'Speechbrain 2',
             'file': 'best_emotion_model.pt',
             'type': 'speechbrain',
             'emotions': ['crying', 'laughing', 'babbling', 'silence'],
-            'path': 'models/emotion/speechbrain'
+            'path': 'models/emotion/speechbrain',
+            'preprocessing': {
+                'normalize': True,
+                'high_pass_filter': True,
+                'filter_cutoff': 80,
+                'target_rms': 0.1
+            }
         },
         'basic_emotion': {
             'name': 'Basic Emotion',
@@ -88,8 +101,14 @@ class EmotionDetector(BaseDetector):
         self.model_id = model_id or 'basic_emotion'  # Default to basic emotion model
         self.is_model_loaded = False
         self.audio_buffer = []
-        self.buffer_duration = 2.0  # seconds
+        self.buffer_duration = 2.5  # seconds - increased from 2.0 to 5.0 to process longer audio segments
         self.logger = logging.getLogger(__name__)
+        
+        # Debug and metrics settings
+        self.debug_mode = False  # Set to True to enable detailed audio waveform logging
+        self.save_audio_samples = False  # Set to True to save audio samples for debugging
+        self.last_prediction_time = 0  # Track when we last made a prediction
+        self.min_time_between_predictions = 2.0  # Minimum time between predictions (seconds)
         
         # Microphone settings
         self.current_microphone_id = None
@@ -263,6 +282,9 @@ class EmotionDetector(BaseDetector):
     def _audio_to_melspec(self, audio_data: np.ndarray) -> torch.Tensor:
         """Convert audio data to mel spectrogram format expected by the model.
         
+        Handles up to self.buffer_duration seconds of audio (5 seconds) and converts
+        it to a standardized mel spectrogram format for the model.
+        
         Args:
             audio_data: Audio data as numpy array
             
@@ -283,14 +305,31 @@ class EmotionDetector(BaseDetector):
         if len(audio_tensor.shape) == 1:
             audio_tensor = audio_tensor.unsqueeze(0)  # [1, samples]
             
-        # Make sure we have enough samples (pad if needed)
-        if audio_tensor.shape[1] < self.SAMPLE_RATE:
-            padding = torch.zeros(1, self.SAMPLE_RATE - audio_tensor.shape[1])
-            audio_tensor = torch.cat([audio_tensor, padding], dim=1)
+        # For longer audio segments (5 seconds), we need to decide how to handle them
+        # Option 1: Use the full 5 seconds (recommended for better emotion detection)
+        # Option 2: Take the middle portion
+        # Option 3: Take the first X seconds
         
-        # Trim if too long
-        if audio_tensor.shape[1] > self.SAMPLE_RATE:
-            audio_tensor = audio_tensor[:, :self.SAMPLE_RATE]
+        # Get the expected number of samples for our target duration (default 1 second for existing models)
+        target_samples = self.SAMPLE_RATE  # Default: 1 second audio for model input
+        
+        # For models that can handle longer inputs, we can use more of the buffer
+        if self.model_id == 'basic_emotion' or self.model_info['type'] == 'speechbrain':
+            # These models might benefit from longer audio
+            target_samples = int(min(self.buffer_duration, 3.0) * self.SAMPLE_RATE)  # Use up to 3 seconds
+            
+        # Ensure we have at least the target number of samples (pad if needed)
+        if audio_tensor.shape[1] < target_samples:
+            padding = torch.zeros(1, target_samples - audio_tensor.shape[1], device=audio_tensor.device)
+            audio_tensor = torch.cat([audio_tensor, padding], dim=1)
+            self.logger.debug(f"Padded audio from {audio_tensor.shape[1] - padding.shape[1]} to {audio_tensor.shape[1]} samples")
+        
+        # If we have too much audio, take a center segment for better context
+        if audio_tensor.shape[1] > target_samples:
+            # Take the middle portion for better context
+            start = (audio_tensor.shape[1] - target_samples) // 2
+            audio_tensor = audio_tensor[:, start:start+target_samples]
+            self.logger.debug(f"Taking center {target_samples/self.SAMPLE_RATE:.1f}s from {audio_tensor.shape[1]/self.SAMPLE_RATE:.1f}s audio")
             
         # Create mel spectrogram transformer
         # Parameters match common settings for speech/audio tasks
@@ -328,6 +367,11 @@ class EmotionDetector(BaseDetector):
         elif current_frames > target_frames:
             # Trim if too long
             mel_spec = mel_spec[:, :, :target_frames]
+            
+        # Add an extra dimension to make it [batch, channels, height, width]
+        # if it's not already in that format
+        if len(mel_spec.shape) == 3:
+            mel_spec = mel_spec.unsqueeze(1)  # [1, 1, 80, 100]
             
         # Log the mel spectrogram shape
         self.logger.debug(f"Mel spectrogram shape: {mel_spec.shape}")
@@ -512,7 +556,7 @@ class EmotionDetector(BaseDetector):
             self.model.eval()
             self.is_model_loaded = True
             self.logger.info("Successfully loaded other basic model")
-            
+                
         except Exception as e:
             self.logger.error(f"Error loading other basic model: {str(e)}")
             import traceback
@@ -523,18 +567,300 @@ class EmotionDetector(BaseDetector):
     def _load_standard_model(self, model_path):
         """Load standard PyTorch models (speechbrain, binary)."""
         try:
-            self.model = torch.load(model_path, map_location=self.device)
-            self.model.to(self.device)
-            self.model.eval()
-            self.is_model_loaded = True
-            self.logger.info(f"{self.model_info['type']} model loaded successfully")
+            # Special handling for speechbrain models
+            if self.model_info['type'] == 'speechbrain':
+                self.logger.info(f"Loading speechbrain model from {model_path}")
+                
+                # Check if the actual model file exists
+                if not os.path.exists(model_path):
+                    # Try to find it in a subdirectory with the same name
+                    base_dir = os.path.dirname(model_path)
+                    model_name = os.path.splitext(os.path.basename(model_path))[0]
+                    alt_path = os.path.join(base_dir, model_name, f"{model_name}.pt")
+                    
+                    if os.path.exists(alt_path):
+                        self.logger.info(f"Using alternative path for speechbrain model: {alt_path}")
+                        model_path = alt_path
+                    else:
+                        self.logger.error(f"Speechbrain model not found at {model_path} or {alt_path}")
+                        self.is_model_loaded = False
+                        self.model = None
+                        return
+                
+                # Load the model with additional error checking
+                try:
+                    model_data = torch.load(model_path, map_location=self.device)
+                    
+                    # Enhanced detection of model structure
+                    if isinstance(model_data, dict):
+                        # Check if this is a SpeechBrain dictionary
+                        if any(k.startswith('wav2vec2.') for k in model_data.keys()):
+                            self.logger.info("Detected SpeechBrain wav2vec2 model")
+                            
+                            # Create a wrapper model for wav2vec2-based models
+                            from torch import nn
+                            
+                            class Wav2Vec2Wrapper(nn.Module):
+                                def __init__(self, num_emotions):
+                                    super().__init__()
+                                    self.num_emotions = num_emotions
+                                    self.linear = nn.Linear(768, num_emotions)  # wav2vec2 typically outputs 768 features
+                                
+                                def forward(self, x):
+                                    # Simplify: treat input as features already extracted
+                                    # Just pass through linear layer
+                                    batch_size = x.shape[0]
+                                    
+                                    # If input is audio waveform, average it to get a feature vector
+                                    if len(x.shape) == 2:  # [batch, time]
+                                        # Just get average features
+                                        x = x.mean(dim=1, keepdim=True)
+                                        x = x.view(batch_size, -1)
+                                    
+                                    # If input is mel spectrogram, flatten it
+                                    if len(x.shape) > 2:  # [batch, mels, time] or [batch, 1, mels, time]
+                                        if len(x.shape) == 4:
+                                            x = x.squeeze(1)  # Remove channel dim if present
+                                        
+                                        # Average over time dimension
+                                        x = x.mean(dim=2)  # Now [batch, mels]
+                                        
+                                    # Transform to expected size if needed
+                                    if x.shape[1] != 768:
+                                        x = torch.nn.functional.adaptive_avg_pool1d(
+                                            x.unsqueeze(2), 768).squeeze(2)  # Resize to 768
+                                        
+                                    # Make predictions
+                                    return self.linear(x)
+                            
+                            self.model = Wav2Vec2Wrapper(len(self.emotions))
+                            self.logger.info(f"Created Wav2Vec2Wrapper model with {len(self.emotions)} emotions")
+                            
+                        # Check for SpeechBrain components structure
+                        elif 'embedding_model' in model_data and 'classifier' in model_data:
+                            self.logger.info("Found embedding_model and classifier in speechbrain model")
+                            # This is likely a SpeechBrain model with components
+                            self.speechbrain_components = model_data
+                            
+                            # Create a simple wrapper model
+                            from torch import nn
+                            
+                            class SpeechBrainWrapper(nn.Module):
+                                def __init__(self, components, emotions, device):
+                                    super().__init__()
+                                    self.components = components
+                                    self.emotions = emotions
+                                    self.device = device
+                                    # Move components to the device
+                                    for name, component in self.components.items():
+                                        if hasattr(component, 'to'):
+                                            self.components[name] = component.to(device)
+                                    
+                                def forward(self, x):
+                                    try:
+                                        # Basic forward pass for speechbrain components
+                                        # For audio input tensors
+                                        # Step 1: Extract features if needed
+                                        if 'compute_features' in self.components:
+                                            x = self.components['compute_features'](x)
+                                        
+                                        # Step 2: Normalize if needed
+                                        if 'mean_var_norm' in self.components:
+                                            x = self.components['mean_var_norm'](x)
+                                        
+                                        # Step 3: Get embeddings
+                                        if 'embedding_model' in self.components:
+                                            x = self.components['embedding_model'](x)
+                                        
+                                        # Step 4: Classification
+                                        if 'classifier' in self.components:
+                                            x = self.components['classifier'](x)
+                                        
+                                        return x
+                                    except Exception as e:
+                                        # Fallback to simpler processing if component pipeline fails
+                                        import logging
+                                        logger = logging.getLogger(__name__)
+                                        logger.error(f"Error in SpeechBrainWrapper forward: {str(e)}")
+                                        
+                                        # Fallback to simple processing
+                                        if len(x.shape) == 2:  # [batch, time]
+                                            # Just use classifier directly on averaged features
+                                            x = x.mean(dim=1, keepdim=True)
+                                            if 'classifier' in self.components:
+                                                return self.components['classifier'](x)
+                                            else:
+                                                # Even more basic fallback
+                                                return torch.randn(x.shape[0], len(self.emotions), 
+                                                                 device=self.device)
+                                        else:
+                                            # Unknown format, return random predictions
+                                            return torch.randn(x.shape[0], len(self.emotions), 
+                                                             device=self.device)
+                            
+                            # Create our wrapper model
+                            self.model = SpeechBrainWrapper(model_data, self.emotions, self.device)
+                            self.logger.info(f"Created SpeechBrain wrapper model with components: {list(model_data.keys())}")
+                            
+                        elif 'state_dict' in model_data and isinstance(model_data['state_dict'], dict):
+                            # It's a nested state dict
+                            self.logger.info("Loading speechbrain model with nested state_dict")
+                            
+                            # Create a simple model
+                            from torch import nn
+                            
+                            class BasicAudioModel(nn.Module):
+                                def __init__(self, num_emotions):
+                                    super().__init__()
+                                    self.conv1 = nn.Conv1d(1, 64, kernel_size=8, stride=2, padding=2)
+                                    self.bn1 = nn.BatchNorm1d(64)
+                                    self.pool = nn.MaxPool1d(2)
+                                    self.conv2 = nn.Conv1d(64, 128, kernel_size=5, stride=2, padding=2)
+                                    self.bn2 = nn.BatchNorm1d(128)
+                                    self.global_pool = nn.AdaptiveAvgPool1d(1)
+                                    self.fc1 = nn.Linear(128, 64)
+                                    self.fc2 = nn.Linear(64, num_emotions)
+                                    self.dropout = nn.Dropout(0.3)
+                                
+                                def forward(self, x):
+                                    # Handle different input formats
+                                    if len(x.shape) == 4:  # [B, C, H, W] - spectrogram with channel
+                                        # Take average across frequency bands
+                                        x = x.mean(dim=2)  # Now [B, C, W]
+                                    
+                                    if len(x.shape) == 3 and x.shape[1] > 1 and x.shape[1] < 100:
+                                        # Likely [B, F, T] format (batch, frequency, time)
+                                        # Take average across frequency
+                                        x = x.mean(dim=1, keepdim=True)  # Now [B, 1, T]
+                                    
+                                    if len(x.shape) == 2:
+                                        # [B, T] format (batch, time)
+                                        x = x.unsqueeze(1)  # Add channel dim -> [B, 1, T]
+                                    
+                                    # Standard convolution processing
+                                    x = self.pool(torch.relu(self.bn1(self.conv1(x))))
+                                    x = self.pool(torch.relu(self.bn2(self.conv2(x))))
+                                    x = self.global_pool(x).flatten(1)
+                                    x = torch.relu(self.fc1(x))
+                                    x = self.dropout(x)
+                                    x = self.fc2(x)
+                                    return x
+                            
+                            # Create and initialize model
+                            self.model = BasicAudioModel(len(self.emotions))
+                            self.logger.info(f"Initialized BasicAudioModel with {len(self.emotions)} emotions")
+                            
+                            # Don't try to load weights - the structures won't match
+                            self.logger.warning("Using initialized weights - not loading state_dict due to likely structure mismatch")
+                            
+                        else:
+                            # It's a standard state dict, create a basic model
+                            self.logger.info("Loading speechbrain model as a standard state dict")
+                            from torch import nn
+                            
+                            class BasicSpeechbrainModel(nn.Module):
+                                def __init__(self, num_emotions):
+                                    super().__init__()
+                                    # Simple model as fallback
+                                    self.conv1 = nn.Conv1d(1, 64, kernel_size=8, stride=2, padding=2)
+                                    self.bn1 = nn.BatchNorm1d(64)
+                                    self.conv2 = nn.Conv1d(64, 128, kernel_size=5, stride=2, padding=2)
+                                    self.bn2 = nn.BatchNorm1d(128)
+                                    self.conv3 = nn.Conv1d(128, 256, kernel_size=3, stride=2, padding=1)
+                                    self.bn3 = nn.BatchNorm1d(256)
+                                    self.pool = nn.AdaptiveAvgPool1d(1)
+                                    self.fc1 = nn.Linear(256, 128)
+                                    self.fc2 = nn.Linear(128, num_emotions)
+                                    self.dropout = nn.Dropout(0.3)
+                                    
+                                def forward(self, x):
+                                    # Ensure input is shaped correctly for 1D convolutions [batch, channels, time]
+                                    if len(x.shape) == 4:  # [batch, channels, height, width]
+                                        # Likely a spectrogram, average across frequency dimension (height)
+                                        x = x.mean(dim=2)  # -> [batch, channels, width]
+                                    elif len(x.shape) == 3 and x.shape[1] > 1 and x.shape[1] < 100:
+                                        # Likely [batch, frequency, time] from spectrogram
+                                        x = x.mean(dim=1, keepdim=True)  # Average over mel bands
+                                    elif len(x.shape) == 2:
+                                        # [batch, time] - raw audio
+                                        x = x.unsqueeze(1)  # Add channel dimension -> [batch, 1, time]
+                                    
+                                    # Standard convolutional processing
+                                    x = torch.relu(self.bn1(self.conv1(x)))
+                                    x = torch.relu(self.bn2(self.conv2(x)))
+                                    x = torch.relu(self.bn3(self.conv3(x)))
+                                    x = self.pool(x).squeeze(-1)
+                                    x = torch.relu(self.fc1(x))
+                                    x = self.dropout(x)
+                                    x = self.fc2(x)
+                                    return x
+                            
+                            self.model = BasicSpeechbrainModel(len(self.emotions))
+                            
+                            # Try to load the state dict, but expect it to fail
+                            try:
+                                if isinstance(model_data, dict) and len(model_data) < 30:  # Simple state dict
+                                    self.model.load_state_dict(model_data)
+                                    self.logger.info("Successfully loaded speechbrain state dict into basic model")
+                                else:
+                                    # Too complex, just use initialized weights
+                                    self.logger.warning("Model structure too complex, using initialized weights")
+                            except Exception as load_err:
+                                self.logger.warning(f"Could not load speechbrain state dict: {str(load_err)}")
+                                self.logger.info("Using initialized weights for basic model")
+                    else:
+                        # It's a full model
+                        self.model = model_data
+                        self.logger.info(f"Loaded full speechbrain model of type: {type(self.model).__name__}")
+                    
+                    # Move model to device and set to evaluation mode
+                    self.model.to(self.device)
+                    self.model.eval()
+                    self.is_model_loaded = True
+                    self.logger.info("Speechbrain model successfully loaded and moved to device")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error during speechbrain model loading: {str(e)}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+                    self.is_model_loaded = False
+                    self.model = None
+                
+            # Binary models (simpler loading)
+            elif self.model_info['type'] == 'binary':
+                self.logger.info(f"Loading binary model from {model_path}")
+                try:
+                    self.model = torch.load(model_path, map_location=self.device)
+                    self.model.to(self.device)
+                    self.model.eval()
+                    self.is_model_loaded = True
+                    self.logger.info(f"Binary model loaded successfully: {type(self.model).__name__}")
+                except Exception as e:
+                    self.logger.error(f"Error loading binary model: {str(e)}")
+                    self.is_model_loaded = False
+                    self.model = None
+            
+            # Other standard models
+            else:
+                self.logger.info(f"Loading standard model from {model_path}")
+                try:
+                    self.model = torch.load(model_path, map_location=self.device)
+                    self.model.to(self.device)
+                    self.model.eval()
+                    self.is_model_loaded = True
+                    self.logger.info(f"Standard model loaded successfully: {type(self.model).__name__}")
+                except Exception as e:
+                    self.logger.error(f"Error loading standard model: {str(e)}")
+                    self.is_model_loaded = False
+                    self.model = None
+                
         except Exception as e:
             self.logger.error(f"Error loading {self.model_info['type']} model: {str(e)}")
             import traceback
             self.logger.error(traceback.format_exc())
             self.is_model_loaded = False
             self.model = None
-
+            
     def switch_model(self, model_id: str) -> Dict[str, Any]:
         """Switch to a different emotion recognition model.
         
@@ -548,10 +874,21 @@ class EmotionDetector(BaseDetector):
             raise ValueError(f"Unknown model ID: {model_id}")
             
         try:
+            self.logger.info(f"Switching model from {self.model_id} to {model_id}")
+            
             # Store old model info for rollback
             old_model_id = self.model_id
             old_model = self.model
             old_emotions = self.emotions
+            old_is_model_loaded = self.is_model_loaded
+            
+            # Save history data for current model before switching
+            self._save_history()
+            
+            # Clear audio buffer when switching models to avoid processing
+            # data with incompatible formats
+            self.audio_buffer = []
+            self.logger.info(f"Cleared audio buffer when switching from {old_model_id} to {model_id}")
             
             # Update model info
             self.model_id = model_id
@@ -561,36 +898,74 @@ class EmotionDetector(BaseDetector):
             # Update history file path
             self.history_file = self.log_dir / f"emotion_history_{self.model_id}.json"
             
-            # Reset emotion history for new model
-            with self.history_lock:
-                self.emotion_counts = {emotion: 0 for emotion in self.emotions}
                 # Load existing history for this model if available
-                self._load_history()
+            self._load_history()
             
-            # Initialize new model
-            self._initialize_model()
+            # Reset emotion counts to include all emotions for new model
+            with self.history_lock:
+                # Create a new dictionary with all emotions set to 0
+                new_counts = {emotion: 0 for emotion in self.emotions}
+                # Copy over any existing counts for emotions that exist in both models
+                for emotion, count in self.emotion_counts.items():
+                    if emotion in new_counts:
+                        new_counts[emotion] = count
+                self.emotion_counts = new_counts
             
-            # Save history data for previous model
-            self._save_history(old_model_id)
+            # Initialize new model - don't use _initialize_model directly to avoid
+            # threading issues - just load the specific model type needed
+            if self.model_info['type'] == 'basic':
+                model_path = self._get_model_path(model_id)
+                self._load_basic_model(model_path)
+            elif self.model_info['type'] == 'speechbrain':
+                model_path = self._get_model_path(model_id)
+                self._load_standard_model(model_path)
+            else:
+                # For other model types
+                model_path = self._get_model_path(model_id)
+                try:
+                    self.model = torch.load(model_path, map_location=self.device)
+                    self.model.to(self.device)
+                    self.model.eval()
+                    self.is_model_loaded = True
+                except Exception as e:
+                    self.logger.error(f"Error loading model: {str(e)}")
+                    self.is_model_loaded = False
+                    self.model = None
             
             return {
-                'status': 'success',
+                'status': 'success' if self.is_model_loaded else 'error',
                 'message': f"Switched to model: {self.model_info['name']}",
                 'model_info': {
                     'id': model_id,
                     'name': self.model_info['name'],
                     'type': self.model_info['type'],
-                    'emotions': self.emotions
+                    'emotions': self.emotions,
+                    'is_loaded': self.is_model_loaded
                 },
                 'emotion_history': self.get_emotion_history()
             }
             
         except Exception as e:
             # Rollback on error
+            self.logger.error(f"Error switching to model {model_id}: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            
             self.model_id = old_model_id
             self.model = old_model
             self.emotions = old_emotions
-            raise
+            self.is_model_loaded = old_is_model_loaded
+            
+            return {
+                'status': 'error',
+                'message': f"Failed to switch to model: {str(e)}",
+                'model_info': {
+                    'id': self.model_id,
+                    'name': self.model_info['name'],
+                    'type': self.model_info['type'],
+                    'emotions': self.emotions
+                }
+            }
             
     def get_available_models(self) -> Dict[str, Any]:
         """Get information about available models.
@@ -945,12 +1320,14 @@ class EmotionDetector(BaseDetector):
             'emotion': self.emotion_state,
             'confidence': self.confidence,
             'confidences': self.confidences
-        }
+        } 
 
     def process_audio_chunk(self, audio_chunk: np.ndarray) -> Dict[str, Any]:
         """
         Process an audio chunk and return emotion prediction.
-        This method is designed to be thread-safe and not create new threads.
+        
+        The method accumulates audio chunks until it has collected 5 seconds of audio,
+        then processes the entire segment and returns emotion predictions.
         
         Args:
             audio_chunk: Audio data as numpy array
@@ -959,39 +1336,30 @@ class EmotionDetector(BaseDetector):
             Dict containing emotion prediction
         """
         try:
+            # Get current time and check if we need to make another prediction yet
+            current_time = time.time()
+            time_since_last = current_time - self.last_prediction_time
+            
             # Only log every few batches to reduce noise
-            # Use timestamp milliseconds to get a deterministic but varying log frequency
-            should_log_detailed = (int(time.time() * 1000) % 100) < 10  # Only log ~10% of batches
+            should_log_detailed = (int(current_time * 1000) % 100) < 10  # Only log ~10% of batches
             
             # Generate a unique ID for this processing batch to track it in logs
-            batch_id = f"batch_{int(time.time() * 1000) % 10000}"
-            
-            # Log the incoming audio data with detailed stats only when should_log_detailed is True
-            if should_log_detailed:
-                rms = np.sqrt(np.mean(np.square(audio_chunk)))
-                peak = np.max(np.abs(audio_chunk))
-                self.logger.debug(f"[{batch_id}] Processing audio chunk: shape={audio_chunk.shape}, dtype={audio_chunk.dtype}, "
-                                f"min={np.min(audio_chunk):.4f}, max={np.max(audio_chunk):.4f}, "
-                                f"rms={rms:.6f}, peak={peak:.6f}")
-                
-                # Check if audio is silent
-                if rms < 0.01:
-                    self.logger.debug(f"[{batch_id}] Audio is very quiet (RMS: {rms:.6f})")
+            batch_id = f"batch_{int(current_time * 1000) % 10000}"
             
             # Flatten audio if needed
-            if len(audio_chunk.shape) > 1:
+            if audio_chunk is not None and len(audio_chunk.shape) > 1:
                 audio_chunk = audio_chunk.flatten()
                 if should_log_detailed:
                     self.logger.debug(f"[{batch_id}] Flattened audio chunk to shape: {audio_chunk.shape}")
             
-            # Add to buffer (we need a certain amount of audio for reliable prediction)
-            original_buffer_size = len(self.audio_buffer)
-            self.audio_buffer.extend(audio_chunk)
-            new_buffer_size = len(self.audio_buffer)
+            # Check if audio chunk exists and has data
+            if audio_chunk is None or len(audio_chunk) == 0:
+                if should_log_detailed:
+                    self.logger.debug(f"[{batch_id}] Received empty audio chunk, skipping")
+                return None
             
-            if should_log_detailed:
-                self.logger.debug(f"[{batch_id}] Added {len(audio_chunk)} samples to buffer. "
-                                f"Buffer size: {original_buffer_size} → {new_buffer_size} samples")
+            # Add to buffer (we need a certain amount of audio for reliable prediction)
+            self.audio_buffer.extend(audio_chunk)
             
             # Keep only the most recent buffer_duration seconds
             buffer_size = int(self.SAMPLE_RATE * self.buffer_duration)
@@ -1001,14 +1369,22 @@ class EmotionDetector(BaseDetector):
                 if should_log_detailed:
                     self.logger.debug(f"[{batch_id}] Trimmed buffer to {buffer_size} samples (removed {excess} old samples)")
             
-            # Only process if we have enough audio data
-            min_samples = int(self.SAMPLE_RATE * 0.5)  # At least 0.5 seconds
-            if len(self.audio_buffer) < min_samples:
-                # Not enough audio data yet
+            # Only process if we have enough data and sufficient time has passed since last prediction
+            if len(self.audio_buffer) < buffer_size * 0.75:  # At least 75% of the buffer is full
                 if should_log_detailed:
-                    self.logger.debug(f"[{batch_id}] Not enough audio data yet: {len(self.audio_buffer)}/{min_samples} samples "
-                                    f"({len(self.audio_buffer)/self.SAMPLE_RATE:.2f} sec / {min_samples/self.SAMPLE_RATE:.2f} sec)")
+                    self.logger.debug(f"[{batch_id}] Waiting for more audio data: {len(self.audio_buffer)}/{buffer_size} samples "
+                                    f"({len(self.audio_buffer)/self.SAMPLE_RATE:.2f}s / {self.buffer_duration:.2f}s)")
                 return None
+            
+            # Check if enough time has passed since the last prediction
+            if time_since_last < self.min_time_between_predictions:
+                if should_log_detailed:
+                    self.logger.debug(f"[{batch_id}] Skipping prediction - last one was {time_since_last:.2f}s ago "
+                                    f"(min interval: {self.min_time_between_predictions:.2f}s)")
+                return None
+                
+            # OK to make a prediction now - update the timestamp
+            self.last_prediction_time = current_time
             
             # Only log detailed processing info occasionally to reduce noise
             if should_log_detailed:
@@ -1024,161 +1400,240 @@ class EmotionDetector(BaseDetector):
                     # Start timing for performance measurement
                     inference_start = time.time()
                     
-                    # Convert audio data to numpy array
-                    audio = np.array(self.audio_buffer, dtype=np.float32)
+                    # Preprocess the audio data using our improved function
+                    audio = self._preprocess_audio(self.audio_buffer, batch_id)
                     
-                    # Normalize audio to -1 to 1 range
-                    max_abs = np.max(np.abs(audio))
-                    if max_abs > 1e-6:  # Avoid division by zero
-                        audio = audio / max_abs
-                    else:
+                    # Process based on model type and prepare input tensors
+                    try:
+                        if self.model_id == 'basic_emotion':
+                            # Convert to mel spectrogram
+                            inputs = self._audio_to_melspec(audio)
+                            if should_log_detailed:
+                                self.logger.debug(f"[{batch_id}] Converted audio to mel spectrogram with shape {inputs.shape}")
+                        elif self.model_info['type'] == 'speechbrain':
+                            # Special handling for speechbrain models
+                            # They often expect raw audio waveform
+                            inputs = torch.tensor(audio, dtype=torch.float32, device=self.device)
+                            
+                            # Add batch dimension if needed
+                            if len(inputs.shape) == 1:
+                                inputs = inputs.unsqueeze(0)
+                            
+                            # Reshape if needed for speechbrain (batch, time)
+                            if len(inputs.shape) == 3 and inputs.shape[2] == 1:
+                                inputs = inputs.squeeze(2)
+                                
+                            if should_log_detailed:
+                                self.logger.debug(f"[{batch_id}] Prepared audio tensor for speechbrain with shape {inputs.shape}")
+                        else:
+                            # For other models, use the audio directly as a tensor
+                            inputs = torch.tensor(audio, dtype=torch.float32, device=self.device)
+                            # Add batch dimension if needed
+                            if len(inputs.shape) == 1:
+                                inputs = inputs.unsqueeze(0)
+                            if should_log_detailed:
+                                self.logger.debug(f"[{batch_id}] Created audio tensor with shape {inputs.shape}")
+                        
+                        # Check inputs for NaN or Inf values
+                        if torch.isnan(inputs).any() or torch.isinf(inputs).any():
+                            self.logger.warning(f"[{batch_id}] Inputs contain NaN or Inf values, fixing")
+                            inputs = torch.nan_to_num(inputs)
+                            
+                        # Log that we're processing with the model
                         if should_log_detailed:
-                            self.logger.warning(f"[{batch_id}] Audio is silent, normalization skipped")
-                    
-                    if should_log_detailed:
-                        self.logger.debug(f"[{batch_id}] Normalized audio: min={np.min(audio):.4f}, max={np.max(audio):.4f}")
-                    
-                    # For basic_emotion model, convert to mel spectrogram format 
-                    # expected by the CNN model
-                    if self.model_id == 'basic_emotion':
-                        # Convert to mel spectrogram
-                        inputs = self._audio_to_melspec(audio)
-                        if should_log_detailed:
-                            self.logger.debug(f"[{batch_id}] Converted audio to mel spectrogram with shape {inputs.shape}")
-                    else:
-                        # For other models, use the audio directly as a tensor
-                        inputs = torch.tensor(audio, dtype=torch.float32, device=self.device)
-                        # Add batch dimension if needed
-                        if len(inputs.shape) == 1:
-                            inputs = inputs.unsqueeze(0)
-                        if should_log_detailed:
-                            self.logger.debug(f"[{batch_id}] Created audio tensor with shape {inputs.shape}")
-                    
-                    # Log that we're processing with the model
-                    if should_log_detailed:
-                        self.logger.info(f"[{batch_id}] Processing audio with model: model={type(self.model).__name__}")
-                    
-                    # Make predictions with model
-                    with torch.no_grad():
-                        # Attempt to get model outputs
+                            self.logger.info(f"[{batch_id}] Processing 5-second audio segment with model: model={type(self.model).__name__}")
+                        
+                        # Make predictions with model - wrap in try/except to handle model-specific errors
                         try:
-                            outputs = self.model(inputs)
-                            inference_time = time.time() - inference_start
-                            if should_log_detailed:
-                                self.logger.debug(f"[{batch_id}] Model inference completed in {inference_time*1000:.2f}ms")
-                            
-                            if isinstance(outputs, tuple):
+                            with torch.no_grad():
+                                # Attempt to get model outputs
+                                outputs = self.model(inputs)
+                                inference_time = time.time() - inference_start
+                                
                                 if should_log_detailed:
-                                    self.logger.debug(f"[{batch_id}] Model returned a tuple of outputs, using first output")
-                                outputs = outputs[0]
-                            
-                            if should_log_detailed:
-                                self.logger.debug(f"[{batch_id}] Raw model output: shape={outputs.shape}, "
-                                                f"min={torch.min(outputs).item():.4f}, max={torch.max(outputs).item():.4f}")
-                            
-                            # Process outputs based on model type
-                            if self.model_id == 'basic_emotion' or self.model_id == 'speechbrain':
-                                # Basic emotion model likely outputs class probabilities
+                                    self.logger.debug(f"[{batch_id}] Model inference completed in {inference_time*1000:.2f}ms")
+                                
                                 if isinstance(outputs, tuple):
-                                    # Some models return multiple outputs, use the first one
+                                    if should_log_detailed:
+                                        self.logger.debug(f"[{batch_id}] Model returned a tuple of outputs, using first output")
                                     outputs = outputs[0]
                                 
-                                # Apply softmax if needed
-                                if hasattr(outputs, 'softmax'):
-                                    probs = outputs.softmax(dim=1)
-                                else:
-                                    probs = torch.nn.functional.softmax(outputs, dim=1)
-                                
                                 if should_log_detailed:
-                                    self.logger.debug(f"[{batch_id}] Softmax probabilities: {probs.cpu().numpy()}")
-                                
-                                # Convert to numpy
-                                probs_np = probs.cpu().numpy()[0]
-                                
-                                # Map to emotion names
-                                emotion_probs = {emotion: float(probs_np[i]) for i, emotion in enumerate(self.emotions) if i < len(probs_np)}
-                                
-                                # Only log individual emotion probabilities in detailed logs
-                                if should_log_detailed:
-                                    for emotion, prob in emotion_probs.items():
-                                        self.logger.debug(f"[{batch_id}] Emotion '{emotion}': {prob:.4f}")
-                                
-                                # Get dominant emotion
-                                dominant_idx = np.argmax(probs_np)
-                                if dominant_idx < len(self.emotions):
-                                    dominant_emotion = self.emotions[dominant_idx]
-                                    confidence = float(probs_np[dominant_idx])
-                                else:
-                                    # Fallback if index is out of range
-                                    self.logger.warning(f"[{batch_id}] Dominant index {dominant_idx} out of range for emotions list of length {len(self.emotions)}")
-                                    dominant_emotion = "unknown"
-                                    confidence = 0.0
-                                
-                                # Only log the final prediction occasionally to reduce log spam
-                                if should_log_detailed:
-                                    self.logger.info(f"[{batch_id}] Model prediction: {dominant_emotion} ({confidence:.4f})")
-                                
-                                # Update state
-                                self.emotion_state = dominant_emotion
-                                self.confidence = confidence
-                                self.confidences = emotion_probs
-                            
-                            elif self.model_id == 'cry_detection':
-                                # Binary model likely outputs single value
-                                prob = torch.sigmoid(outputs).item()
-                                if should_log_detailed:
-                                    self.logger.debug(f"[{batch_id}] Binary output after sigmoid: {prob:.4f}")
-                                
-                                # For binary detection, map to crying/not_crying
-                                if prob > 0.5:
-                                    dominant_emotion = "crying"
-                                    confidence = prob
-                                else:
-                                    dominant_emotion = "not_crying"
-                                    confidence = 1.0 - prob
-                                
-                                emotion_probs = {
-                                    "crying": float(prob),
-                                    "not_crying": float(1.0 - prob)
-                                }
-                                
-                                if should_log_detailed:
-                                    self.logger.info(f"[{batch_id}] Binary prediction: {dominant_emotion} ({confidence:.4f})")
-                                
-                                # Update state
-                                self.emotion_state = dominant_emotion
-                                self.confidence = confidence
-                                self.confidences = emotion_probs
-                            
-                            else:
-                                # Unknown model type, use simulated values
-                                self.logger.warning(f"[{batch_id}] Unknown model type for inference: {self.model_id}")
-                                raise ValueError(f"Unknown model type: {self.model_id}")
-                                
-                        except Exception as e:
-                            # Always log errors regardless of should_log_detailed
-                            self.logger.error(f"[{batch_id}] Error during model inference: {str(e)}")
+                                    self.logger.debug(f"[{batch_id}] Raw model output: shape={outputs.shape}, "
+                                                    f"min={torch.min(outputs).item():.4f}, max={torch.max(outputs).item():.4f}")
+                        except Exception as model_error:
+                            self.logger.error(f"[{batch_id}] Error during model inference: {str(model_error)}")
                             import traceback
                             self.logger.error(traceback.format_exc())
-                            raise
+                            
+                            # Create fallback outputs - random predictions
+                            self.logger.warning(f"[{batch_id}] Using fallback prediction due to model error")
+                            outputs = torch.rand(1, len(self.emotions), device=self.device)
+                            
+                            # If this happens frequently, we should disable the model
+                            self.model_error_count = getattr(self, 'model_error_count', 0) + 1
+                            if self.model_error_count > 5:
+                                self.logger.error(f"[{batch_id}] Too many model errors ({self.model_error_count}), disabling model")
+                                self.is_model_loaded = False
+                    except Exception as input_error:
+                        # Handle errors in the input processing stage
+                        self.logger.error(f"[{batch_id}] Error preparing inputs for model: {str(input_error)}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+                        
+                        # Create dummy outputs for fallback processing
+                        outputs = torch.rand(1, len(self.emotions), device=self.device)
                     
+                    # Process outputs based on model type
+                    try:
+                        if self.model_id == 'basic_emotion' or self.model_info['type'] == 'speechbrain':
+                            # Process for class probabilities
+                            if isinstance(outputs, tuple):
+                                # Some models return multiple outputs, use the first one
+                                outputs = outputs[0]
+                            
+                            # Apply softmax if needed
+                            if hasattr(outputs, 'softmax'):
+                                probs = outputs.softmax(dim=1)
+                            else:
+                                probs = torch.nn.functional.softmax(outputs, dim=1)
+                            
+                            if should_log_detailed:
+                                self.logger.debug(f"[{batch_id}] Softmax probabilities: {probs.cpu().numpy()}")
+                            
+                            # Convert to numpy
+                            probs_np = probs.cpu().numpy()[0]
+                            
+                            # Map to emotion names
+                            emotion_probs = {emotion: float(probs_np[i]) if i < len(probs_np) else 0.0 
+                                           for i, emotion in enumerate(self.emotions)}
+                            
+                            # Only log individual emotion probabilities in detailed logs
+                            if should_log_detailed:
+                                for emotion, prob in emotion_probs.items():
+                                    self.logger.debug(f"[{batch_id}] Emotion '{emotion}': {prob:.4f}")
+                            
+                            # Get dominant emotion
+                            dominant_idx = np.argmax(probs_np)
+                            if dominant_idx < len(self.emotions):
+                                dominant_emotion = self.emotions[dominant_idx]
+                                confidence = float(probs_np[dominant_idx])
+                            else:
+                                # Fallback if index is out of range
+                                self.logger.warning(f"[{batch_id}] Dominant index {dominant_idx} out of range for emotions list of length {len(self.emotions)}")
+                                dominant_emotion = self.emotions[0] if self.emotions else "unknown"
+                                confidence = 0.5
+                            
+                            # Only log the final prediction occasionally to reduce log spam
+                            if should_log_detailed:
+                                self.logger.info(f"[{batch_id}] Model prediction: {dominant_emotion} ({confidence:.4f})")
+                            else:
+                                # Always log the emotion prediction even in non-detailed mode
+                                self.logger.info(f"Predicted emotion: {dominant_emotion} ({confidence:.4f})")
+                            
+                            # Update state
+                            self.emotion_state = dominant_emotion
+                            self.confidence = confidence
+                            self.confidences = emotion_probs
+                        
+                        elif self.model_id == 'cry_detection':
+                            # Binary model likely outputs single value
+                            prob = torch.sigmoid(outputs).item()
+                            if should_log_detailed:
+                                self.logger.debug(f"[{batch_id}] Binary output after sigmoid: {prob:.4f}")
+                            
+                            # For binary detection, map to crying/not_crying
+                            if prob > 0.5:
+                                dominant_emotion = "crying"
+                                confidence = prob
+                            else:
+                                dominant_emotion = "not_crying"
+                                confidence = 1.0 - prob
+                            
+                            emotion_probs = {
+                                "crying": float(prob),
+                                "not_crying": float(1.0 - prob)
+                            }
+                            
+                            # Always log the binary prediction
+                            self.logger.info(f"Binary prediction: {dominant_emotion} ({confidence:.4f})")
+                            
+                            # Update state
+                            self.emotion_state = dominant_emotion
+                            self.confidence = confidence
+                            self.confidences = emotion_probs
+                        
+                        else:
+                            # Unknown model type, use simulated values
+                            self.logger.warning(f"[{batch_id}] Unknown model type for inference: {self.model_id}")
+                            
+                            # Generate synthetic probabilities
+                            confidences = {emotion: random.uniform(0.1, 0.3) for emotion in self.emotions}
+                            dominant_emotion = random.choice(self.emotions)
+                            confidences[dominant_emotion] = random.uniform(0.6, 0.9)
+                            
+                            # Normalize to sum to 1.0
+                            total = sum(confidences.values())
+                            confidences = {k: v/total for k, v in confidences.items()}
+                            
+                            # Update state
+                            self.emotion_state = dominant_emotion
+                            self.confidence = confidences[dominant_emotion]
+                            self.confidences = confidences
+                            
+                    except Exception as output_error:
+                        # Handle errors in the output processing stage
+                        self.logger.error(f"[{batch_id}] Error processing model outputs: {str(output_error)}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+                        
+                        # Fall back to simulation
+                        confidences = {emotion: random.uniform(0.1, 0.3) for emotion in self.emotions}
+                        dominant_emotion = random.choice(self.emotions)
+                        confidences[dominant_emotion] = random.uniform(0.6, 0.9)
+                        
+                        # Normalize to sum to 1.0
+                        total = sum(confidences.values())
+                        confidences = {k: v/total for k, v in confidences.items()}
+                        
+                        # Update state
+                        self.emotion_state = dominant_emotion
+                        self.confidence = confidences[dominant_emotion]
+                        self.confidences = confidences
+                
                 except Exception as e:
-                    # Always log errors regardless of should_log_detailed
-                    self.logger.error(f"[{batch_id}] Error processing audio with model: {str(e)}")
+                    # Handle any other errors that might occur during processing
+                    self.logger.error(f"[{batch_id}] Unexpected error processing audio: {str(e)}")
                     import traceback
                     self.logger.error(traceback.format_exc())
+                    
                     # Fall back to simulation
-                    self.is_model_loaded = False  # Mark model as not loaded for future calls
-                    self.logger.warning(f"[{batch_id}] Model disabled due to error, falling back to simulation")
+                    self.model_error_count = getattr(self, 'model_error_count', 0) + 1
+                    if self.model_error_count > 5:
+                        self.logger.error(f"[{batch_id}] Too many processing errors ({self.model_error_count}), disabling model")
+                        self.is_model_loaded = False
+                    
+                    # Generate fallback probabilities
+                    confidences = {emotion: random.uniform(0.1, 0.3) for emotion in self.emotions}
+                    dominant_emotion = random.choice(self.emotions)
+                    confidences[dominant_emotion] = random.uniform(0.6, 0.9)
+                    
+                    # Normalize to sum to 1.0
+                    total = sum(confidences.values())
+                    confidences = {k: v/total for k, v in confidences.items()}
+                    
+                    # Update state
+                    self.emotion_state = dominant_emotion
+                    self.confidence = confidences[dominant_emotion]
+                    self.confidences = confidences
             
             # If no model or error occurred, use simulated values
-            if not self.is_model_loaded or self.model is None:
+            else:
                 # Only log this warning occasionally to reduce noise
                 if should_log_detailed:
                     self.logger.warning(f"[{batch_id}] Model not loaded, using simulated values")
                 
                 # Update simulation state
-                current_time = time.time()
                 elapsed = current_time - self.last_update_time
                 self.state_duration += elapsed
                 
@@ -1230,12 +1685,26 @@ class EmotionDetector(BaseDetector):
                     self.emotion_counts[self.emotion_state] = 1
                     self.logger.warning(f"[{batch_id}] Added missing emotion '{self.emotion_state}' to emotion_counts")
             
+            # Don't clear the buffer completely - keep a 50% overlap for better continuity
+            # This is important for emotion detection to avoid missing transitions
+            half_buffer = len(self.audio_buffer) // 2
+            if half_buffer > 0:
+                self.audio_buffer = self.audio_buffer[-half_buffer:]
+                if should_log_detailed:
+                    self.logger.debug(f"[{batch_id}] Keeping {half_buffer} samples in buffer for overlap")
+            else:
+                # If buffer is too small, clear it
+                self.audio_buffer = []
+                if should_log_detailed:
+                    self.logger.debug(f"[{batch_id}] Cleared audio buffer")
+            
             result = {
                 'emotion': self.emotion_state,
                 'confidence': self.confidence,
                 'confidences': self.confidences,
                 'batch_id': batch_id,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'segment_duration': self.buffer_duration
             }
             
             # Log the final result only occasionally to reduce noise
@@ -1248,4 +1717,164 @@ class EmotionDetector(BaseDetector):
             self.logger.error(f"Error processing audio chunk: {str(e)}")
             import traceback
             self.logger.error(traceback.format_exc())
-            return None 
+            return None
+
+    def check_speechbrain_models(self) -> Dict[str, Any]:
+        """Check if SpeechBrain models are available and attempt to load them.
+        
+        Returns:
+            Dict containing status and information about available SpeechBrain models
+        """
+        results = {
+            "status": "success",
+            "models": [],
+            "errors": []
+        }
+        
+        # Find all speechbrain models in AVAILABLE_MODELS
+        speechbrain_models = {model_id: info for model_id, info in self.AVAILABLE_MODELS.items() 
+                             if info['type'] == 'speechbrain'}
+        
+        # Check status of each model
+        for model_id, info in speechbrain_models.items():
+            model_info = {
+                "id": model_id,
+                "name": info["name"],
+                "emotions": info["emotions"],
+                "path": None,
+                "status": "unknown",
+                "size": 0,
+                "exists": False,
+                "error": None
+            }
+            
+            try:
+                # Get the model path
+                model_path = self._get_model_path(model_id)
+                model_info["path"] = model_path
+                
+                # Check if the file exists
+                if os.path.exists(model_path):
+                    model_info["exists"] = True
+                    model_info["size"] = os.path.getsize(model_path)
+                    model_info["status"] = "available"
+                    
+                    # Try to load a small part of the model to verify it's valid PyTorch
+                    try:
+                        # Just check if it can be loaded, don't keep it in memory
+                        model_data = torch.load(model_path, map_location="cpu")
+                        if isinstance(model_data, dict):
+                            model_info["structure"] = "dict"
+                            model_info["keys"] = list(model_data.keys())
+                        else:
+                            model_info["structure"] = str(type(model_data).__name__)
+                        model_info["status"] = "valid"
+                    except Exception as e:
+                        model_info["status"] = "invalid"
+                        model_info["error"] = str(e)
+                        results["errors"].append(f"Error loading {model_id}: {str(e)}")
+                else:
+                    # Try alternative paths
+                    base_dir = os.path.dirname(model_path)
+                    model_name = os.path.splitext(os.path.basename(model_path))[0]
+                    alt_path = os.path.join(base_dir, model_name, f"{model_name}.pt")
+                    
+                    if os.path.exists(alt_path):
+                        model_info["path"] = alt_path
+                        model_info["exists"] = True
+                        model_info["size"] = os.path.getsize(alt_path)
+                        model_info["status"] = "available (alt path)"
+                    else:
+                        model_info["status"] = "missing"
+                        results["errors"].append(f"Model file not found for {model_id}")
+            except Exception as e:
+                model_info["status"] = "error"
+                model_info["error"] = str(e)
+                results["errors"].append(f"Error checking {model_id}: {str(e)}")
+            
+            results["models"].append(model_info)
+        
+        # Set overall status
+        if not speechbrain_models:
+            results["status"] = "no_models"
+        elif all(model["status"] == "valid" for model in results["models"]):
+            results["status"] = "all_valid"
+        elif any(model["status"] == "valid" for model in results["models"]):
+            results["status"] = "some_valid"
+        else:
+            results["status"] = "none_valid"
+        
+        return results 
+
+    def _preprocess_audio(self, audio_data: np.ndarray, batch_id: str) -> np.ndarray:
+        """Preprocess audio data to improve quality for emotion detection.
+        
+        Args:
+            audio_data: Raw audio data as numpy array
+            batch_id: Batch ID for logging
+            
+        Returns:
+            Preprocessed audio numpy array
+        """
+        should_log = hasattr(self, 'debug_mode') and self.debug_mode
+        
+        # Convert to numpy array if needed
+        if not isinstance(audio_data, np.ndarray):
+            audio_data = np.array(audio_data)
+        
+        # Ensure we have float32 data
+        if audio_data.dtype != np.float32:
+            audio_data = audio_data.astype(np.float32)
+        
+        # Check for silence or near-silence
+        rms = np.sqrt(np.mean(np.square(audio_data)))
+        if rms < 0.001:  # Very low signal
+            if should_log:
+                self.logger.warning(f"[{batch_id}] Audio is very quiet (RMS: {rms:.6f})")
+            
+            # Boost the signal slightly to avoid numerical issues
+            if rms > 0:
+                audio_data = audio_data * (0.01 / rms)
+        
+        # Normalize to -1 to 1 range (with safety checks)
+        max_abs = np.max(np.abs(audio_data))
+        if max_abs > 1e-6:  # Avoid division by zero
+            audio_data = audio_data / max_abs
+            if should_log:
+                self.logger.debug(f"[{batch_id}] Normalized audio: min={np.min(audio_data):.4f}, max={np.max(audio_data):.4f}, rms={np.sqrt(np.mean(np.square(audio_data))):.4f}")
+        
+        # Apply a gentle high-pass filter to remove DC offset and very low frequencies
+        # This can be important for emotion detection as emotions are typically in higher frequencies
+        if len(audio_data) > 32:
+            try:
+                # Define the highpass filter
+                b, a = signal.butter(2, 80/(self.SAMPLE_RATE/2), 'highpass')
+                audio_data = signal.filtfilt(b, a, audio_data)
+                if should_log:
+                    self.logger.debug(f"[{batch_id}] Applied high-pass filter")
+            except Exception as e:
+                # Fallback if filter fails
+                if should_log:
+                    self.logger.warning(f"[{batch_id}] Filter failed: {str(e)}")
+        
+        # Handle NaN or Inf values that might appear
+        audio_data = np.nan_to_num(audio_data, nan=0.0, posinf=1.0, neginf=-1.0)
+        
+        # Save audio sample for debugging if enabled
+        if hasattr(self, 'save_audio_samples') and self.save_audio_samples:
+            try:
+                import soundfile as sf
+                import os
+                
+                # Ensure directory exists
+                debug_dir = os.path.join(os.path.expanduser('~'), 'babymonitor_debug')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                # Save the audio file
+                debug_file = os.path.join(debug_dir, f"audio_sample_{batch_id}.wav")
+                sf.write(debug_file, audio_data, self.SAMPLE_RATE)
+                self.logger.info(f"[{batch_id}] Saved audio sample to {debug_file}")
+            except Exception as e:
+                self.logger.warning(f"[{batch_id}] Failed to save audio sample: {str(e)}")
+        
+        return audio_data

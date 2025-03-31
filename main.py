@@ -57,16 +57,58 @@ logger = logging.getLogger('baby_monitor')
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
 
-# Signal handler for graceful shutdown
+# Global variables to track running state and components
 stop_event = Event()
+running_components = []
 
 def signal_handler(sig, frame):
-    """Handle signals for graceful shutdown."""
-    logger.info("Shutdown signal received. Stopping Baby Monitor System...")
+    """
+    Improved signal handler for graceful shutdown.
+    
+    This will set the stop_event and attempt to stop all running components
+    that have been registered.
+    """
+    logger.info("Shutdown signal received (Ctrl+C). Stopping Baby Monitor System...")
+    
+    # Set the global stop event
     stop_event.set()
 
+    # Try to stop web interface which might be blocking in the main thread
+    for component in running_components:
+        if hasattr(component, 'stop') and callable(component.stop):
+            logger.info(f"Stopping component: {component.__class__.__name__}")
+            try:
+                component.stop()
+            except Exception as e:
+                logger.error(f"Error stopping {component.__class__.__name__}: {e}")
+    
+    # Signal to eventlet that we want to stop
+    try:
+        import eventlet
+        eventlet.kill(eventlet.getcurrent())
+    except Exception as e:
+        logger.error(f"Error killing eventlet greenlet: {e}")
+    
+    # If all else fails, exit more forcefully after a short delay
+    def force_exit():
+        logger.warning("Forcing exit...")
+        os._exit(0)
+        
+    # Schedule a force exit if graceful shutdown doesn't work
+    from threading import Timer
+    t = Timer(5.0, force_exit)
+    t.daemon = True
+    t.start()
+
+# Register the signal handlers
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
+
+def register_component(component):
+    """Register a component to be stopped on shutdown."""
+    global running_components
+    running_components.append(component)
+    return component
 
 def run_normal_mode(args):
     """
@@ -80,45 +122,46 @@ def run_normal_mode(args):
     try:
         # Initialize camera
         logger.info("Initializing camera...")
-        camera = Camera(args.camera_id)
+        camera = register_component(Camera(args.camera_id))
         
         # Initialize person detector
         logger.info("Initializing person detector...")
-        person_detector = PersonDetector(
+        person_detector = register_component(PersonDetector(
             threshold=args.threshold
-        )
+        ))
         
         # Initialize emotion detector
         logger.info("Initializing emotion detector...")
-        emotion_detector = EmotionDetector(
+        emotion_detector = register_component(EmotionDetector(
             threshold=args.threshold
-        )
+        ))
         
         # Initialize audio processor with emotion detector
         logger.info("Initializing audio processor...")
-        audio_processor = AudioProcessor(
+        audio_processor = register_component(AudioProcessor(
             device=args.input_device,
             emotion_detector=emotion_detector
-        )
+        ))
         
         # Set up emotion callback to send updates to web interface
         def emotion_callback(result):
-            if 'web_interface' in locals():
+            if 'web_interface' in locals() and not stop_event.is_set():
                 web_interface.emit_emotion_update(result)
         
         audio_processor.set_emotion_callback(emotion_callback)
         
         # Start web interface
         logger.info("Starting web interface...")
-        web_interface = SimpleBabyMonitorWeb(
+        web_interface = register_component(SimpleBabyMonitorWeb(
             camera=camera,
             person_detector=person_detector,
             emotion_detector=emotion_detector,
             host=args.host,
             port=args.port,
             mode="normal",
-            debug=args.debug
-        )
+            debug=args.debug,
+            stop_event=stop_event  # Pass stop_event to web interface
+        ))
         
         # Print access information
         print("\n" + "="*80)
@@ -127,48 +170,25 @@ def run_normal_mode(args):
         print("Press Ctrl+C to stop the server")
         print("="*80 + "\n")
         
-        # Start the web interface in the main thread
-        web_interface.run()
+        # Start the web interface in the main thread, but check stop_event
+        try:
+            web_interface.run(stop_event=stop_event)
+        except KeyboardInterrupt:
+            logger.info("Keyboard interrupt detected in web interface")
+            signal_handler(signal.SIGINT, None)
         
         # This code will only be reached when the web interface is stopped
         logger.info("Web interface stopped")
             
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt. Shutting down...")
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
         logger.error(f"Error in normal mode: {e}")
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        try:
-            if 'web_interface' in locals():
-                web_interface.stop()
-        except Exception as e:
-            logger.error(f"Error stopping web interface: {e}")
-            
-        try:
-            if 'person_detector' in locals() and hasattr(person_detector, 'stop'):
-                person_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping person detector: {e}")
-            
-        try:
-            if 'emotion_detector' in locals() and hasattr(emotion_detector, 'stop'):
-                emotion_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping emotion detector: {e}")
-            
-        try:
-            if 'camera' in locals():
-                camera.release()
-        except Exception as e:
-            logger.error(f"Error releasing camera: {e}")
-            
-        try:
-            if 'audio_processor' in locals():
-                audio_processor.stop()
-        except Exception as e:
-            logger.error(f"Error stopping audio processor: {e}")
+        # Shutdown is handled by signal_handler and running_components list
     
     return 0
 
@@ -187,45 +207,46 @@ def run_dev_mode(args):
     try:
         # Initialize camera
         logger.info("Initializing camera...")
-        camera = Camera(args.camera_id)
+        camera = register_component(Camera(args.camera_id))
         
         # Initialize person detector
         logger.info("Initializing person detector...")
-        person_detector = PersonDetector(
+        person_detector = register_component(PersonDetector(
             threshold=args.threshold
-        )
+        ))
         
         # Initialize emotion detector
         logger.info("Initializing emotion detector...")
-        emotion_detector = EmotionDetector(
+        emotion_detector = register_component(EmotionDetector(
             threshold=args.threshold
-        )
+        ))
         
         # Initialize audio processor with emotion detector
         logger.info("Initializing audio processor...")
-        audio_processor = AudioProcessor(
+        audio_processor = register_component(AudioProcessor(
             device=args.input_device,
             emotion_detector=emotion_detector
-        )
+        ))
         
         # Set up emotion callback to send updates to web interface
         def emotion_callback(result):
-            if 'web_interface' in locals():
+            if 'web_interface' in locals() and not stop_event.is_set():
                 web_interface.emit_emotion_update(result)
         
         audio_processor.set_emotion_callback(emotion_callback)
         
         # Start web interface in dev mode
         logger.info("Starting web interface in developer mode...")
-        web_interface = SimpleBabyMonitorWeb(
+        web_interface = register_component(SimpleBabyMonitorWeb(
             camera=camera,
             person_detector=person_detector,
             emotion_detector=emotion_detector,
             host=args.host,
             port=args.port,
             mode="dev",
-            debug=True  # Always enable debug in dev mode
-        )
+            debug=True,  # Always enable debug in dev mode
+            stop_event=stop_event  # Pass stop_event to web interface
+        ))
         
         # Print access information
         print("\n" + "="*80)
@@ -235,48 +256,25 @@ def run_dev_mode(args):
         print("Press Ctrl+C to stop the server")
         print("="*80 + "\n")
         
-        # Start the web interface in the main thread
-        web_interface.run()
+        # Start the web interface in the main thread, but check stop_event
+        try:
+            web_interface.run(stop_event=stop_event)
+        except KeyboardInterrupt:
+            logger.info("Keyboard interrupt detected in web interface")
+            signal_handler(signal.SIGINT, None)
         
         # This code will only be reached when the web interface is stopped
         logger.info("Web interface stopped")
             
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt. Shutting down...")
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
         logger.error(f"Error in developer mode: {e}")
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        try:
-            if 'web_interface' in locals():
-                web_interface.stop()
-        except Exception as e:
-            logger.error(f"Error stopping web interface: {e}")
-            
-        try:
-            if 'person_detector' in locals() and hasattr(person_detector, 'stop'):
-                person_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping person detector: {e}")
-            
-        try:
-            if 'emotion_detector' in locals() and hasattr(emotion_detector, 'stop'):
-                emotion_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping emotion detector: {e}")
-            
-        try:
-            if 'camera' in locals():
-                camera.release()
-        except Exception as e:
-            logger.error(f"Error releasing camera: {e}")
-            
-        try:
-            if 'audio_processor' in locals():
-                audio_processor.stop()
-        except Exception as e:
-            logger.error(f"Error stopping audio processor: {e}")
+        # Shutdown is handled by signal_handler and running_components list
     
     return 0
 
@@ -300,7 +298,7 @@ def run_local_mode(args):
         
         # Launch the main GUI
         logger.info("Starting local GUI...")
-        return launch_main_gui()
+        return launch_main_gui(stop_event=stop_event)
         
     except Exception as e:
         logger.error(f"Error in local mode: {e}")
@@ -316,34 +314,35 @@ def main(args):
         
     # Initialize camera first
     logger.info("Initializing camera...")
-    camera = Camera(args.camera_id)
+    camera = register_component(Camera(args.camera_id))
     if not camera or not camera.is_opened():
         logger.error("Failed to initialize camera")
         return 1
 
     # Initialize detectors
     logger.info("Initializing detectors...")
-    person_detector = PersonDetector(threshold=args.threshold)
-    emotion_detector = EmotionDetector(threshold=args.threshold)
+    person_detector = register_component(PersonDetector(threshold=args.threshold))
+    emotion_detector = register_component(EmotionDetector(threshold=args.threshold))
     
     # Initialize web interface
     logger.info("Initializing web interface...")
-    web = SimpleBabyMonitorWeb(
+    web = register_component(SimpleBabyMonitorWeb(
         camera=camera,  # Pass the initialized camera
         person_detector=person_detector,
         emotion_detector=emotion_detector,
         host=args.host,
         port=args.port,
         mode=args.mode,
-        debug=args.debug
-    )
+        debug=args.debug,
+        stop_event=stop_event
+    ))
     
     # Initialize audio processor with emotion detector
     logger.info("Initializing audio processor...")
-    audio_processor = AudioProcessor(
+    audio_processor = register_component(AudioProcessor(
         device=args.input_device,
         emotion_detector=emotion_detector
-    )
+    ))
     
     # Set up emotion callback
     audio_processor.set_emotion_callback(web.emit_emotion_update)
@@ -360,11 +359,11 @@ def main(args):
             last_stats_time = time.time()
             processed_batch_ids = set()  # Track already processed batch IDs
             
-            while True:
+            while not stop_event.is_set():
                 try:
                     # Check if we should stop
-                    if not web.running:
-                        logger.info("Web interface stopped, stopping message queue processor")
+                    if stop_event.is_set() or not web.running:
+                        logger.info("Stop event set or web interface stopped, stopping message queue processor")
                         break
                     
                     # Use a non-blocking get with short timeout to allow for cooperative multitasking
@@ -399,7 +398,8 @@ def main(args):
                                         logger.debug(f"Processing emotion message: {emotion} ({confidence:.4f}) [batch: {batch_id}]")
                                         
                                         # Send to web interface - we're in the same eventlet context as the web server
-                                        web.emit_emotion_update(data)
+                                        if not stop_event.is_set():
+                                            web.emit_emotion_update(data)
                                         
                                     else:
                                         logger.debug(f"Skipping duplicate emotion batch: {batch_id}")
@@ -423,6 +423,11 @@ def main(args):
                     import traceback
                     logger.error(traceback.format_exc())
                     eventlet.sleep(0.5)  # Sleep longer after an error
+                
+                # Check stop_event more frequently
+                if stop_event.is_set():
+                    logger.info("Stop event detected in message queue processor")
+                    break
         except Exception as e:
             logger.error(f"Message queue processor crashed: {str(e)}")
             import traceback
@@ -430,6 +435,7 @@ def main(args):
     
     logger.info("Starting message queue processor...")
     queue_processor = eventlet.spawn(process_message_queue)
+    register_component(queue_processor)  # Register for proper cleanup
     
     try:
         # Start audio processing explicitly
@@ -437,17 +443,25 @@ def main(args):
         audio_processor.start()
         
         # Start web interface (this will block)
-        web.run()
+        web.run(stop_event=stop_event)
         
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("Keyboard interrupt caught in main function")
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
     finally:
-        logger.info("Cleaning up...")
-        audio_processor.stop()
-        web.stop()
-        camera.release()
+        logger.info("Cleaning up from main function...")
+        stop_event.set()  # Ensure stop event is set
+        
+        # Explicitly stop components in reverse order
+        for component in reversed(running_components):
+            if hasattr(component, 'stop') and callable(component.stop):
+                logger.info(f"Stopping {component.__class__.__name__}")
+                try:
+                    component.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping {component.__class__.__name__}: {e}")
 
 def parse_args():
     """Parse command line arguments."""
@@ -476,4 +490,10 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    main(args)
+    try:
+        main(args)
+    except KeyboardInterrupt:
+        logger.info("Main program interrupted via keyboard")
+        signal_handler(signal.SIGINT, None)
+    finally:
+        logger.info("Baby Monitor System shutdown complete")
