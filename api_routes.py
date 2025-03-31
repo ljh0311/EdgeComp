@@ -223,6 +223,40 @@ def restart_audio():
         "status": "success"
     })
 
+@api_bp.route('/emotion/current', methods=['GET'])
+def get_current_emotion():
+    """Get the current emotion detection result."""
+    try:
+        if not emotion_detector or not emotion_detector.is_running:
+            return jsonify({
+                'error': 'Emotion detector is not running',
+                'status': 'error'
+            }), 400
+            
+        # Get the latest emotion detection result
+        result = emotion_detector.get_latest_result()
+        if result:
+            return jsonify({
+                'status': 'success',
+                'data': result
+            })
+        else:
+            return jsonify({
+                'status': 'no_data',
+                'data': {
+                    'emotion': 'unknown',
+                    'confidence': 0.0,
+                    'emotions': {emotion: 0.0 for emotion in emotion_detector.emotions}
+                }
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting current emotion: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
 # ===================== AUDIO MICROPHONE ENDPOINTS =====================
 
 @api_bp.route('/audio/microphones', methods=['GET'])
@@ -415,6 +449,28 @@ def set_microphone():
         "emotion_detector_updated": mic_set_success
     })
 
+@api_bp.route('/audio/microphone', methods=['GET'])
+def get_microphone_status():
+    """Get current microphone status"""
+    global emotion_detector
+    
+    # If we have a real emotion detector, get actual microphone status
+    if emotion_detector and hasattr(emotion_detector, 'get_microphone_status'):
+        try:
+            status = emotion_detector.get_microphone_status()
+            return jsonify(status)
+        except Exception as e:
+            print(f"Error getting microphone status: {str(e)}")
+    
+    # Fallback to basic status
+    return jsonify({
+        "initialized": False,
+        "error": "Microphone not initialized",
+        "is_muted": True,
+        "name": "No Microphone",
+        "status": "error"
+    })
+
 # ===================== SYSTEM ENDPOINTS =====================
 
 @api_bp.route('/system/check', methods=['GET'])
@@ -452,54 +508,34 @@ def check_system():
         }
     })
 
-@api_bp.route('/system/info', methods=['GET'])
+@api_bp.route('/system_info', methods=['GET'])
 def get_system_info():
     """Get detailed system information"""
+    global emotion_detector
+    
     # Get system information
     system_info = {
         "os": platform.platform(),
         "python_version": platform.python_version(),
         "opencv_version": cv2.__version__ if OPENCV_AVAILABLE else "Not installed",
-        "camera_resolution": "640x480",  # Replace with actual resolution
-        "camera_device": "0",            # Replace with actual device
-        "microphone_device": current_microphone["name"] if current_microphone else "Default",
-        "microphone_index": current_microphone["id"] if current_microphone else "0",
-        "audio_sample_rate": current_microphone["sample_rate"] if current_microphone else 44100,
-        "audio_channels": current_microphone.get("channels", 1) if current_microphone else 1,
-        "audio_bit_depth": 16,  # Default bit depth
-        "audio_gain": 0         # Default gain
+        "camera_status": "connected" if OPENCV_AVAILABLE else "not available",
+        "emotion_detector_status": "running" if emotion_detector and emotion_detector.is_model_loaded else "not available",
+        "current_emotion": "no_data",
+        "cpu_usage": psutil.cpu_percent(),
+        "memory_usage": psutil.virtual_memory().percent,
+        "uptime": str(datetime.datetime.now() - app_start_time).split('.')[0]
     }
     
-    # Get CPU and memory usage
-    cpu_usage = psutil.cpu_percent()
-    memory = psutil.virtual_memory()
-    memory_usage = memory.percent
-    memory_available = round(memory.available / (1024 * 1024))
+    # Get emotion model info if available
+    if emotion_detector and hasattr(emotion_detector, 'get_available_models'):
+        try:
+            models_data = emotion_detector.get_available_models()
+            system_info["available_emotion_models"] = models_data
+            system_info["emotion_model"] = models_data.get("current_model")
+        except Exception as e:
+            print(f"Error getting emotion models: {str(e)}")
     
-    # Get disk usage
-    disk = psutil.disk_usage('/')
-    disk_usage = disk.percent
-    
-    # Calculate uptime
-    uptime = datetime.datetime.now() - app_start_time
-    uptime_str = str(datetime.timedelta(seconds=int(uptime.total_seconds())))
-    
-    # Get model info
-    model_info = current_emotion_model if current_emotion_model else {
-        "name": "Basic Emotion",
-        "type": "basic",
-        "emotions": ["crying", "laughing", "babbling", "silence"]
-    }
-    
-    return jsonify({
-        "system_info": system_info,
-        "cpu_usage": cpu_usage,
-        "memory_usage": memory_usage,
-        "memory_available": memory_available,
-        "disk_usage": disk_usage,
-        "uptime": uptime_str,
-        "model_info": model_info
-    })
+    return jsonify(system_info)
 
 @api_bp.route('/system/restart', methods=['POST'])
 def restart_system():
@@ -514,14 +550,94 @@ def restart_system():
 
 @api_bp.route('/system/stop', methods=['POST'])
 def stop_system():
-    """Stop the system services"""
-    # Placeholder for system stopping logic
-    # In a real implementation, you would stop services
-    
+    """Stop the baby monitor system"""
     return jsonify({
-        "message": "System stopped successfully",
+        "message": "System stop initiated",
         "status": "success"
     })
+
+# ===================== CAMERA ENDPOINTS =====================
+
+@api_bp.route('/cameras', methods=['GET'])
+def get_cameras():
+    """Get list of available cameras"""
+    try:
+        # Try to get list of cameras using OpenCV
+        if OPENCV_AVAILABLE:
+            cameras = []
+            index = 0
+            while True:
+                cap = cv2.VideoCapture(index)
+                if not cap.isOpened():
+                    break
+                ret, _ = cap.read()
+                if ret:
+                    cameras.append({
+                        "id": str(index),
+                        "name": f"Camera {index + 1}",
+                        "active": index == 0,  # First camera is active by default
+                        "status": "connected"
+                    })
+                cap.release()
+                index += 1
+                if index >= 10:  # Limit to 10 cameras to prevent infinite loop
+                    break
+            
+            return jsonify({
+                "cameras": cameras,
+                "status": "success"
+            })
+        else:
+            # Fallback to single default camera
+            return jsonify({
+                "cameras": [{
+                    "id": "0",
+                    "name": "Default Camera",
+                    "active": True,
+                    "status": "connected"
+                }],
+                "status": "success"
+            })
+    except Exception as e:
+        print(f"Error getting cameras: {str(e)}")
+        return jsonify({
+            "error": "Failed to get camera list",
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@api_bp.route('/cameras/activate', methods=['POST'])
+def activate_camera():
+    """Activate a specific camera"""
+    data = request.json
+    camera_id = data.get('camera_id')
+    
+    if not camera_id:
+        return jsonify({"error": "Camera ID is required"}), 400
+    
+    try:
+        # Verify camera exists and can be opened
+        cap = cv2.VideoCapture(int(camera_id))
+        if not cap.isOpened():
+            return jsonify({
+                "error": f"Camera {camera_id} not found or cannot be opened",
+                "status": "error"
+            }), 404
+        
+        cap.release()
+        
+        return jsonify({
+            "message": f"Camera {camera_id} activated",
+            "status": "success",
+            "camera_id": camera_id
+        })
+    except Exception as e:
+        print(f"Error activating camera: {str(e)}")
+        return jsonify({
+            "error": "Failed to activate camera",
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 # Register this blueprint in your main app.py as:
 # from api_routes import api_bp

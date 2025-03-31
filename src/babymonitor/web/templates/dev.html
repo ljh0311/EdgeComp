@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block title %}Baby Monitor - Developer Tools{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dev-container {
+        padding: 2rem;
+        background-color: #1a1a1a;
+        min-height: calc(100vh - 56px);
+    }
+
+    .dev-card {
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .dev-card-header {
+        background-color: #333;
+        padding: 1rem;
+        border-bottom: 1px solid #404040;
+    }
+
+    .dev-card-body {
+        padding: 1.5rem;
+    }
+
+    /* Audio visualization */
+    .audio-visualizer {
+        width: 100%;
+        height: 100px;
+        background-color: #252525;
+        border-radius: 8px;
+        margin-top: 1rem;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .audio-bar {
+        position: absolute;
+        bottom: 0;
+        background-color: #0dcaf0;
+        width: 3px;
+        margin-right: 2px;
+        transition: height 0.1s ease;
+    }
+
+    .audio-level {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+
+    /* API Response */
+    .api-response {
+        background-color: #252525;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        font-family: monospace;
+        white-space: pre-wrap;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .api-response.success {
+        border-left: 4px solid #198754;
+    }
+
+    .api-response.error {
+        border-left: 4px solid #dc3545;
+    }
+
+    /* Emotion bars */
+    .emotion-progress {
+        height: 24px;
+        margin-bottom: 10px;
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .emotion-label {
+        position: absolute;
+        width: 100%;
+        text-align: left;
+        color: white;
+        font-weight: bold;
+        line-height: 24px;
+        padding-left: 10px;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        font-size: 0.9rem;
+        z-index: 1;
+    }
+
+    .progress-bar-pulse {
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+
+    /* Controls */
+    .control-group {
+        margin-bottom: 1rem;
+    }
+
+    .control-group label {
+        color: #fff;
+        margin-bottom: 0.5rem;
+    }
+
+    .form-select-dark {
+        background-color: #333;
+        border: 1px solid #404040;
+        color: #fff;
+        padding: 0.5rem;
+        width: 100%;
+        border-radius: 4px;
+        margin-bottom: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dev-container">
+    <div class="row">
+        <!-- Audio Input Section -->
+        <div class="col-lg-6 mb-4">
+            <div class="dev-card">
+                <div class="dev-card-header">
+                    <h5 class="mb-0"><i class="bi bi-mic"></i> Audio Input</h5>
+                </div>
+                <div class="dev-card-body">
+                    <div class="control-group">
+                        <label>Input Device</label>
+                        <select class="form-select-dark" id="microphoneSelect">
+                            <option value="">Loading microphones...</option>
+                        </select>
+                    </div>
+                    <div class="audio-visualizer" id="audioVisualizer">
+                        <div class="audio-level" id="audioLevel">-60 dB</div>
+                    </div>
+                    <div class="api-response" id="audioResponse">Waiting for audio data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emotion Detection Section -->
+        <div class="col-lg-6 mb-4">
+            <div class="dev-card">
+                <div class="dev-card-header">
+                    <h5 class="mb-0"><i class="bi bi-emoji-smile"></i> Emotion Detection</h5>
+                </div>
+                <div class="dev-card-body">
+                    <div class="control-group">
+                        <label>Current Model</label>
+                        <select class="form-select-dark" id="modelSelect">
+                            <option value="">Loading models...</option>
+                        </select>
+                    </div>
+                    <div id="emotionProgressContainer">
+                        <!-- Emotion progress bars will be added here -->
+                    </div>
+                    <div class="api-response" id="emotionResponse">Waiting for emotion data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Testing Section -->
+        <div class="col-12">
+            <div class="dev-card">
+                <div class="dev-card-header">
+                    <h5 class="mb-0"><i class="bi bi-code-slash"></i> API Testing</h5>
+                </div>
+                <div class="dev-card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="control-group">
+                                <label>API Endpoint</label>
+                                <select class="form-select-dark" id="apiEndpoint">
+                                    <option value="/api/emotion/current">Current Emotion</option>
+                                    <option value="/api/audio/microphone">Microphone Status</option>
+                                    <option value="/api/emotion/models">Available Models</option>
+                                    <option value="/api/system_info">System Info</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" id="testApi">
+                                <i class="bi bi-play"></i> Test API
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="api-response" id="apiTestResponse">Select an endpoint and click Test API</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Socket.IO connection
+    const socket = io();
+    
+    // Initialize variables
+    let audioVisualizerBars = [];
+    const NUM_BARS = 32;
+    
+    // DOM Elements
+    const audioVisualizer = document.getElementById('audioVisualizer');
+    const audioLevel = document.getElementById('audioLevel');
+    const audioResponse = document.getElementById('audioResponse');
+    const emotionResponse = document.getElementById('emotionResponse');
+    const apiTestResponse = document.getElementById('apiTestResponse');
+    const emotionProgressContainer = document.getElementById('emotionProgressContainer');
+    
+    // Initialize audio visualizer
+    function initAudioVisualizer() {
+        audioVisualizerBars = [];
+        
+        const barWidth = (audioVisualizer.clientWidth - 100) / NUM_BARS - 2;
+        
+        for (let i = 0; i < NUM_BARS; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'audio-bar';
+            bar.style.left = `${i * (barWidth + 2)}px`;
+            bar.style.width = `${barWidth}px`;
+            audioVisualizer.appendChild(bar);
+            audioVisualizerBars.push(bar);
+        }
+    }
+    
+    // Update audio visualizer
+    function updateAudioVisualizer(level) {
+        const normalizedLevel = (level + 60) / 60; // Convert -60dB to 0dB range to 0-1
+        audioVisualizerBars.forEach((bar, index) => {
+            const height = Math.random() * normalizedLevel * 100;
+            bar.style.height = `${height}px`;
+        });
+        audioLevel.textContent = `${level.toFixed(1)} dB`;
+    }
+    
+    // Update emotion display
+    function updateEmotionDisplay(data) {
+        // Update emotion progress bars
+        emotionProgressContainer.innerHTML = '';
+        
+        if (data.emotions) {
+            Object.entries(data.emotions).forEach(([emotion, confidence]) => {
+                const emotionDiv = document.createElement('div');
+                emotionDiv.className = 'position-relative mb-2';
+                
+                const colorClass = getEmotionColorClass(emotion);
+                const percentage = (confidence * 100).toFixed(1);
+                
+                emotionDiv.innerHTML = `
+                    <div class="emotion-progress">
+                        <div class="progress-bar ${colorClass} ${confidence > 0.5 ? 'progress-bar-pulse' : ''}" 
+                             role="progressbar" 
+                             style="width: ${percentage}%">
+                            <div class="emotion-label">
+                                ${capitalizeFirstLetter(emotion)}: ${percentage}%
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                emotionProgressContainer.appendChild(emotionDiv);
+            });
+        }
+        
+        // Update raw response
+        emotionResponse.textContent = JSON.stringify(data, null, 2);
+    }
+    
+    // Get emotion color class
+    function getEmotionColorClass(emotion) {
+        const colorMap = {
+            'crying': 'bg-danger',
+            'laughing': 'bg-success',
+            'babbling': 'bg-info',
+            'silence': 'bg-secondary',
+            'happy': 'bg-success',
+            'sad': 'bg-danger',
+            'angry': 'bg-warning',
+            'neutral': 'bg-secondary'
+        };
+        return colorMap[emotion] || 'bg-secondary';
+    }
+    
+    // Capitalize first letter
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+    
+    // Socket.IO event handlers
+    socket.on('connect', () => {
+        console.log('Connected to server');
+        fetchMicrophones();
+        fetchModels();
+    });
+    
+    socket.on('audio_level_update', (data) => {
+        updateAudioVisualizer(data.level);
+        audioResponse.textContent = JSON.stringify(data, null, 2);
+    });
+    
+    socket.on('emotion_update', (data) => {
+        updateEmotionDisplay(data);
+    });
+    
+    // Fetch available microphones
+    function fetchMicrophones() {
+        fetch('/repair/api/audio/microphones')
+            .then(response => response.json())
+            .then(data => {
+                const select = document.getElementById('microphoneSelect');
+                select.innerHTML = '';
+                
+                if (data.microphones && data.microphones.length > 0) {
+                    data.microphones.forEach(mic => {
+                        const option = document.createElement('option');
+                        option.value = mic.id;
+                        option.textContent = mic.name;
+                        if (mic.id === data.current_microphone) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No microphones available';
+                    option.disabled = true;
+                    select.appendChild(option);
+                }
+            })
+            .catch(error => console.error('Error fetching microphones:', error));
+    }
+    
+    // Fetch available models
+    function fetchModels() {
+        fetch('/api/emotion/models')
+            .then(response => response.json())
+            .then(data => {
+                const select = document.getElementById('modelSelect');
+                select.innerHTML = '';
+                
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = `${model.name} (${model.type})`;
+                        if (model.id === data.current_model.id) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No models available';
+                    option.disabled = true;
+                    select.appendChild(option);
+                }
+            })
+            .catch(error => console.error('Error fetching models:', error));
+    }
+    
+    // Test API endpoint
+    function testApi() {
+        const endpoint = document.getElementById('apiEndpoint').value;
+        
+        fetch(endpoint)
+            .then(response => response.json())
+            .then(data => {
+                apiTestResponse.textContent = JSON.stringify(data, null, 2);
+                apiTestResponse.className = 'api-response success';
+            })
+            .catch(error => {
+                apiTestResponse.textContent = `Error: ${error.message}`;
+                apiTestResponse.className = 'api-response error';
+            });
+    }
+    
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', () => {
+        initAudioVisualizer();
+        
+        // Add event listeners
+        document.getElementById('testApi').addEventListener('click', testApi);
+        
+        document.getElementById('modelSelect').addEventListener('change', (e) => {
+            const modelId = e.target.value;
+            fetch('/api/emotion/switch_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_id: modelId })
+            });
+        });
+        
+        document.getElementById('microphoneSelect').addEventListener('change', (e) => {
+            const micId = e.target.value;
+            fetch('/repair/api/audio/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ microphone_id: micId })
+            });
+        });
+        
+        // Start with a test API call
+        testApi();
+    });
+</script>
+{% endblock %} 

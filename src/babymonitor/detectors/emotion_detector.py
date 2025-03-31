@@ -17,9 +17,11 @@ import sounddevice as sd
 import threading
 import queue
 import traceback
+import yaml
 from datetime import datetime
 from collections import deque
 from .base_detector import BaseDetector
+from ..config import config
 
 class EmotionDetector(BaseDetector):
     """Sound-based emotion detector for baby monitoring."""
@@ -27,47 +29,45 @@ class EmotionDetector(BaseDetector):
     # Default emotions for backward compatibility
     DEFAULT_EMOTIONS = ['crying', 'laughing', 'babbling', 'silence']
     
-    # Audio processing constants
-    SAMPLE_RATE = 16000  # Hz
-    CHUNK_SIZE = 4000    # Samples
-    CHANNELS = 1         # Mono audio
+    # Audio processing constants - now from config
+    SAMPLE_RATE = config.audio.get('sample_rate', 16000)  # Hz
+    CHUNK_SIZE = config.audio.get('chunk_size', 4000)    # Samples
+    CHANNELS = config.audio.get('channels', 1)         # Mono audio
     DTYPE = np.float32   # Audio data type
     
     # Model definitions with detailed information
     AVAILABLE_MODELS = {
+        'basic_emotion': {
+            'name': 'Basic Emotion',
+            'file': 'model.pt',
+            'type': 'basic',
+            'emotions': ['crying', 'laughing', 'babbling', 'silence'],
+            'path': 'models/emotion/basic_emotion'
+        },
         'emotion2': {
             'name': 'Enhanced Emotion Model',
-            'file': 'baby_cry_classifier_enhanced.tflite',
-            'type': 'advanced',
+            'file': 'model.pt',
+            'type': 'emotion2',
             'emotions': ['happy', 'sad', 'angry', 'neutral', 'crying', 'laughing'],
             'path': 'models/emotion/emotion2'
         },
         'cry_detection': {
             'name': 'Cry Detection',
-            'file': 'cry_detection_model.pth',
-            'type': 'binary',
+            'file': 'model.pth',
+            'type': 'cry_detection',
             'emotions': ['crying', 'not_crying'],
             'path': 'models/emotion/cry_detection'
         },
         'speechbrain': {
             'name': 'SpeechBrain Emotion',
-            'file': 'emotion_model.pt',
+            'file': 'best_emotion_model.pt',
             'type': 'speechbrain',
             'emotions': ['happy', 'sad', 'angry', 'neutral'],
             'path': 'models/emotion/speechbrain'
-        },
-        'basic_emotion': {
-            'name': 'Basic Emotion',
-            'file': 'best_emotion_model.pt',
-            'type': 'basic',
-            'emotions': ['crying', 'laughing', 'babbling', 'silence'],
-            'path': 'models/emotion/speechbrain'
         }
-    }    
-    def __init__(self, 
-                 model_id: Optional[str] = None,
-                 threshold: float = 0.5,
-                 device: str = 'cpu'):
+    }
+    
+    def __init__(self, model_id=None, threshold=None, device=None):
         """Initialize the emotion detector.
         
         Args:
@@ -75,19 +75,40 @@ class EmotionDetector(BaseDetector):
             threshold: Detection confidence threshold
             device: Device to run inference on ('cpu' or 'cuda')
         """
+        # Load configuration
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'config', 'emotion_detector.yaml')
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logging.error(f"Error loading config from {config_path}: {e}")
+            config = {}
+        
+        # Get configuration values with defaults
+        emotion_config = config.get('model', {})
+        threshold = threshold or emotion_config.get('threshold', 0.5)
+        device = device or emotion_config.get('device', 'cpu')
+        
         super().__init__(threshold=threshold)
+        
+        # Set audio configuration from config file
+        audio_config = config.get('audio', {})
+        self.SAMPLE_RATE = audio_config.get('sample_rate', 16000)
+        self.CHUNK_SIZE = audio_config.get('chunk_size', 1024)
+        self.CHANNELS = audio_config.get('channels', 1)
+        self.DTYPE = np.float32
         
         self.device = torch.device(device if torch.cuda.is_available() and device == 'cuda' else 'cpu')
         self.model = None
-        # Set default model to 'speechbrain' since it's the most comprehensive
-        self.model_id = model_id or 'speechbrain'
+        # Set default model to basic_emotion
+        self.model_id = model_id or emotion_config.get('default_model', 'basic_emotion')
         self.is_model_loaded = False
         self.logger = logging.getLogger(__name__)
         
         # Audio processing setup
         self.audio_queue = queue.Queue()
         self.audio_buffer = []
-        self.buffer_duration = 2.0  # seconds
+        self.buffer_duration = audio_config.get('buffer_duration', 2.0)  # seconds
         self.stream = None
         self.audio_thread = None
         self.processing_thread = None
@@ -96,24 +117,29 @@ class EmotionDetector(BaseDetector):
         # Microphone settings
         self.current_microphone_id = None
         self.microphone_initialized = False
-        self.is_muted = False  # Track if current microphone is muted
+        self.is_muted = True  # Start muted until we confirm mic works
         
         # Get model info with proper fallback
         if self.model_id not in self.AVAILABLE_MODELS:
-            self.logger.warning(f"Model {self.model_id} not found, falling back to speechbrain")
-            self.model_id = 'speechbrain'
+            self.logger.warning(f"Model {self.model_id} not found, falling back to basic_emotion")
+            self.model_id = 'basic_emotion'
         
         self.model_info = self.AVAILABLE_MODELS[self.model_id]
         self.emotions = self.model_info['emotions']
         
-        # Initialize history tracking
-        self.emotion_history = deque(maxlen=1000)
+        # Initialize history tracking with config values
+        system_config = config.get('system', {})
+        history_length = system_config.get('history_length', 1000)
+        self.emotion_history = deque(maxlen=history_length)
         self.emotion_counts = {emotion: 0 for emotion in self.emotions}
         self.daily_emotion_history = {}
         self.history_lock = threading.Lock()
+        self.latest_result = None  # Store latest result
+        self.latest_result_lock = threading.Lock()  # Lock for thread-safe access
         
-        # Set up file paths for persistent storage
-        self.log_dir = Path(os.path.expanduser('~')) / 'babymonitor_logs'
+        # Set up file paths for persistent storage using config
+        logging_config = config.get('logging', {})
+        self.log_dir = Path(logging_config.get('file', 'logs/babymonitor.log')).parent
         self.log_dir.mkdir(exist_ok=True)
         self.history_file = self.log_dir / f"emotion_history_{self.model_id}.json"
         
@@ -123,106 +149,133 @@ class EmotionDetector(BaseDetector):
         # Initialize model
         self._initialize_model()
         
-        # Try to initialize default microphone
-        try:
-            import sounddevice as sd
-            default_device = sd.default.device[0]  # Get default input device
-            if default_device is not None:
-                self.set_microphone(str(default_device))
-        except Exception as e:
-            self.logger.warning(f"Could not initialize default microphone: {e}")
-        
+        # Initialize audio - now with better error handling
+        self._initialize_audio()
+
     def audio_callback(self, indata, frames, time_info, status):
         """Callback function for audio stream."""
-        if status:
-            self.logger.warning(f"Audio callback status: {status}")
-        if self.is_running:
-            self.audio_queue.put(indata.copy())
-            
-    def set_microphone(self, mic_id: str) -> bool:
-        """Set the active microphone.
-        
-        Args:
-            mic_id: ID of the microphone to use
-            
-        Returns:
-            bool: True if microphone was set successfully
-        """
+        if status and status.output_underflow:
+            self.logger.warning("Audio buffer underflow")
+        if self.is_running and indata is not None and len(indata) > 0:
+            try:
+                # Only log audio levels at debug level and very rarely
+                if self.logger.isEnabledFor(logging.DEBUG) and random.random() < 0.001:  # 0.1% chance
+                    rms = np.sqrt(np.mean(np.square(indata)))
+                    db = 20 * np.log10(rms) if rms > 0 else -60
+                    self.logger.debug(f"Audio input level: {db:.1f} dB")
+                
+                self.audio_queue.put(indata.copy())
+            except Exception as e:
+                self.logger.error(f"Error in audio callback: {e}")
+
+    def set_microphone(self, device_id: str) -> bool:
+        """Set the microphone device to use."""
         try:
-            # Stop existing audio processing
-            was_running = self.is_running
-            self.is_running = False
-            if self.processing_thread and self.processing_thread.is_alive():
-                self.processing_thread.join(timeout=1.0)
+            # Stop any existing audio stream
+            if self.is_running:
+                self.stop()
             
-            # Stop existing stream if any
-            if self.stream is not None:
-                try:
-                    self.stream.stop()
-                    self.stream.close()
-                except Exception as e:
-                    self.logger.warning(f"Error closing existing stream: {e}")
-            
-            # Convert mic_id to int for sounddevice
-            mic_id_int = int(mic_id)
-            
-            # Get device info to check if it's muted/inactive
-            device_info = sd.query_devices(mic_id_int)
-            
-            # Check if device is an input device
-            if device_info['max_input_channels'] == 0:
-                self.logger.error(f"Device {mic_id} is not an input device")
+            # Convert device_id to int if possible (sounddevice prefers int indices)
+            try:
+                device_index = int(device_id)
+            except ValueError:
+                device_index = device_id
+                
+            # Query device info
+            try:
+                devices = sd.query_devices()
+                matching_devices = [d for d in devices if d['index'] == device_index and d['max_input_channels'] > 0]
+                
+                if not matching_devices:
+                    self.logger.error(f"No valid input device found with index {device_id}")
+                    return False
+                    
+                device_info = matching_devices[0]  # Use the first matching input device
+                
+            except Exception as e:
+                self.logger.error(f"Error querying device {device_id}: {e}")
                 return False
-            
-            # Update muted state based on device info
-            self.is_muted = device_info.get('is_muted', False) or device_info['max_input_channels'] == 0
-            
-            # Create new audio stream
-            self.stream = sd.InputStream(
-                device=mic_id_int,
-                channels=self.CHANNELS,
-                samplerate=self.SAMPLE_RATE,
-                dtype=self.DTYPE,
-                blocksize=self.CHUNK_SIZE,
-                callback=self.audio_callback
-            )
-            
-            # Store the microphone ID
-            self.current_microphone_id = mic_id
-            
-            # Reset audio buffer and queue
-            self.audio_buffer = []
-            while not self.audio_queue.empty():
-                try:
-                    self.audio_queue.get_nowait()
-                except queue.Empty:
-                    break
-            
-            # Mark microphone as initialized
+                
+            # Test device by opening a stream briefly
+            try:
+                test_stream = sd.InputStream(
+                    device=device_info['index'],
+                    channels=self.CHANNELS,
+                    samplerate=self.SAMPLE_RATE,
+                    dtype=self.DTYPE
+                )
+                test_stream.start()
+                time.sleep(0.1)  # Wait a bit to ensure device works
+                test_stream.stop()
+                test_stream.close()
+            except Exception as e:
+                self.logger.error(f"Error testing device {device_id}: {e}")
+                return False
+                
+            # If we got here, device is working
+            self.current_microphone_id = device_info['index']
             self.microphone_initialized = True
+            self.is_muted = False
             
-            # Start the stream
-            self.stream.start()
-            
-            # Always start audio processing when setting a new microphone
-            self.is_running = True
-            self.start_audio_processing()
-            
-            self.logger.info(f"Successfully set microphone to {mic_id} (Name: {device_info.get('name', 'Unknown')})")
+            # Start the audio processing if detector is running
+            if self.is_running:
+                self.start()
+                
+            self.logger.info(f"Successfully initialized microphone: {device_info['name']}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error setting microphone: {str(e)}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            # Reset state on error
+            self.logger.error(f"Error setting microphone {device_id}: {e}")
             self.microphone_initialized = False
             self.is_muted = True
-            self.is_running = False
             return False
 
+    def get_microphone_status(self) -> dict:
+        """Get the current microphone status."""
+        try:
+            if self.current_microphone_id is not None:
+                try:
+                    device_info = sd.query_devices(self.current_microphone_id)
+                    name = device_info.get('name', 'Unknown Device')
+                    
+                    # Test if the microphone is actually working
+                    if self.is_running and not self.audio_queue.empty():
+                        status = 'ok'
+                    elif self.microphone_initialized and not self.is_muted:
+                        status = 'initialized'
+                    else:
+                        status = 'error'
+                        
+                except Exception as e:
+                    self.logger.error(f"Error querying device {self.current_microphone_id}: {e}")
+                    name = 'Device Error'
+                    status = 'error'
+            else:
+                name = 'No Device Selected'
+                status = 'error'
+            
+            return {
+                'initialized': self.microphone_initialized,
+                'is_muted': self.is_muted,
+                'device_id': self.current_microphone_id,
+                'name': name,
+                'status': status
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting microphone status: {e}")
+            return {
+                'initialized': False,
+                'is_muted': True,
+                'device_id': None,
+                'name': 'Error Getting Status',
+                'status': 'error',
+                'error': str(e)
+            }
+
     def get_audio_level(self) -> float:
-        if self.is_muted or not self.is_running or not self.microphone_initialized:
+        """Get current audio level in dB."""
+        mic_status = self.get_microphone_status()
+        if not mic_status['initialized'] or mic_status['is_muted']:
             return -60.0  # Return silence level for muted/uninitialized microphone
         
         try:
@@ -286,26 +339,30 @@ class EmotionDetector(BaseDetector):
                 time.sleep(1)  # Prevent tight loop on error
                 
     def process_audio(self, audio_chunk: np.ndarray) -> Dict[str, Any]:
-        """Process audio chunk and detect emotion.
-        
-        Args:
-            audio_chunk: Numpy array containing audio samples
-            
-        Returns:
-            Dict containing:
-                - emotion: Detected emotion label
-                - confidence: Confidence score
-                - emotions: Dict of all emotion probabilities
-                - fps: Current processing FPS
-                - timestamp: Processing timestamp
-        """
+        """Process audio chunk and detect emotion."""
+        if not self.is_model_loaded:
+            return {
+                'emotion': 'error',
+                'confidence': 0.0,
+                'emotions': {emotion: 0.0 for emotion in self.emotions},
+                'status': 'error',
+                'error_message': 'Model not loaded'
+            }
+
         if audio_chunk is None or len(audio_chunk) == 0:
             return {
-                'emotion': 'unknown',
+                'emotion': 'no_data',
                 'confidence': 0.0,
-                'emotions': {emotion: 0.0 for emotion in self.emotions}
+                'emotions': {emotion: 0.0 for emotion in self.emotions},
+                'status': 'no_data'
             }
             
+        # Log audio chunk statistics only at debug level and rarely
+        if self.logger.isEnabledFor(logging.DEBUG) and random.random() < 0.001:  # 0.1% chance
+            rms = np.sqrt(np.mean(np.square(audio_chunk)))
+            db = 20 * np.log10(rms) if rms > 0 else -60
+            self.logger.debug(f"Processing audio chunk - Level: {db:.1f} dB, Shape: {audio_chunk.shape}")
+        
         start_time = time.time()
         
         try:
@@ -323,73 +380,133 @@ class EmotionDetector(BaseDetector):
                     audio_data = audio_data[:buffer_samples]
                 
                 # Normalize audio
-                audio_data = audio_data / np.max(np.abs(audio_data))
+                audio_data = audio_data / (np.max(np.abs(audio_data)) + 1e-6)
                 
                 # Convert to mono if stereo
                 if len(audio_data.shape) > 1:
                     audio_data = np.mean(audio_data, axis=1)
                 
-                # Extract features using the model's feature extractor
-                inputs = self.feature_extractor(
-                    audio_data, 
-                    sampling_rate=self.SAMPLE_RATE,
-                    return_tensors="pt"
-                )
-                
-                # Run inference
-                with torch.no_grad():
-                    outputs = self.model(**inputs)
-                    logits = outputs.logits
-                    probabilities = torch.nn.functional.softmax(logits, dim=-1)
-                
-                # Convert to emotion probabilities dict
-                emotion_probs = {
-                    emotion: float(prob)
-                    for emotion, prob in zip(self.emotions, probabilities[0])
-                }
-                
-                # Get dominant emotion and confidence
-                dominant_emotion = max(emotion_probs.items(), key=lambda x: x[1])[0]
-                confidence = emotion_probs[dominant_emotion]
-                
-                # Create result
-                result = {
-                    'emotion': dominant_emotion,
-                    'confidence': confidence,
-                    'emotions': emotion_probs,
-                    'fps': float(self.fps),
-                    'timestamp': time.time()
-                }
-                print(result)
-                
-                # Record in history if confidence exceeds threshold
-                if confidence >= self.threshold:
-                    self._record_emotion(dominant_emotion, confidence, emotion_probs)
-                
-                # Clear buffer
-                self.audio_buffer = []
-                
-                # Update FPS
-                self.update_fps(time.time() - start_time)
-                
-                return result
-                
+                try:
+                    # Process based on model type
+                    model_type = self.model_info['type']
+                    
+                    if model_type == 'basic':
+                        # Convert to tensor
+                        audio_tensor = torch.FloatTensor(audio_data).unsqueeze(0)
+                        audio_tensor = audio_tensor.to(self.device)
+                        
+                        # Run inference
+                        with torch.no_grad():
+                            outputs = self.model(audio_tensor)
+                            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+                            
+                        # Convert to emotion probabilities dict
+                        emotion_probs = {
+                            emotion: float(prob)
+                            for emotion, prob in zip(self.emotions, probabilities[0])
+                        }
+                        
+                    elif model_type == 'speechbrain':
+                        try:
+                            from speechbrain.inference import EncoderClassifier
+                            
+                            # Load the model directly without hyperparameters
+                            model_dir = os.path.dirname(model_path)
+                            self.model = EncoderClassifier.from_hparams(
+                                source=model_dir,
+                                run_opts={"device": str(self.device)}
+                            )
+                            
+                            self.model.eval()
+                            self.model.to(self.device)
+                            self.emotions = self.model_info['emotions']
+                            self.is_model_loaded = True
+                            self.logger.info(f"Successfully loaded speechbrain model from {model_path}")
+                            
+                        except Exception as e:
+                            self.logger.error(f"Error loading speechbrain model: {str(e)}")
+                            self.logger.error(traceback.format_exc())
+                            # Try fallback to cry detection model
+                            if self.model_id != 'cry_detection':
+                                self.logger.info("Attempting to fall back to cry detection model...")
+                                self.model_id = 'cry_detection'
+                                self.model_info = self.AVAILABLE_MODELS['cry_detection']
+                                return self._initialize_model()
+                            else:
+                                self.is_model_loaded = False
+                                return
+                    
+                    else:  # Default processing for other model types
+                        audio_tensor = torch.FloatTensor(audio_data).unsqueeze(0)
+                        audio_tensor = audio_tensor.to(self.device)
+                        
+                        with torch.no_grad():
+                            outputs = self.model(audio_tensor)
+                            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+                            
+                        emotion_probs = {
+                            emotion: float(prob)
+                            for emotion, prob in zip(self.emotions, probabilities[0])
+                        }
+                    
+                    # Get dominant emotion and confidence
+                    dominant_emotion = max(emotion_probs.items(), key=lambda x: x[1])[0]
+                    confidence = emotion_probs[dominant_emotion]
+                    
+                    # Record emotion if confidence exceeds threshold
+                    if confidence >= self.threshold:
+                        self._record_emotion(dominant_emotion, confidence, emotion_probs)
+                    
+                    # Create result
+                    result = {
+                        'emotion': dominant_emotion,
+                        'confidence': confidence,
+                        'emotions': emotion_probs,
+                        'fps': float(self.fps),
+                        'timestamp': time.time(),
+                        'status': 'success'
+                    }
+                    
+                    # Store the latest result
+                    with self.latest_result_lock:
+                        self.latest_result = result
+                    
+                    # Clear buffer
+                    self.audio_buffer = []
+                    
+                    # Update FPS
+                    self.update_fps(time.time() - start_time)
+                    
+                    return result
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in model inference: {str(e)}")
+                    self.logger.error(traceback.format_exc())
+                    return {
+                        'emotion': 'error',
+                        'confidence': 0.0,
+                        'emotions': {emotion: 0.0 for emotion in self.emotions},
+                        'status': 'error',
+                        'error_message': str(e)
+                    }
+            
             return {
                 'emotion': 'buffering',
                 'confidence': 0.0,
                 'emotions': {emotion: 0.0 for emotion in self.emotions},
-                'fps': float(self.fps)
+                'fps': float(self.fps),
+                'status': 'buffering'
             }
             
         except Exception as e:
             self.logger.error(f"Error processing audio: {str(e)}")
-            import traceback
             self.logger.error(traceback.format_exc())
             return {
                 'emotion': 'error',
                 'confidence': 0.0,
                 'emotions': {emotion: 0.0 for emotion in self.emotions},
-                'fps': float(self.fps)
+                'status': 'error',
+                'error_message': str(e)
             }
             
     def _record_emotion(self, emotion: str, confidence: float, all_emotions: Dict[str, float]):
@@ -432,84 +549,82 @@ class EmotionDetector(BaseDetector):
         """Initialize the emotion recognition model."""
         try:
             model_path = self._get_model_path(self.model_id)
-            config_path = None
             
-            # Get config file path if specified
-            if 'config_file' in self.model_info:
-                config_dir = os.path.dirname(model_path)
-                config_path = os.path.join(config_dir, self.model_info['config_file'])
-            
-            # Check if model file exists
             if not os.path.exists(model_path):
-                self.logger.warning(f"Model file not found at {model_path}")
+                self.logger.error(f"Model file not found at {model_path}")
                 self.is_model_loaded = False
                 return
-                
-            # Initialize model based on type
-            model_type = self.model_info['type']
-            if model_type == 'wav2vec2':
-                from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
-                self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(os.path.dirname(model_path))
-                self.model = Wav2Vec2ForSequenceClassification.from_pretrained(os.path.dirname(model_path))
-            elif model_type == 'speechbrain':
-                from speechbrain.inference import EncoderClassifier
-                import yaml
-                
-                # Load config file
-                if not config_path or not os.path.exists(config_path):
-                    self.logger.error(f"Config file not found at {config_path}")
-                    self.is_model_loaded = False
-                    return
-                    
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                
-                # Create a basic hparams structure if modules is missing
-                if 'modules' not in config:
-                    config['modules'] = {
-                        'encoder': {'select': 'CNN'},
-                        'classifier': {'select': 'MLP'}
-                    }
-                
-                try:
-                    self.model = EncoderClassifier.from_hparams(
-                        source=os.path.dirname(model_path),
-                        hparams_file=config_path,
-                        savedir=os.path.dirname(model_path)
-                    )
-                    self.feature_extractor = getattr(self.model, 'mods', {}).get('preprocessor', None)
-                except Exception as e:
-                    self.logger.error(f"Error loading SpeechBrain model: {str(e)}")
-                    self.logger.error(f"Config contents: {config}")
-                    raise
-                    
-            elif model_type == 'emotion2':
-                import tensorflow as tf
-                import pickle
-                self.model = tf.lite.Interpreter(model_path=model_path)
-                self.model.allocate_tensors()
-                # Load label encoder if available
-                label_file = os.path.join(os.path.dirname(model_path), self.model_info['label_file'])
-                if os.path.exists(label_file):
-                    with open(label_file, 'rb') as f:
-                        self.label_encoder = pickle.load(f)
-            elif model_type == 'cry_detection':
-                self.model = torch.jit.load(model_path)
+            
+            # Initialize cry detection model
+            try:
+                from .models.cry_detection import CryDetectionModel
+                self.model = CryDetectionModel()
+                state_dict = torch.load(model_path, map_location=self.device)
+                self.model.load_state_dict(state_dict)
                 self.model.eval()
-                
-            if hasattr(self, 'model') and self.model is not None:
                 self.model = self.model.to(self.device)
                 self.is_model_loaded = True
-                self.logger.info(f"Successfully loaded {model_type} model from {model_path}")
-            else:
-                self.logger.error(f"Failed to load {model_type} model")
+                self.logger.info(f"Successfully loaded model from {model_path}")
+            except Exception as e:
+                self.logger.error(f"Error loading model: {str(e)}")
+                self.logger.error(traceback.format_exc())
                 self.is_model_loaded = False
-            
+                
         except Exception as e:
             self.logger.error(f"Error initializing model: {str(e)}")
-            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            self.logger.error(traceback.format_exc())
             self.is_model_loaded = False
             
+    def _initialize_audio(self):
+        """Initialize audio settings and try to set up default microphone."""
+        try:
+            # Get list of available input devices
+            devices = sd.query_devices()
+            input_devices = [dev for dev in devices if dev['max_input_channels'] > 0]
+            
+            if not input_devices:
+                self.logger.error("No input devices found")
+                self.microphone_initialized = False
+                self.is_muted = True
+                return
+            
+            # Try to find the best microphone in this order:
+            # 1. System default input device
+            # 2. Any device with "microphone" in the name
+            # 3. First available input device
+            
+            default_device = sd.default.device[0]
+            mic_devices = [dev for dev in input_devices if 'mic' in dev['name'].lower()]
+            
+            # Try system default first
+            if default_device is not None:
+                success = self.set_microphone(str(default_device))
+                if success:
+                    return
+                    
+            # Try microphone-named devices next
+            if mic_devices:
+                for mic in mic_devices:
+                    success = self.set_microphone(str(mic['index']))
+                    if success:
+                        return
+                    
+            # Finally, try any input device
+            for device in input_devices:
+                success = self.set_microphone(str(device['index']))
+                if success:
+                    return
+                
+            self.logger.error("Could not initialize any microphone")
+            self.microphone_initialized = False
+            self.is_muted = True
+            
+        except Exception as e:
+            self.logger.error(f"Could not initialize microphone: {e}")
+            self.logger.error(traceback.format_exc())
+            self.microphone_initialized = False
+            self.is_muted = True
+
     def switch_model(self, model_id: str) -> Dict[str, Any]:
         """Switch to a different emotion recognition model.
         
@@ -596,7 +711,6 @@ class EmotionDetector(BaseDetector):
         if not model_info:
             raise ValueError(f"Unknown model ID: {model_id}")
             
-        # Get the absolute path to the workspace root
         workspace_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
         model_path = workspace_root / model_info['path'] / model_info['file']
         return str(model_path.resolve())
@@ -740,13 +854,25 @@ class EmotionDetector(BaseDetector):
         if self.processing_thread is not None:
             self.processing_thread.join(timeout=2.0)
         
-        if hasattr(self, 'save_thread') and self.save_thread.is_alive():
-            self.save_thread.join(timeout=2.0)
+        # Clear audio buffer and queue
+        self.audio_buffer = []
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
             
+        # Reset microphone state
+        self.microphone_initialized = False
+        self.is_muted = True
+        self.current_microphone_id = None
+        
+        # Save any pending data
         self._save_history()
+        
+        # Clear model
         self.model = None
         self.is_model_loaded = False
-        self.audio_buffer = []
         
     def reset(self):
         """Reset the detector state but maintain history."""
@@ -801,4 +927,69 @@ class EmotionDetector(BaseDetector):
             self.processing_thread = threading.Thread(target=self._process_audio_thread)
             self.processing_thread.daemon = True
             self.processing_thread.start()
-            self.logger.info("Started audio processing thread") 
+            self.logger.info("Started audio processing thread")
+
+    def get_latest_result(self) -> Optional[Dict[str, Any]]:
+        """Get the latest emotion detection result.
+        
+        Returns:
+            Dict containing the latest emotion detection result or None if no result available
+        """
+        with self.latest_result_lock:
+            return self.latest_result 
+
+    def start(self):
+        """Start the detector."""
+        if not self.is_running:
+            try:
+                if not self.microphone_initialized:
+                    self.logger.error("Cannot start: Microphone not initialized")
+                    return False
+                    
+                self.logger.info(f"Starting audio stream with device {self.current_microphone_id}")
+                self.stream = sd.InputStream(
+                    device=self.current_microphone_id,
+                    channels=self.CHANNELS,
+                    samplerate=self.SAMPLE_RATE,
+                    dtype=self.DTYPE,
+                    callback=self.audio_callback,
+                    blocksize=self.CHUNK_SIZE
+                )
+                self.stream.start()
+                self.is_running = True
+                self.start_audio_processing()
+                self.logger.info("Audio stream started successfully")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Error starting audio stream: {e}")
+                self.logger.error(traceback.format_exc())
+                self.is_running = False
+                return False
+        return True 
+
+    def stop(self):
+        """Stop the detector and cleanup resources."""
+        self.is_running = False
+        
+        # Stop audio stream
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+            except Exception as e:
+                self.logger.error(f"Error stopping audio stream: {e}")
+        
+        # Wait for processing thread to finish
+        if self.processing_thread is not None:
+            self.processing_thread.join(timeout=2.0)
+            self.processing_thread = None
+        
+        # Clear audio buffer and queue
+        self.audio_buffer = []
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break

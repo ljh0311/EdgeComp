@@ -890,62 +890,191 @@
 <script>
 // Add global mode variable to be used in JS
 const appMode = "{{ mode }}";
-</script>
-<script src="{{ url_for('static', filename='js/metrics.js') }}"></script>
-<script>
-// Additional JavaScript for normal mode
-{% if mode == "normal" %}
+
+// Initialize emotion data storage
+let emotionData = {
+    labels: [],
+    datasets: []
+};
+
+// Initialize charts
+let emotionChart;
+let emotionDistributionChart;
+
 document.addEventListener('DOMContentLoaded', function() {
-  // Function to update the simple cards in normal mode
-  function updateNormalModeCards(data) {
-    if (!data) return;
-    
-    // Update movement detection
-    if (data.detections !== undefined) {
-      document.getElementById('normalDetections').textContent = data.detections;
-    }
-    
-    // Update emotion
-    if (data.emotion) {
-      let emotion = data.emotion;
-      let displayEmotion = "Quiet";
-      
-      if (emotion === "crying") displayEmotion = "Crying";
-      else if (emotion === "laughing") displayEmotion = "Laughing";
-      else if (emotion === "babbling") displayEmotion = "Babbling";
-      
-      document.getElementById('normalEmotion').textContent = displayEmotion;
-    }
-    
-    // Update camera status
-    if (data.camera_status !== undefined) {
-      let cameraStatus = "OK";
-      
-      if (data.camera_status === "error") cameraStatus = "Problem";
-      else if (data.camera_status === "warning") cameraStatus = "Warning";
-      
-      document.getElementById('normalCamera').textContent = cameraStatus;
-    }
-    
-    // Update system health
-    if (data.cpu_usage !== undefined && data.memory_usage !== undefined) {
-      let healthStatus = "Good";
-      
-      if (data.cpu_usage > 80 || data.memory_usage > 80) {
-        healthStatus = "Critical";
-      } else if (data.cpu_usage > 60 || data.memory_usage > 60) {
-        healthStatus = "Warning";
-      }
-      
-      document.getElementById('normalHealth').textContent = healthStatus;
-    }
-  }
-  
-  // Add socket.io listener for metrics updates
-  socket.on('metrics_update', function(data) {
-    updateNormalModeCards(data);
-  });
+    // Initialize emotion distribution chart
+    const emotionCtx = document.getElementById('emotionDistributionChart').getContext('2d');
+    emotionDistributionChart = new Chart(emotionCtx, {
+        type: 'line',
+        data: emotionData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: {
+                        callback: function(value) {
+                            return value + '%';
+                        }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+
+    // Socket.IO event listeners
+    const socket = io();
+
+    socket.on('emotion_update', function(data) {
+        updateEmotionMetrics(data);
+    });
+
+    socket.on('metrics_update', function(data) {
+        updateSystemMetrics(data);
+    });
 });
-{% endif %}
+
+function updateEmotionMetrics(data) {
+    if (!data || !data.emotions) return;
+
+    const timestamp = new Date().toLocaleTimeString();
+    
+    // Update emotion chart
+    if (emotionDistributionChart) {
+        // Add new data point
+        if (emotionDistributionChart.data.labels.length > 20) {
+            emotionDistributionChart.data.labels.shift();
+            emotionDistributionChart.data.datasets.forEach(dataset => {
+                dataset.data.shift();
+            });
+        }
+
+        emotionDistributionChart.data.labels.push(timestamp);
+
+        // Ensure datasets exist for each emotion
+        Object.entries(data.emotions).forEach(([emotion, value]) => {
+            let dataset = emotionDistributionChart.data.datasets.find(ds => ds.label === emotion);
+            
+            if (!dataset) {
+                // Create new dataset for this emotion
+                const color = getEmotionColor(emotion);
+                dataset = {
+                    label: emotion,
+                    data: [],
+                    borderColor: color,
+                    backgroundColor: color + '40',
+                    fill: true,
+                    tension: 0.4
+                };
+                emotionDistributionChart.data.datasets.push(dataset);
+            }
+
+            dataset.data.push(value * 100);
+        });
+
+        emotionDistributionChart.update();
+    }
+
+    // Update emotion percentages
+    Object.entries(data.emotions).forEach(([emotion, value]) => {
+        const percentageElement = document.getElementById(`${emotion}Percentage`);
+        if (percentageElement) {
+            percentageElement.textContent = `${(value * 100).toFixed(1)}%`;
+        }
+    });
+
+    // Update current emotion in normal mode
+    if (appMode === 'normal') {
+        const normalEmotion = document.getElementById('normalEmotion');
+        if (normalEmotion && data.emotion) {
+            let displayEmotion = capitalizeFirstLetter(data.emotion);
+            if (data.confidence < 0.5) {
+                displayEmotion = 'Quiet';
+            }
+            normalEmotion.textContent = displayEmotion;
+        }
+    }
+
+    // Add to detection log
+    if (data.confidence > 0.5) {
+        addToDetectionLog({
+            type: 'emotion',
+            emotion: data.emotion,
+            confidence: data.confidence,
+            timestamp: new Date()
+        });
+    }
+}
+
+function getEmotionColor(emotion) {
+    const colors = {
+        'crying': '#dc3545',
+        'laughing': '#198754',
+        'babbling': '#0dcaf0',
+        'silence': '#6c757d',
+        'happy': '#198754',
+        'sad': '#dc3545',
+        'angry': '#ffc107',
+        'neutral': '#6c757d'
+    };
+    return colors[emotion] || '#6c757d';
+}
+
+function addToDetectionLog(event) {
+    const logContainer = document.getElementById('detectionLogContainer');
+    if (!logContainer) return;
+
+    const alertItem = document.createElement('div');
+    alertItem.className = 'alert-item';
+
+    if (event.type === 'emotion') {
+        const alertType = event.emotion === 'crying' ? 'alert-warning' : 'alert-info';
+        alertItem.classList.add(alertType);
+        
+        alertItem.innerHTML = `
+            <div class="alert-time">${event.timestamp.toLocaleTimeString()}</div>
+            <div class="alert-message">
+                <i class="bi bi-emoji-${getEmotionIcon(event.emotion)}"></i>
+                ${capitalizeFirstLetter(event.emotion)} detected
+                <span class="badge bg-secondary">${(event.confidence * 100).toFixed(1)}%</span>
+            </div>
+        `;
+    }
+
+    logContainer.insertBefore(alertItem, logContainer.firstChild);
+
+    // Limit log items
+    while (logContainer.children.length > 50) {
+        logContainer.removeChild(logContainer.lastChild);
+    }
+}
+
+function getEmotionIcon(emotion) {
+    const icons = {
+        'crying': 'frown',
+        'laughing': 'smile',
+        'babbling': 'chat-dots',
+        'silence': 'volume-mute',
+        'happy': 'smile',
+        'sad': 'frown',
+        'angry': 'angry',
+        'neutral': 'neutral'
+    };
+    return icons[emotion] || 'neutral';
+}
+
+function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+// Add the rest of your existing metrics.js code here
+// ... existing code ...
 </script>
 {% endblock %}

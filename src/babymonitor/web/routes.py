@@ -29,7 +29,7 @@ VIDEO_FEED = f"{API_PREFIX}/video_feed"
 AUDIO_MICROPHONES = f"{API_PREFIX}/audio/microphones"
 AUDIO_SET_MICROPHONE = f"{API_PREFIX}/audio/set_microphone"
 AUDIO_LEVEL = f"{API_PREFIX}/audio/level"
-AUDIO_INFO = f"{API_PREFIX}/audio/microphone_info"
+AUDIO_INFO = f"{API_PREFIX}/audio/microphone"
 AUDIO_TEST = f"{API_PREFIX}/audio/test"
 AUDIO_RESTART = f"{API_PREFIX}/audio/restart"
 

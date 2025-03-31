@@ -42,6 +42,7 @@ from .routes import (
     AUDIO_MICROPHONES,
     AUDIO_SET_MICROPHONE,
     AUDIO_LEVEL,
+    AUDIO_INFO,
     EMOTION_MODELS,
     EMOTION_MODEL_INFO,
     EMOTION_SWITCH_MODEL,
@@ -186,6 +187,75 @@ class BabyMonitorWeb:
                 self.generate_frames(),
                 mimetype="multipart/x-mixed-replace; boundary=frame",
             )
+
+        @self.app.route(AUDIO_INFO)
+        def get_microphone_info():
+            """Get current microphone information."""
+            try:
+                if not hasattr(self, 'emotion_detector') or self.emotion_detector is None:
+                    return jsonify({
+                        'id': '0',
+                        'name': 'Not available',
+                        'status': 'error',
+                        'error': 'Emotion detector not initialized'
+                    }), 200  # Return 200 with error info instead of 500
+
+                mic_id = getattr(self.emotion_detector, 'current_microphone_id', '0')
+                mic_name = "Default Microphone"
+                try:
+                    import sounddevice as sd
+                    device_info = sd.query_devices(int(mic_id)) if mic_id else None
+                    if device_info:
+                        mic_name = device_info.get('name', 'Default Microphone')
+                except Exception as e:
+                    logger.warning(f"Could not get microphone name: {e}")
+                    
+                return jsonify({
+                    'id': str(mic_id),
+                    'name': mic_name,
+                    'status': 'active' if not getattr(self.emotion_detector, 'is_muted', True) else 'muted'
+                }), 200
+
+            except Exception as e:
+                logger.error(f"Error getting microphone info: {e}")
+                return jsonify({
+                    'id': '0',
+                    'name': 'Not available',
+                    'status': 'error',
+                    'error': str(e)
+                }), 200  # Return 200 with error info
+
+        @self.app.route(CAMERA_LIST)
+        def list_cameras():
+            """Get list of available cameras."""
+            try:
+                if not hasattr(self, 'camera_manager') or self.camera_manager is None:
+                    return jsonify({
+                        'cameras': [{
+                            'id': '0',
+                            'name': 'Default Camera',
+                            'active': True
+                        }]
+                    }), 200
+
+                cameras = self.camera_manager.get_cameras()
+                return jsonify({
+                    'cameras': [{
+                        'id': str(cam.get('id', i)),
+                        'name': cam.get('name', f'Camera {i+1}'),
+                        'active': cam.get('active', False) or (
+                            hasattr(self, 'active_camera') and 
+                            self.active_camera == str(cam.get('id', i))
+                        )
+                    } for i, cam in enumerate(cameras)]
+                }), 200
+
+            except Exception as e:
+                logger.error(f"Error listing cameras: {e}")
+                return jsonify({
+                    'cameras': [],
+                    'error': str(e)
+                }), 200  # Return 200 with empty list and error
 
         @self.app.route(SYSTEM_STATUS)
         def get_system_status_api():
@@ -459,31 +529,6 @@ class BabyMonitorWeb:
             except Exception as e:
                 logger.error(f"Error restarting audio: {str(e)}")
                 return jsonify({'status': 'error', 'message': str(e)}), 500
-
-        # Camera endpoints
-        @self.app.route(CAMERA_LIST, methods=["GET"])
-        def get_cameras():
-            """Get list of connected cameras."""
-            try:
-                if not hasattr(self, "camera_manager") or self.camera_manager is None:
-                    return (
-                        jsonify({"cameras": []}),
-                        200,
-                    )  # Return empty list instead of error
-
-                camera_list = self.camera_manager.get_camera_list()
-                # Add active status
-                for camera in camera_list:
-                    camera["id"] = camera["name"]  # Use name as id for simplicity
-                    if self.active_camera and camera["name"] == self.active_camera:
-                        camera["active"] = True
-                    else:
-                        camera["active"] = False
-
-                return jsonify({"cameras": camera_list})
-            except Exception as e:
-                logger.error(f"Error getting camera list: {str(e)}")
-                return jsonify({"cameras": []}), 200  # Return empty list on error
 
         # Camera management endpoints
         @self.app.route(CAMERA_ADD, methods=["POST"])

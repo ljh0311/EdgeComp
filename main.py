@@ -76,13 +76,37 @@ def run_normal_mode(args):
     """
     logger.info("Starting Baby Monitor System in NORMAL mode")
 
+    components = {}
     try:
         # Initialize camera
         logger.info("Initializing system...")
-        camera = Camera(args.camera_id)
-        audio_processor = AudioProcessor(device=args.input_device)
-        person_detector = PersonDetector(threshold=args.threshold)
-        emotion_detector = EmotionDetector(threshold=args.threshold)
+        try:
+            camera = Camera(args.camera_id)
+            components['camera'] = camera
+        except Exception as e:
+            logger.error(f"Failed to initialize camera: {e}")
+            raise
+
+        try:
+            audio_processor = AudioProcessor(device=args.input_device)
+            components['audio_processor'] = audio_processor
+        except Exception as e:
+            logger.error(f"Failed to initialize audio processor: {e}")
+            raise
+
+        try:
+            person_detector = PersonDetector(threshold=args.threshold)
+            components['person_detector'] = person_detector
+        except Exception as e:
+            logger.error(f"Failed to initialize person detector: {e}")
+            raise
+
+        try:
+            emotion_detector = EmotionDetector(threshold=args.threshold)
+            components['emotion_detector'] = emotion_detector
+        except Exception as e:
+            logger.error(f"Failed to initialize emotion detector: {e}")
+            raise
 
         # Start web interface
         logger.info("Starting web interface...")
@@ -95,6 +119,7 @@ def run_normal_mode(args):
             mode="normal",
             debug=args.debug,
         )
+        components['web_interface'] = web_interface
 
         # Print access information
         print("\n" + "=" * 80)
@@ -118,35 +143,20 @@ def run_normal_mode(args):
         raise
     finally:
         logger.info("Shutting down Baby Monitor System...")
-        try:
-            if "web_interface" in locals():
-                web_interface.stop()
-        except Exception as e:
-            logger.error(f"Error stopping web interface: {e}")
-
-        try:
-            if "person_detector" in locals() and hasattr(person_detector, "stop"):
-                person_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping person detector: {e}")
-
-        try:
-            if "emotion_detector" in locals() and hasattr(emotion_detector, "stop"):
-                emotion_detector.stop()
-        except Exception as e:
-            logger.error(f"Error stopping emotion detector: {e}")
-
-        try:
-            if "camera" in locals():
-                camera.release()
-        except Exception as e:
-            logger.error(f"Error releasing camera: {e}")
-
-        try:
-            if "audio_processor" in locals():
-                audio_processor.stop()
-        except Exception as e:
-            logger.error(f"Error stopping audio processor: {e}")
+        # Cleanup components in reverse order
+        for name in reversed(list(components.keys())):
+            component = components[name]
+            try:
+                if name == 'web_interface':
+                    component.stop()
+                elif name in ['person_detector', 'emotion_detector'] and hasattr(component, 'stop'):
+                    component.stop()
+                elif name == 'camera':
+                    component.release()
+                elif name == 'audio_processor':
+                    component.stop()
+            except Exception as e:
+                logger.error(f"Error stopping {name}: {e}")
 
     return 0
 
