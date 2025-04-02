@@ -11,6 +11,8 @@ Usage:
 Options:
     --host HOST             Host IP address of the Baby Monitor server [default: 192.168.1.100]
     --port PORT             Port of the Baby Monitor server [default: 5000]
+    --mqtt-host HOST        MQTT broker host [default: same as host]
+    --mqtt-port PORT        MQTT broker port [default: 1883]
 """
 
 import sys
@@ -38,110 +40,120 @@ except ImportError:
 
 try:
     import socketio
+    import paho.mqtt.client as mqtt
 except ImportError:
-    print("Error: python-socketio is required. Please install it using: pip install python-socketio")
+    print("Error: Required libraries missing. Please install them using: pip install python-socketio paho-mqtt")
     sys.exit(1)
 
-class VideoThread(QThread):
-    """Thread for fetching video frames from the server"""
-    update_frame = pyqtSignal(QPixmap)
-    error_signal = pyqtSignal(str)
-    
-    def __init__(self, server_url):
-        super().__init__()
-        self.server_url = server_url
-        self.running = False
-    
-    def run(self):
-        self.running = True
-        while self.running:
-            try:
-                # Get the latest frame from the server
-                response = requests.get(f"{self.server_url}/video_feed", stream=True)
-                if response.status_code == 200:
-                    # Process the multipart/x-mixed-replace stream
-                    bytes_data = bytes()
-                    for chunk in response.iter_content(chunk_size=1024):
-                        bytes_data += chunk
-                        a = bytes_data.find(b'\xff\xd8')  # JPEG start
-                        b = bytes_data.find(b'\xff\xd9')  # JPEG end
-                        if a != -1 and b != -1:
-                            jpg = bytes_data[a:b+2]
-                            bytes_data = bytes_data[b+2:]
-                            image = QImage()
-                            image.loadFromData(jpg)
-                            pixmap = QPixmap.fromImage(image)
-                            self.update_frame.emit(pixmap)
-                            time.sleep(0.01)  # Prevent CPU overuse
-                else:
-                    self.error_signal.emit(f"Failed to get video feed: {response.status_code}")
-                    time.sleep(5)  # Wait before retrying
-            except Exception as e:
-                self.error_signal.emit(f"Video stream error: {str(e)}")
-                time.sleep(5)  # Wait before retrying
-            
-            if not self.running:
-                break
-    
-    def stop(self):
-        self.running = False
-        self.wait()
-
-class SocketClient(QObject):
-    """Socket.IO client for real-time updates"""
+class MQTTClient(QObject):
+    """MQTT client for real-time updates"""
     emotion_update = pyqtSignal(dict)
     system_info_update = pyqtSignal(dict)
     alert_signal = pyqtSignal(str, str)  # level, message
     connection_status = pyqtSignal(bool)
+    video_frame = pyqtSignal(bytes)
     
-    def __init__(self, server_url):
+    def __init__(self, broker_host, broker_port=1883):
         super().__init__()
-        self.server_url = server_url
-        self.socket = socketio.Client()
-        self.setup_socket_events()
-    
-    def setup_socket_events(self):
-        @self.socket.event
-        def connect():
-            print("Connected to server")
+        self.broker_host = broker_host
+        self.broker_port = broker_port
+        self.client = mqtt.Client()
+        self.setup_mqtt_events()
+        self.connected = False
+        
+    def setup_mqtt_events(self):
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+        self.client.on_message = self.on_message
+        
+    def on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT broker")
+            self.connected = True
             self.connection_status.emit(True)
-        
-        @self.socket.event
-        def disconnect():
-            print("Disconnected from server")
+            
+            # Subscribe to topics
+            topics = [
+                "babymonitor/emotion",
+                "babymonitor/system",
+                "babymonitor/alert",
+                "babymonitor/video",
+                "babymonitor/crying"
+            ]
+            for topic in topics:
+                self.client.subscribe(topic)
+        else:
+            print(f"Failed to connect to MQTT broker with code: {rc}")
             self.connection_status.emit(False)
+            
+    def on_disconnect(self, client, userdata, rc):
+        print("Disconnected from MQTT broker")
+        self.connected = False
+        self.connection_status.emit(False)
         
-        @self.socket.on('emotion_update')
-        def on_emotion_update(data):
-            self.emotion_update.emit(data)
-        
-        @self.socket.on('system_info')
-        def on_system_info(data):
-            self.system_info_update.emit(data)
-        
-        @self.socket.on('alert')
-        def on_alert(data):
-            self.alert_signal.emit(data.get('level', 'info'), data.get('message', ''))
-        
-        @self.socket.on('crying_detected')
-        def on_crying_detected(data):
-            message = f"Crying detected (confidence: {(data.get('confidence', 0) * 100):.1f}%)"
-            self.alert_signal.emit('warning', message)
-    
-    def connect_to_server(self):
+    def on_message(self, client, userdata, msg):
         try:
-            self.socket.connect(self.server_url)
+            if msg.topic == "babymonitor/video":
+                self.video_frame.emit(msg.payload)
+            else:
+                payload = json.loads(msg.payload.decode())
+                
+                if msg.topic == "babymonitor/emotion":
+                    self.emotion_update.emit(payload)
+                elif msg.topic == "babymonitor/system":
+                    self.system_info_update.emit(payload)
+                elif msg.topic == "babymonitor/alert":
+                    self.alert_signal.emit(payload.get('level', 'info'), payload.get('message', ''))
+                elif msg.topic == "babymonitor/crying":
+                    message = f"Crying detected (confidence: {(payload.get('confidence', 0) * 100):.1f}%)"
+                    self.alert_signal.emit('warning', message)
+        except Exception as e:
+            print(f"Error processing MQTT message: {e}")
+            
+    def connect_to_broker(self):
+        try:
+            self.client.connect(self.broker_host, self.broker_port)
+            self.client.loop_start()
             return True
         except Exception as e:
-            print(f"Failed to connect to server: {e}")
+            print(f"Failed to connect to MQTT broker: {e}")
             return False
-    
-    def disconnect_from_server(self):
+            
+    def disconnect_from_broker(self):
         try:
-            if self.socket.connected:
-                self.socket.disconnect()
+            if self.connected:
+                self.client.loop_stop()
+                self.client.disconnect()
         except Exception as e:
-            print(f"Error disconnecting: {e}")
+            print(f"Error disconnecting from MQTT broker: {e}")
+
+class VideoThread(QThread):
+    """Thread for handling video frames"""
+    update_frame = pyqtSignal(QPixmap)
+    error_signal = pyqtSignal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.latest_frame = None
+        
+    def process_frame(self, frame_data):
+        try:
+            image = QImage()
+            image.loadFromData(frame_data)
+            pixmap = QPixmap.fromImage(image)
+            self.update_frame.emit(pixmap)
+        except Exception as e:
+            self.error_signal.emit(f"Error processing video frame: {str(e)}")
+    
+    def run(self):
+        self.running = True
+        while self.running:
+            time.sleep(0.01)  # Prevent CPU overuse
+            
+    def stop(self):
+        self.running = False
+        self.wait()
 
 class AlertWidget(QFrame):
     """Widget for displaying alerts"""
@@ -463,26 +475,34 @@ class EmotionWidget(QFrame):
 class BabyMonitorClient(QMainWindow):
     """Main window for the Baby Monitor Client"""
     
-    def __init__(self, server_host, server_port):
+    def __init__(self, server_url, mqtt_host, mqtt_port):
         super().__init__()
         
         # Store connection info
-        self.server_host = server_host
-        self.server_port = server_port
-        self.server_url = f"http://{server_host}:{server_port}"
+        self.server_url = server_url
+        self.mqtt_host = mqtt_host
+        self.mqtt_port = mqtt_port
+        self.connection_mode = None  # 'mqtt' or 'http'
         
         # Set up UI
         self.setup_ui()
         
-        # Initialize video thread
-        self.video_thread = None
+        # Initialize MQTT client
+        self.mqtt_client = MQTTClient(mqtt_host, mqtt_port)
+        self.mqtt_client.emotion_update.connect(self.update_emotion_display)
+        self.mqtt_client.system_info_update.connect(self.update_system_info)
+        self.mqtt_client.alert_signal.connect(self.add_alert)
+        self.mqtt_client.connection_status.connect(self.handle_mqtt_connection)
+        self.mqtt_client.video_frame.connect(self.process_video_frame)
         
-        # Initialize socket client
-        self.socket_client = SocketClient(self.server_url)
-        self.socket_client.emotion_update.connect(self.update_emotion)
-        self.socket_client.system_info_update.connect(self.update_system_info)
-        self.socket_client.alert_signal.connect(self.add_alert)
-        self.socket_client.connection_status.connect(self.update_connection_status)
+        # Initialize Socket.IO client (for fallback)
+        self.sio = socketio.Client()
+        self.setup_socketio_events()
+        
+        # Initialize video thread
+        self.video_thread = VideoThread()
+        self.video_thread.update_frame.connect(self.update_video_display)
+        self.video_thread.error_signal.connect(self.handle_video_error)
         
         # Connect to server
         self.connect_to_server()
@@ -569,82 +589,77 @@ class BabyMonitorClient(QMainWindow):
         self.statusBar.showMessage("Ready")
     
     def connect_to_server(self):
-        """Connect to the baby monitor server"""
-        self.statusBar.showMessage(f"Connecting to {self.server_url}...")
+        """Connect to the baby monitor server using MQTT first, then fallback to HTTP"""
+        self.statusBar.showMessage("Attempting MQTT connection...")
         
-        # Connect socket
-        threading.Thread(target=self._connect_socket, daemon=True).start()
-        
-        # Start video thread
-        if self.video_thread is None or not self.video_thread.isRunning():
-            self.video_thread = VideoThread(self.server_url)
-            self.video_thread.update_frame.connect(self.update_video_frame)
-            self.video_thread.error_signal.connect(self.show_video_error)
-            self.video_thread.start()
-    
-    def _connect_socket(self):
-        """Connect socket in a separate thread to avoid blocking UI"""
-        success = self.socket_client.connect_to_server()
+        # Try MQTT connection first
+        threading.Thread(target=self._try_mqtt_connection, daemon=True).start()
+
+    def _try_mqtt_connection(self):
+        """Attempt to connect via MQTT"""
+        success = self.mqtt_client.connect_to_broker()
         if not success:
-            # If failed, update UI from the main thread
+            # MQTT failed, try HTTP/Socket.IO
+            self.statusBar.showMessage("MQTT connection failed, trying HTTP/Socket.IO...")
+            threading.Thread(target=self._try_http_connection, daemon=True).start()
+
+    def _try_http_connection(self):
+        """Attempt to connect via HTTP/Socket.IO as fallback"""
+        try:
+            self.sio.connect(f'http://{self.server_url}')
+            self.connection_mode = 'http'
+            self.add_alert('info', 'Connected using HTTP/Socket.IO (fallback mode)')
+            
+            # Start video thread for HTTP mode
+            if not self.video_thread.isRunning():
+                self.video_thread.start()
+                
+        except Exception as e:
+            # Both connection methods failed
             QApplication.instance().processEvents()
             self.update_connection_status(False)
-    
-    def disconnect_from_server(self):
-        """Disconnect from the baby monitor server"""
-        # Stop video thread
-        if self.video_thread and self.video_thread.isRunning():
-            self.video_thread.stop()
-            self.video_thread = None
-        
-        # Disconnect socket
-        self.socket_client.disconnect_from_server()
-        
-        # Update UI
-        self.update_connection_status(False)
-        self.video_label.setText("Disconnected from video feed")
-        self.statusBar.showMessage("Disconnected from server")
-    
-    def connect_button_clicked(self):
-        """Handle connect/disconnect button click"""
-        if self.connect_button.text() == "Connect":
-            # Show server input dialog
-            host, ok1 = QInputDialog.getText(self, "Server Settings", "Server Host:",
-                                           QLineEdit.Normal, self.server_host)
+            self.add_alert('danger', f'Failed to connect: {str(e)}')
+
+    def handle_mqtt_connection(self, connected):
+        """Handle MQTT connection status changes"""
+        if connected:
+            self.connection_mode = 'mqtt'
+            self.update_connection_status(True)
+            self.add_alert('info', 'Connected using MQTT (primary mode)')
             
-            if ok1:
-                port, ok2 = QInputDialog.getInt(self, "Server Settings", "Server Port:",
-                                             self.server_port, 1, 65535)
-                
-                if ok2:
-                    # Update connection info
-                    self.server_host = host
-                    self.server_port = port
-                    self.server_url = f"http://{host}:{port}"
-                    
-                    # Connect to server
-                    self.connect_to_server()
+            # Start video thread for MQTT mode
+            if not self.video_thread.isRunning():
+                self.video_thread.start()
         else:
-            # Disconnect
-            self.disconnect_from_server()
-    
+            # If we're in MQTT mode and connection is lost, try HTTP fallback
+            if self.connection_mode == 'mqtt':
+                self.add_alert('warning', 'MQTT connection lost, trying HTTP fallback...')
+                threading.Thread(target=self._try_http_connection, daemon=True).start()
+
+    def handle_socketio_connection(self, connected):
+        """Handle Socket.IO connection status changes"""
+        if not connected and self.connection_mode == 'http':
+            self.update_connection_status(False)
+            self.add_alert('warning', 'HTTP connection lost, retrying MQTT...')
+            # Try to reconnect using MQTT
+            threading.Thread(target=self._try_mqtt_connection, daemon=True).start()
+
     def update_connection_status(self, connected):
         """Update the connection status in the UI"""
         if connected:
-            self.connection_label.setText("Status: Connected")
+            mode = "MQTT" if self.connection_mode == 'mqtt' else "HTTP"
+            self.connection_label.setText(f"Status: Connected ({mode})")
             self.connection_label.setStyleSheet("color: #28a745; font-weight: bold;")
             self.connect_button.setText("Disconnect")
-            self.statusBar.showMessage(f"Connected to {self.server_url}")
-            
-            # Add initial alert
-            self.add_alert("info", f"Connected to baby monitor server at {self.server_host}:{self.server_port}")
+            self.statusBar.showMessage(f"Connected to {self.server_url} using {mode}")
         else:
             self.connection_label.setText("Status: Disconnected")
             self.connection_label.setStyleSheet("color: #dc3545; font-weight: bold;")
             self.connect_button.setText("Connect")
             self.statusBar.showMessage("Disconnected from server")
+            self.connection_mode = None
     
-    def update_video_frame(self, pixmap):
+    def update_video_display(self, pixmap):
         """Update the video frame with a new image"""
         # Scale pixmap to fit label while maintaining aspect ratio
         scaled_pixmap = pixmap.scaled(
@@ -654,11 +669,11 @@ class BabyMonitorClient(QMainWindow):
         )
         self.video_label.setPixmap(scaled_pixmap)
     
-    def show_video_error(self, error_message):
+    def handle_video_error(self, error_message):
         """Show video error in the video label"""
         self.video_label.setText(error_message)
     
-    def update_emotion(self, data):
+    def update_emotion_display(self, data):
         """Update emotion widget with new data"""
         self.emotion_widget.update_emotions(data)
     
@@ -675,13 +690,10 @@ class BabyMonitorClient(QMainWindow):
     
     def check_server_status(self):
         """Check if the server is still reachable"""
-        if not hasattr(self.socket_client.socket, 'connected') or not self.socket_client.socket.connected:
+        if not self.mqtt_client.connected:
             try:
-                # Try a quick HTTP request to see if server is up
-                response = requests.get(f"{self.server_url}/api/system_info", timeout=2)
-                if response.status_code == 200:
-                    # Server is up but socket is disconnected, try reconnecting
-                    threading.Thread(target=self._connect_socket, daemon=True).start()
+                # Try a quick MQTT request to see if server is up
+                self.mqtt_client.client.reconnect()
             except:
                 # Server is down, update UI if needed
                 if self.connect_button.text() == "Disconnect":
@@ -690,25 +702,67 @@ class BabyMonitorClient(QMainWindow):
     def show_settings(self):
         """Show settings dialog"""
         host, ok1 = QInputDialog.getText(self, "Server Settings", "Server Host:",
-                                       QLineEdit.Normal, self.server_host)
+                                       QLineEdit.Normal, self.mqtt_host)
         
         if ok1:
             port, ok2 = QInputDialog.getInt(self, "Server Settings", "Server Port:",
-                                         self.server_port, 1, 65535)
+                                         self.mqtt_port, 1, 65535)
             
             if ok2:
                 # Check if settings changed
-                if host != self.server_host or port != self.server_port:
+                if host != self.mqtt_host or port != self.mqtt_port:
                     # Disconnect from current server
                     self.disconnect_from_server()
                     
                     # Update connection info
-                    self.server_host = host
-                    self.server_port = port
-                    self.server_url = f"http://{host}:{port}"
+                    self.mqtt_host = host
+                    self.mqtt_port = port
                     
                     # Connect to new server
                     self.connect_to_server()
+    
+    def process_video_frame(self, frame_data):
+        self.video_thread.process_frame(frame_data)
+    
+    def disconnect_from_server(self):
+        """Disconnect from the baby monitor server"""
+        # Stop video thread
+        self.video_thread.stop()
+        
+        # Disconnect MQTT
+        self.mqtt_client.disconnect_from_broker()
+        
+        # Update UI
+        self.update_connection_status(False)
+        self.video_label.setText("Disconnected from video feed")
+        self.statusBar.showMessage("Disconnected from server")
+    
+    def connect_button_clicked(self):
+        """Handle connect/disconnect button click"""
+        if self.connect_button.text() == "Connect":
+            # Show server input dialog
+            host, ok1 = QInputDialog.getText(self, "Server Settings", "Server Host:",
+                                           QLineEdit.Normal, self.mqtt_host)
+            
+            if ok1:
+                port, ok2 = QInputDialog.getInt(self, "Server Settings", "Server Port:",
+                                             self.mqtt_port, 1, 65535)
+                
+                if ok2:
+                    # Update connection info
+                    self.mqtt_host = host
+                    self.mqtt_port = port
+                    
+                    # Connect to server
+                    self.connect_to_server()
+        else:
+            # Disconnect
+            self.disconnect_from_server()
+    
+    def setup_socketio_events(self):
+        """Set up Socket.IO events"""
+        self.sio.on('connect', self.handle_socketio_connection)
+        self.sio.on('disconnect', self.handle_socketio_connection)
     
     def closeEvent(self, event):
         """Handle window close event"""
@@ -718,15 +772,18 @@ class BabyMonitorClient(QMainWindow):
         # Accept the close event
         event.accept()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Baby Monitor Client")
+    parser.add_argument("--host", default="192.168.1.100", help="Host IP address")
+    parser.add_argument("--port", type=int, default=5000, help="Server port")
+    parser.add_argument("--mqtt-host", help="MQTT broker host (defaults to --host)")
+    parser.add_argument("--mqtt-port", type=int, default=1883, help="MQTT broker port")
+    return parser.parse_args()
+
 def main():
     """Main function"""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Baby Monitor Client')
-    parser.add_argument('--host', type=str, default='192.168.1.100',
-                        help='Host IP address of the Baby Monitor server')
-    parser.add_argument('--port', type=int, default=5000,
-                        help='Port of the Baby Monitor server')
-    args = parser.parse_args()
+    args = parse_args()
     
     # Create application
     app = QApplication(sys.argv)
@@ -752,7 +809,7 @@ def main():
     app.setPalette(dark_palette)
     
     # Create and show the main window
-    window = BabyMonitorClient(args.host, args.port)
+    window = BabyMonitorClient(args.host, args.mqtt_host, args.mqtt_port)
     window.show()
     
     # Run the application

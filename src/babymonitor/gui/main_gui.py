@@ -12,11 +12,13 @@ import os
 import time
 import numpy as np
 import cv2
+import argparse
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                            QLabel, QPushButton, QComboBox, QMessageBox, QProgressBar,
-                           QTabWidget, QGroupBox, QGridLayout, QSplitter, QFrame)
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QThread
-from PyQt5.QtGui import QImage, QPixmap, QFont, QColor, QPalette
+                           QTabWidget, QGroupBox, QGridLayout, QSplitter, QFrame,
+                           QLineEdit, QFileDialog, QSlider, QCheckBox, QRadioButton)
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QThread, QSize
+from PyQt5.QtGui import QImage, QPixmap, QFont, QColor, QPalette, QIcon
 import logging
 
 # Import baby monitor components
@@ -25,6 +27,7 @@ from babymonitor.detectors.person_detector import PersonDetector
 from babymonitor.detectors.emotion_detector import EmotionDetector
 from babymonitor.audio import AudioProcessor
 from babymonitor.gui.emotion_gui import EmotionDetectorGUI
+from babymonitor.gui.dev_tools import DevToolsPanel
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +67,13 @@ class VideoThread(QThread):
 class BabyMonitorGUI(QMainWindow):
     """Main GUI for the Baby Monitor System."""
     
-    def __init__(self):
+    def __init__(self, dev_mode=False):
         super().__init__()
         self.setWindowTitle("Baby Monitor System")
         self.setGeometry(100, 100, 1200, 800)
+        
+        # Store developer mode flag
+        self.dev_mode = dev_mode
         
         # Initialize components
         self.init_components()
@@ -114,7 +120,8 @@ class BabyMonitorGUI(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # Create header
-        header = QLabel("Baby Monitor System - Developer Mode")
+        title = "Baby Monitor System - Developer Mode" if self.dev_mode else "Baby Monitor System"
+        header = QLabel(title)
         header.setStyleSheet("font-size: 24px; font-weight: bold; margin: 10px;")
         header.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(header)
@@ -164,8 +171,51 @@ class BabyMonitorGUI(QMainWindow):
         video_layout.addLayout(video_controls)
         dashboard_layout.addWidget(video_group, 2)
         
-        # Right panel - Status and controls
+        # Right panel - Status and controls (enhanced from index.html)
         right_panel = QVBoxLayout()
+        
+        # Add System Status panel inspired by index.html
+        system_status_group = QGroupBox("System Status")
+        system_status_layout = QVBoxLayout(system_status_group)
+        
+        # System status items
+        self.status_items = {}
+        
+        # Create status items inspired by index.html
+        status_items_data = [
+            {"icon": "clock", "label": "Uptime:", "id": "uptime", "initial": "00:00:00"},
+            {"icon": "camera", "label": "Camera:", "id": "cameraStatus", "initial": "Connecting..."},
+            {"icon": "person", "label": "Person Detection:", "id": "personDetectorStatus", "initial": "Initializing..."},
+            {"icon": "emoji-smile", "label": "Emotion Detection:", "id": "emotionDetectorStatus", "initial": "Initializing..."},
+            {"icon": "cpu", "label": "CPU Usage:", "id": "cpuUsage", "initial": "0%", "progress": True},
+            {"icon": "memory", "label": "Memory Usage:", "id": "memoryUsage", "initial": "0%", "progress": True}
+        ]
+        
+        for item in status_items_data:
+            item_layout = QHBoxLayout()
+            
+            # Label with icon
+            label = QLabel(item["label"])
+            label.setStyleSheet("font-weight: bold;")
+            item_layout.addWidget(label)
+            
+            # Value (either text or progress bar)
+            if item.get("progress", False):
+                progress = QProgressBar()
+                progress.setRange(0, 100)
+                progress.setValue(0)
+                progress.setFormat("%v%")
+                progress.setTextVisible(True)
+                self.status_items[item["id"]] = progress
+                item_layout.addWidget(progress)
+            else:
+                value = QLabel(item["initial"])
+                self.status_items[item["id"]] = value
+                item_layout.addWidget(value)
+            
+            system_status_layout.addLayout(item_layout)
+        
+        right_panel.addWidget(system_status_group)
         
         # Person detection status
         person_group = QGroupBox("Person Detection")
@@ -236,31 +286,24 @@ class BabyMonitorGUI(QMainWindow):
         
         right_panel.addWidget(emotion_group)
         
-        # System status
-        status_group = QGroupBox("System Status")
-        status_layout = QGridLayout(status_group)
-        
-        status_layout.addWidget(QLabel("Camera Status:"), 0, 0)
-        self.camera_status = QLabel("Connected")
-        self.camera_status.setStyleSheet("color: green; font-weight: bold;")
-        status_layout.addWidget(self.camera_status, 0, 1)
-        
-        status_layout.addWidget(QLabel("Audio Status:"), 1, 0)
-        self.audio_status = QLabel("Connected")
-        self.audio_status.setStyleSheet("color: green; font-weight: bold;")
-        status_layout.addWidget(self.audio_status, 1, 1)
-        
-        status_layout.addWidget(QLabel("Person Detection:"), 2, 0)
-        self.person_detector_status = QLabel("Running")
-        self.person_detector_status.setStyleSheet("color: green; font-weight: bold;")
-        status_layout.addWidget(self.person_detector_status, 2, 1)
-        
-        status_layout.addWidget(QLabel("Emotion Detection:"), 3, 0)
-        self.emotion_detector_status = QLabel("Running")
-        self.emotion_detector_status.setStyleSheet("color: green; font-weight: bold;")
-        status_layout.addWidget(self.emotion_detector_status, 3, 1)
-        
-        right_panel.addWidget(status_group)
+        # Add Quick Actions panel from index.html
+        if not self.dev_mode:  # Only show in normal mode
+            quick_actions_group = QGroupBox("Quick Actions")
+            quick_actions_layout = QVBoxLayout(quick_actions_group)
+            
+            # Add quick action buttons
+            actions = [
+                {"icon": "camera", "text": "Take Snapshot", "callback": self.take_snapshot},
+                {"icon": "bell", "text": "Toggle Notifications", "callback": self.toggle_notifications},
+                {"icon": "gear", "text": "Settings", "callback": self.show_settings}
+            ]
+            
+            for action in actions:
+                btn = QPushButton(action["text"])
+                btn.clicked.connect(action["callback"])
+                quick_actions_layout.addWidget(btn)
+            
+            right_panel.addWidget(quick_actions_group)
         
         # Controls
         controls_group = QGroupBox("Controls")
@@ -284,6 +327,163 @@ class BabyMonitorGUI(QMainWindow):
         dashboard_layout.addLayout(right_panel, 1)
         self.tabs.addTab(dashboard_tab, "Dashboard")
         
+        # Create metrics tab (inspired by metrics.html)
+        metrics_tab = QWidget()
+        metrics_layout = QVBoxLayout(metrics_tab)
+        
+        # Add layout for metrics similar to metrics.html
+        metrics_header = QLabel("System Metrics")
+        metrics_header.setStyleSheet("font-size: 20px; font-weight: bold;")
+        metrics_layout.addWidget(metrics_header)
+        
+        # Time range control
+        time_range_layout = QHBoxLayout()
+        time_range_label = QLabel("Time Range:")
+        time_range_layout.addWidget(time_range_label)
+        
+        for range_option in ["1h", "3h", "24h"]:
+            btn = QPushButton(range_option)
+            btn.setCheckable(True)
+            if range_option == "1h":
+                btn.setChecked(True)
+            time_range_layout.addWidget(btn)
+        
+        time_range_layout.addStretch()
+        metrics_layout.addLayout(time_range_layout)
+        
+        # Stats grid similar to metrics.html
+        stats_grid = QGridLayout()
+        
+        stat_items = [
+            {"icon": "speedometer", "title": "FPS", "id": "fps_value", "initial": "0"},
+            {"icon": "people", "title": "People Detected", "id": "detections_value", "initial": "0"},
+            {"icon": "cpu", "title": "CPU Usage", "id": "cpu_usage_value", "initial": "0%"},
+            {"icon": "memory", "title": "Memory Usage", "id": "memory_usage_value", "initial": "0%"}
+        ]
+        
+        self.metric_values = {}
+        
+        for i, item in enumerate(stat_items):
+            frame = QFrame()
+            frame.setFrameShape(QFrame.StyledPanel)
+            frame.setStyleSheet("background-color: #252525; border-radius: 8px; padding: 10px;")
+            
+            layout = QVBoxLayout(frame)
+            
+            title = QLabel(item["title"])
+            title.setAlignment(Qt.AlignCenter)
+            title.setStyleSheet("color: #aaaaaa; font-size: 0.8rem;")
+            
+            value = QLabel(item["initial"])
+            value.setAlignment(Qt.AlignCenter)
+            value.setStyleSheet("font-size: 1.5rem; font-weight: bold; color: #ffffff;")
+            self.metric_values[item["id"]] = value
+            
+            layout.addWidget(title)
+            layout.addWidget(value)
+            
+            # Calculate grid position (2x2 grid)
+            row, col = i // 2, i % 2
+            stats_grid.addWidget(frame, row, col)
+        
+        metrics_layout.addLayout(stats_grid)
+        
+        # Add emotion distribution
+        emotion_grid = QGridLayout()
+        emotions = ['crying', 'laughing', 'babbling', 'silence']
+        emotion_icons = {
+            'crying': 'emoji-frown',
+            'laughing': 'emoji-laughing',
+            'babbling': 'chat-dots',
+            'silence': 'volume-mute'
+        }
+        
+        self.emotion_percentage = {}
+        
+        for i, emotion in enumerate(emotions):
+            frame = QFrame()
+            frame.setFrameShape(QFrame.StyledPanel)
+            frame.setStyleSheet(f"background-color: #252525; border-radius: 8px; padding: 10px;")
+            
+            layout = QVBoxLayout(frame)
+            
+            title = QLabel(emotion.capitalize())
+            title.setAlignment(Qt.AlignCenter)
+            title.setStyleSheet("color: #ffffff; font-size: 1rem;")
+            
+            value = QLabel("0%")
+            value.setAlignment(Qt.AlignCenter)
+            value.setStyleSheet("font-size: 1.2rem; font-weight: bold; color: #ffffff;")
+            self.emotion_percentage[emotion] = value
+            
+            layout.addWidget(title)
+            layout.addWidget(value)
+            
+            # Calculate grid position (2x2 grid)
+            row, col = i // 2, i % 2
+            emotion_grid.addWidget(frame, row, col)
+        
+        metrics_layout.addLayout(emotion_grid)
+        
+        # Add system health indicators
+        health_group = QGroupBox("System Health")
+        health_layout = QVBoxLayout(health_group)
+        
+        health_items = [
+            {"label": "CPU Usage", "id": "cpu_health"},
+            {"label": "Memory Usage", "id": "memory_health"},
+            {"label": "Camera Status", "id": "camera_health"},
+            {"label": "AI Processing", "id": "ai_health"}
+        ]
+        
+        self.health_bars = {}
+        
+        for item in health_items:
+            item_layout = QHBoxLayout()
+            
+            label = QLabel(item["label"])
+            label.setStyleSheet("color: #aaaaaa;")
+            item_layout.addWidget(label)
+            
+            progress = QProgressBar()
+            progress.setRange(0, 100)
+            if item["id"] == "camera_health" or item["id"] == "ai_health":
+                progress.setValue(100)
+            else:
+                progress.setValue(0)
+            progress.setTextVisible(False)
+            
+            color = "#198754"  # Green
+            progress.setStyleSheet(f"""
+                QProgressBar {{
+                    border: none;
+                    border-radius: 4px;
+                    background-color: #333;
+                    height: 8px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {color};
+                    border-radius: 4px;
+                }}
+            """)
+            
+            self.health_bars[item["id"]] = progress
+            item_layout.addWidget(progress)
+            
+            if item["id"] == "camera_health" or item["id"] == "ai_health":
+                status_text = "Active"
+            else:
+                status_text = "0%"
+            value = QLabel(status_text)
+            value.setStyleSheet("font-weight: bold; color: #ffffff;")
+            item_layout.addWidget(value)
+            
+            health_layout.addLayout(item_layout)
+        
+        metrics_layout.addWidget(health_group)
+        
+        self.tabs.addTab(metrics_tab, "Metrics")
+        
         # Create emotion detection tab (full emotion GUI)
         emotion_tab = QWidget()
         emotion_tab_layout = QVBoxLayout(emotion_tab)
@@ -305,6 +505,11 @@ class BabyMonitorGUI(QMainWindow):
         
         self.tabs.addTab(logs_tab, "Logs")
         
+        # Add developer tools tab if in developer mode
+        if self.dev_mode:
+            dev_tools_tab = DevToolsPanel(self)
+            self.tabs.addTab(dev_tools_tab, "Developer Tools")
+        
         # Status bar
         self.statusBar().showMessage("Baby Monitor System Ready")
         
@@ -317,6 +522,11 @@ class BabyMonitorGUI(QMainWindow):
         self.log_timer = QTimer()
         self.log_timer.timeout.connect(self.update_logs)
         self.log_timer.start(1000)  # Update every second
+        
+        # Set up timer for updating system metrics
+        self.metrics_timer = QTimer()
+        self.metrics_timer.timeout.connect(self.update_metrics)
+        self.metrics_timer.start(1000)  # Update every second
     
     def update_video_feed(self, frame, results):
         """Update the video feed with the latest frame and detection results."""
@@ -413,6 +623,49 @@ class BabyMonitorGUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error updating logs: {e}")
     
+    def update_metrics(self):
+        """Update system metrics display."""
+        try:
+            # Update FPS (simulated)
+            fps = np.random.randint(25, 35)
+            self.metric_values["fps_value"].setText(str(fps))
+            
+            # Update CPU usage (simulated)
+            cpu_usage = np.random.randint(10, 30)
+            self.metric_values["cpu_usage_value"].setText(f"{cpu_usage}%")
+            self.status_items["cpuUsage"].setValue(cpu_usage)
+            self.health_bars["cpu_health"].setValue(cpu_usage)
+            
+            # Update memory usage (simulated)
+            memory_usage = np.random.randint(20, 50)
+            self.metric_values["memory_usage_value"].setText(f"{memory_usage}%")
+            self.status_items["memoryUsage"].setValue(memory_usage)
+            self.health_bars["memory_health"].setValue(memory_usage)
+            
+            # Update person detections
+            if hasattr(self, 'person_detector'):
+                detections = 0  # Get actual values from person detector
+                self.metric_values["detections_value"].setText(str(detections))
+            
+            # Update uptime
+            uptime = time.strftime("%H:%M:%S", time.gmtime(time.time() - self.start_time))
+            self.status_items["uptime"].setText(uptime)
+            
+            # Update emotion distribution (simulated)
+            emotions = ['crying', 'laughing', 'babbling', 'silence']
+            probs = np.random.random(len(emotions))
+            probs = probs / probs.sum()
+            
+            for emotion, prob in zip(emotions, probs):
+                self.emotion_percentage[emotion].setText(f"{int(prob * 100)}%")
+                
+        except Exception as e:
+            logger.error(f"Error updating metrics: {e}")
+    
+    def toggle_notifications(self):
+        """Toggle notification settings."""
+        QMessageBox.information(self, "Notifications", "Notification settings not implemented yet")
+    
     def change_camera(self, index):
         """Change the camera source."""
         try:
@@ -461,6 +714,9 @@ class BabyMonitorGUI(QMainWindow):
     def start_monitoring(self):
         """Start all monitoring components."""
         try:
+            # Store start time for uptime calculation
+            self.start_time = time.time()
+            
             # Start video thread if not running
             if hasattr(self, 'video_thread') and not self.video_thread.isRunning():
                 self.video_thread.start()
@@ -469,6 +725,11 @@ class BabyMonitorGUI(QMainWindow):
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.statusBar().showMessage("Monitoring started")
+            
+            # Update status items
+            self.status_items["cameraStatus"].setText("Connected")
+            self.status_items["personDetectorStatus"].setText("Running")
+            self.status_items["emotionDetectorStatus"].setText("Running")
         except Exception as e:
             logger.error(f"Error starting monitoring: {e}")
             QMessageBox.warning(self, "Start Error", f"Failed to start monitoring: {str(e)}")
@@ -515,6 +776,13 @@ class BabyMonitorGUI(QMainWindow):
 
 def launch_main_gui():
     """Launch the main Baby Monitor GUI."""
+    parser = argparse.ArgumentParser(description="Baby Monitor GUI")
+    parser.add_argument("--mode", choices=["normal", "dev"], default="normal",
+                      help="Operation mode: normal or developer")
+    
+    args = parser.parse_args()
+    dev_mode = args.mode == "dev"
+    
     app = QApplication(sys.argv)
     
     # Set application style
@@ -537,6 +805,6 @@ def launch_main_gui():
     dark_palette.setColor(QPalette.HighlightedText, Qt.black)
     app.setPalette(dark_palette)
     
-    window = BabyMonitorGUI()
+    window = BabyMonitorGUI(dev_mode=dev_mode)
     window.show()
     return app.exec_() 

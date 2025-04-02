@@ -1,149 +1,322 @@
 #!/bin/bash
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Display banner
-echo -e "${BLUE}"
-echo "==============================================="
-echo "    Baby Monitor System - Unix Installer"
-echo "==============================================="
-echo -e "${NC}"
-
-# Function to check Python version
-check_python_version() {
-    local python_cmd=$1
-    local version=$($python_cmd -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
-    local major=$(echo $version | cut -d. -f1)
-    local minor=$(echo $version | cut -d. -f2)
-    local patch=$(echo $version | cut -d. -f3)
-    
-    if [ $major -eq 3 ] && [ $minor -eq 11 ]; then
-        if [ $patch -le 5 ]; then
-            return 0
-        fi
-    elif [ $major -eq 3 ] && [ $minor -lt 11 ] && [ $minor -ge 8 ]; then
-        return 0
-    fi
-    return 1
-}
+echo "======================================"
+echo "  Baby Monitor System Installation"
+echo "======================================"
+echo "  Version 2.1.0 - State Detection"
+echo "======================================"
+echo
 
 # Check if Python is installed
 if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}Python 3 is not installed or not in PATH.${NC}"
-    echo "Please install Python 3.8 or newer."
-    echo "On Ubuntu/Debian: sudo apt-get install python3 python3-pip python3-venv"
-    echo "On macOS: brew install python3"
+    echo "Error: Python 3 is not installed."
+    echo "Please install Python 3.8 or higher and try again."
+    read -p "Press Enter to exit..." 
     exit 1
 fi
 
-# Check Python version and try to find a compatible version
-PYTHON_CMD=""
-for cmd in "python3.11" "python3.10" "python3.9" "python3.8" "python3"; do
-    if command -v $cmd &> /dev/null; then
-        if check_python_version $cmd; then
-            PYTHON_CMD=$cmd
-            break
-        fi
-    fi
+# Determine Python version
+PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+MAJOR=$(echo $PY_VERSION | cut -d. -f1)
+MINOR=$(echo $PY_VERSION | cut -d. -f2)
+
+# Verify Python version is at least 3.8
+if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 8 ]); then
+    echo "Error: Python version $PY_VERSION is not supported."
+    echo "Please install Python 3.8 or higher."
+    read -p "Press Enter to exit..." 
+    exit 1
+fi
+
+echo "Detected Python $PY_VERSION"
+
+# Parse command line arguments
+INSTALL=false
+MODELS=false
+FIX=false
+CONFIG=false
+TRAIN=false
+DOWNLOAD=false
+NO_GUI=false
+STATE_DETECTION=true  # Enable state detection by default
+
+for arg in "$@"; do
+    case $arg in
+        --install)
+            INSTALL=true
+            ;;
+        --models)
+            MODELS=true
+            ;;
+        --fix)
+            FIX=true
+            ;;
+        --config)
+            CONFIG=true
+            ;;
+        --train)
+            TRAIN=true
+            ;;
+        --download)
+            DOWNLOAD=true
+            ;;
+        --no-gui)
+            NO_GUI=true
+            ;;
+        --no-state-detection)
+            STATE_DETECTION=false
+            ;;
+    esac
 done
 
-if [ -z "$PYTHON_CMD" ]; then
-    echo -e "${RED}No compatible Python version found.${NC}"
-    echo "Please install Python 3.11.5 or an earlier compatible version (3.8-3.11)."
-    echo "Current Python versions found:"
-    for cmd in "python3.11" "python3.10" "python3.9" "python3.8" "python3"; do
-        if command -v $cmd &> /dev/null; then
-            echo "$cmd: $($cmd --version 2>&1)"
-        fi
-    done
-    exit 1
-fi
-
-# Show selected Python version
-PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
-echo -e "Using Python: ${GREEN}${PYTHON_VERSION}${NC}"
-
-# Check for required system dependencies
-echo -e "\n${YELLOW}Checking system dependencies...${NC}"
-MISSING_DEPS=()
-
-check_dependency() {
-    if ! dpkg -l "$1" &> /dev/null; then
-        MISSING_DEPS+=("$1")
-    fi
-}
-
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Check for Linux dependencies
-    check_dependency "python3-dev"
-    check_dependency "python3-pip"
-    check_dependency "python3-venv"
-    check_dependency "libportaudio2"
-    check_dependency "portaudio19-dev"
-    check_dependency "libsndfile1"
+# Set up virtual environment if it doesn't exist
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv venv
     
-    if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
-        echo -e "${YELLOW}Missing dependencies: ${MISSING_DEPS[*]}${NC}"
-        echo "Install them using:"
-        echo "sudo apt-get install ${MISSING_DEPS[*]}"
-        read -p "Would you like to install them now? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            sudo apt-get update
-            sudo apt-get install -y "${MISSING_DEPS[@]}"
-        else
-            echo "Please install the dependencies and run this script again."
-            exit 1
-        fi
+    echo "Activating virtual environment..."
+    source venv/bin/activate
+    
+    echo "Installing required packages..."
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    
+    # Install additional packages for state detection if enabled
+    if [ "$STATE_DETECTION" = true ]; then
+        echo "Installing additional packages for state detection..."
+        pip install scikit-learn opencv-python
+    fi
+    
+    if [ $? -ne 0 ]; then
+        echo "Error installing requirements."
+        echo "Please check your internet connection and try again."
+        read -p "Press Enter to exit..." 
+        exit 1
+    fi
+else
+    echo "Activating existing virtual environment..."
+    source venv/bin/activate
+fi
+
+# Create models directory if it doesn't exist
+if [ ! -d "src/babymonitor/models" ]; then
+    echo "Creating models directory..."
+    mkdir -p src/babymonitor/models
+fi
+
+# Check for models
+echo
+echo "Checking model status..."
+
+# Count total models and missing models
+TOTAL_MODELS=0
+MISSING_MODELS=0
+
+if [ ! -f "src/babymonitor/models/emotion_model.pt" ]; then
+    echo "- Missing: Emotion recognition model"
+    MISSING_MODELS=$((MISSING_MODELS + 1))
+fi
+TOTAL_MODELS=$((TOTAL_MODELS + 1))
+
+if [ ! -f "src/babymonitor/models/yolov8n.pt" ]; then
+    echo "- Missing: Person detection model"
+    MISSING_MODELS=$((MISSING_MODELS + 1))
+fi
+TOTAL_MODELS=$((TOTAL_MODELS + 1))
+
+if [ ! -f "src/babymonitor/models/wav2vec2_emotion.pt" ]; then
+    echo "- Missing: Wav2Vec2 emotion model"
+    MISSING_MODELS=$((MISSING_MODELS + 1))
+fi
+TOTAL_MODELS=$((TOTAL_MODELS + 1))
+
+# Check for state detection model if enabled
+if [ "$STATE_DETECTION" = true ]; then
+    if [ ! -f "src/babymonitor/models/person_state_classifier.pkl" ]; then
+        echo "- Missing: Person state detection model"
+        MISSING_MODELS=$((MISSING_MODELS + 1))
+    fi
+    TOTAL_MODELS=$((TOTAL_MODELS + 1))
+fi
+
+echo
+echo "Found $MISSING_MODELS missing models out of $TOTAL_MODELS required models."
+
+# Handle models based on command line args or user input
+if [ "$DOWNLOAD" = true ]; then
+    echo "Downloading pretrained models..."
+    python3 setup.py --download --no-gui
+elif [ "$TRAIN" = true ]; then
+    echo "Training missing models..."
+    python3 setup.py --train --no-gui
+elif [ $MISSING_MODELS -gt 0 ]; then
+    echo
+    echo "Some required models are missing. What would you like to do?"
+    echo "1. Download pretrained models (recommended)"
+    echo "2. Train models from scratch (takes time and requires data)"
+    echo "3. Continue without models (not recommended)"
+    echo
+    read -p "Enter your choice (1-3): " MODEL_CHOICE
+    
+    if [ "$MODEL_CHOICE" = "1" ]; then
+        echo "Downloading pretrained models..."
+        python3 setup.py --download --no-gui
+    elif [ "$MODEL_CHOICE" = "2" ]; then
+        echo "Training models from scratch..."
+        python3 setup.py --train --no-gui
+    else
+        echo "Continuing without all models - some functionality may be limited."
     fi
 fi
 
-# Create virtual environment
-echo -e "\n${YELLOW}Setting up Python virtual environment...${NC}"
-$PYTHON_CMD -m venv venv
-source venv/bin/activate
-
-# Upgrade pip
-echo -e "\n${YELLOW}Upgrading pip...${NC}"
-pip install --upgrade pip
-
-# Install required packages
-echo -e "\n${YELLOW}Installing required packages...${NC}"
-pip install eventlet==0.33.3 flask-socketio==5.3.6 werkzeug==2.3.7 python-engineio==4.5.1 python-socketio==5.8.0
-
-# Run the installer
-echo -e "\n${YELLOW}Starting the Baby Monitor System installer...${NC}"
-python install.py "$@"
-
-if [ $? -ne 0 ]; then
-    echo -e "\n${RED}Installation failed. Please check the error messages above.${NC}"
-    echo "For more information, see INSTALL.md"
-    exit 1
+# Update or create .env file
+if [ -f ".env" ]; then
+    # Backup existing .env file
+    cp .env .env.backup
+    
+    # Update .env with state detection setting
+    if ! grep -q "STATE_DETECTION_ENABLED=" .env; then
+        echo "STATE_DETECTION_ENABLED=true" >> .env
+    elif [ "$STATE_DETECTION" = true ]; then
+        sed -i 's/STATE_DETECTION_ENABLED=.*/STATE_DETECTION_ENABLED=true/' .env
+    else
+        sed -i 's/STATE_DETECTION_ENABLED=.*/STATE_DETECTION_ENABLED=false/' .env
+    fi
+    
+    echo "Updated configuration in .env file."
+else
+    # Create new .env file with default settings
+    cat > .env << EOF
+# Baby Monitor System Environment Configuration
+# Generated by installer on $(date "+%Y-%m-%d %H:%M:%S")
+MODE=normal
+CAMERA_INDEX=0
+CAMERA_RESOLUTION=640x480
+CAMERA_FPS=15
+AUDIO_DEVICE_INDEX=0
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHANNELS=1
+DETECTION_THRESHOLD=0.5
+EMOTION_THRESHOLD=0.7
+EMOTION_MODEL=basic_emotion
+EMOTION_HISTORY_ENABLED=true
+EMOTION_HISTORY_SAVE_INTERVAL=300
+STATE_DETECTION_ENABLED=${STATE_DETECTION}
+LOG_LEVEL=INFO
+WEB_HOST=0.0.0.0
+WEB_PORT=5000
+EOF
+    echo "Created default .env configuration file."
 fi
 
-# Create start script
-echo -e "\n${YELLOW}Creating start script...${NC}"
-cat > start.sh << 'EOF'
-#!/bin/bash
-source venv/bin/activate
-export PYTHONPATH=.
-export EVENTLET_NO_GREENDNS=yes
-python main.py --mode normal
-EOF
+# Handle specific installation modes
+if [ "$INSTALL" = true ]; then
+    echo "Installing Baby Monitor System..."
+    if [ "$STATE_DETECTION" = false ]; then
+        python3 setup.py --install --no-gui --no-state-detection
+    else
+        python3 setup.py --install --no-gui
+    fi
+elif [ "$MODELS" = true ]; then
+    echo "Managing models..."
+    python3 setup.py --models --no-gui
+elif [ "$FIX" = true ]; then
+    echo "Fixing common issues..."
+    python3 setup.py --fix --no-gui
+elif [ "$CONFIG" = true ]; then
+    echo "Configuring system..."
+    python3 setup.py --config --no-gui
+elif [ "$NO_GUI" = true ]; then
+    echo
+    echo "Choose what you want to do:"
+    echo "1. Install/reinstall the system"
+    echo "2. Manage models"
+    echo "3. Fix common issues"
+    echo "4. Configure system"
+    echo "5. Toggle state detection (currently: ${STATE_DETECTION})"
+    echo
+    read -p "Enter your choice (1-5): " MENU_CHOICE
+    
+    if [ "$MENU_CHOICE" = "1" ]; then
+        if [ "$STATE_DETECTION" = false ]; then
+            python3 setup.py --install --no-gui --no-state-detection
+        else
+            python3 setup.py --install --no-gui
+        fi
+    elif [ "$MENU_CHOICE" = "2" ]; then
+        python3 setup.py --models --no-gui
+    elif [ "$MENU_CHOICE" = "3" ]; then
+        python3 setup.py --fix --no-gui
+    elif [ "$MENU_CHOICE" = "4" ]; then
+        python3 setup.py --config --no-gui
+    elif [ "$MENU_CHOICE" = "5" ]; then
+        # Toggle state detection
+        if [ "$STATE_DETECTION" = true ]; then
+            STATE_DETECTION=false
+            echo "State detection disabled."
+        else
+            STATE_DETECTION=true
+            echo "State detection enabled."
+        fi
+        
+        # Update .env file
+        if [ -f ".env" ]; then
+            if grep -q "STATE_DETECTION_ENABLED=" .env; then
+                sed -i "s/STATE_DETECTION_ENABLED=.*/STATE_DETECTION_ENABLED=${STATE_DETECTION}/" .env
+            else
+                echo "STATE_DETECTION_ENABLED=${STATE_DETECTION}" >> .env
+            fi
+            echo "Updated .env configuration."
+        fi
+    else
+        echo "Invalid choice."
+    fi
+else
+    # No specific mode - launch GUI if available
+    python3 setup.py
+fi
 
-chmod +x start.sh
-chmod +x main.py
+# Check for successful installation
+if [ -d "src/babymonitor" ] && [ -f "run_babymonitor.sh" ]; then
+    echo
+    echo "Baby Monitor has been successfully installed!"
+    echo
+    echo "To launch the application, run:"
+    echo "  ./run_babymonitor.sh"
+    echo
+    
+    # Make the launch script executable
+    chmod +x run_babymonitor.sh
+    
+    # Display information about state detection
+    if [ "$STATE_DETECTION" = true ]; then
+        echo
+        echo "Person State Detection is ENABLED"
+        echo "The system will identify whether people are seated, lying, moving, or standing"
+        echo "View these states in the metrics dashboard"
+    else
+        echo
+        echo "Note: Person State Detection is disabled"
+        echo "To enable it, edit .env and set STATE_DETECTION_ENABLED=true"
+    fi
+fi
 
-echo -e "\n${GREEN}Installation completed successfully!${NC}"
+# Display team information
 echo
-echo "You can now start the Baby Monitor System using:"
-echo "1. Run: python main.py --mode normal"
-echo "2. Or use the generated start script: ./start.sh"
-echo "3. Open http://localhost:5000 in your web browser"
+echo "======================================"
+echo "  Baby Monitor System Developed By:"
+echo "======================================"
+echo "• JunHong: Backend Processing & Client Logic"
+echo "• Darrel: Dashboard Frontend"
+echo "• Ashraf: Datasets & Model Architecture" 
+echo "• Xuan Yu: Specialized Datasets & Training"
+echo "• Javin: Camera Detection System"
+echo "======================================"
+
+# Deactivate virtual environment
+deactivate
+
 echo
-echo "For more information, see README.md" 
+echo "Installation process completed."
+echo
+read -p "Press Enter to exit..." 

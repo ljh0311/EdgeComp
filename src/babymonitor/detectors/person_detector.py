@@ -57,6 +57,13 @@ class PersonDetector(BaseDetector):
         self.keep_history = keep_history
         self.max_history = max_history
         
+        # For state detection
+        self.prev_bboxes = []
+        self.state_history = []
+        self.state_buffer_size = 5
+        self.movement_threshold = 20  # Pixels movement to consider as moving
+        self.min_state_confidence = 0.6  # Minimum confidence to report a state
+        
         # Default model path if none provided
         if model_path is None:
             # Look for model in standard locations
@@ -173,6 +180,9 @@ class PersonDetector(BaseDetector):
                 - person_detected (bool): Whether a person was detected
                 - confidence (float): Confidence score of the detection
                 - detections (list): List of detection information including bounding boxes
+                - person_state (str): Detected state of the person (seated, lying, moving, standing)
+                - state_confidence (float): Confidence score of the state detection
+                - movement_level (float): Estimated movement level (0-1 scale)
         """
         # Check if frame is valid
         if frame is None or frame.size == 0:
@@ -180,7 +190,10 @@ class PersonDetector(BaseDetector):
             return {
                 'person_detected': False,
                 'confidence': 0.0,
-                'detections': []
+                'detections': [],
+                'person_state': 'unknown',
+                'state_confidence': 0.0,
+                'movement_level': 0.0
             }
             
         # Initialize response
@@ -189,7 +202,10 @@ class PersonDetector(BaseDetector):
             'confidence': 0.0,
             'detections': [],
             'processing_time': 0.0,
-            'detection_type': 'none'
+            'detection_type': 'none',
+            'person_state': 'unknown',
+            'state_confidence': 0.0,
+            'movement_level': 0.0
         }
 
         start_time = time.time()
@@ -281,6 +297,20 @@ class PersonDetector(BaseDetector):
                         # Trim history if needed
                         if len(self.detection_history) > self.max_history:
                             self.detection_history.pop(0)
+                    
+                    # Determine person state
+                    state_result = self.detect_person_state(frame, person_boxes)
+                    result['person_state'] = state_result['state']
+                    result['state_confidence'] = state_result['confidence']
+                    result['movement_level'] = state_result['movement_level']
+                    
+                    # Log state if it's determined with high confidence
+                    if state_result['confidence'] > 0.7:
+                        self.logger.info(
+                            f"Person state detected: {state_result['state']} "
+                            f"(confidence: {state_result['confidence']:.2f}, "
+                            f"movement: {state_result['movement_level']:.2f})"
+                        )
         except Exception as e:
             self.logger.error(f"Error detecting persons: {str(e)}")
             import traceback
@@ -484,3 +514,265 @@ class PersonDetector(BaseDetector):
                 "status": "error",
                 "message": f"Error reloading model: {str(e)}"
             }
+
+    def detect_person_state(self, frame: np.ndarray, bboxes: List[Dict]) -> Dict[str, Any]:
+        """Detect the state of a person based on bounding box analysis and motion tracking.
+
+        Args:
+            frame: Current frame
+            bboxes: List of bounding box dictionaries from process_frame method
+
+        Returns:
+            Dict containing person state information:
+                - state: 'seated', 'lying', 'moving', 'standing', or 'unknown'
+                - confidence: Confidence value for the state detection
+                - states: List of all detected states for each person
+                - movement_level: Estimated movement level (0-1 scale)
+        """
+        if not bboxes:
+            # No person detected, so no state to report
+            return {
+                'state': 'unknown',
+                'confidence': 0.0,
+                'states': [],
+                'movement_level': 0.0
+            }
+
+        # Extract just the bounding box coordinates for processing
+        current_boxes = []
+        for bbox_dict in bboxes:
+            if 'bbox' in bbox_dict:
+                current_boxes.append(bbox_dict['bbox'])  # [x1, y1, x2, y2]
+
+        if not current_boxes:
+            return {
+                'state': 'unknown',
+                'confidence': 0.0,
+                'states': [],
+                'movement_level': 0.0
+            }
+
+        # Convert to numpy array
+        current_boxes = np.array(current_boxes)
+        
+        # Calculate width and height ratios of bounding boxes
+        widths = current_boxes[:, 2] - current_boxes[:, 0]
+        heights = current_boxes[:, 3] - current_boxes[:, 1]
+        ratios = widths / heights
+        
+        # Calculate centers of bounding boxes
+        centers_x = (current_boxes[:, 0] + current_boxes[:, 2]) / 2
+        centers_y = (current_boxes[:, 1] + current_boxes[:, 3]) / 2
+        centers = np.column_stack((centers_x, centers_y))
+        
+        # Determine movement
+        movement_detected = False
+        movement_vectors = []
+        movement_level = 0.0
+        person_states = []
+        
+        # Check if we have previous bounding boxes for movement analysis
+        if hasattr(self, 'prev_bboxes') and len(self.prev_bboxes) > 0:
+            # Match current bounding boxes with previous ones (simple approach)
+            for i, current_box in enumerate(current_boxes):
+                # Find the closest previous box
+                min_dist = float('inf')
+                closest_idx = -1
+                
+                for j, prev_box in enumerate(self.prev_bboxes):
+                    # Calculate center of previous box
+                    prev_center_x = (prev_box[0] + prev_box[2]) / 2
+                    prev_center_y = (prev_box[1] + prev_box[3]) / 2
+                    
+                    # Calculate distance between centers
+                    dist = np.sqrt((centers_x[i] - prev_center_x) ** 2 + (centers_y[i] - prev_center_y) ** 2)
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_idx = j
+                
+                # Check if there's a close enough match
+                if closest_idx != -1 and min_dist < 100:  # 100 pixel threshold
+                    # Calculate movement vector
+                    movement_x = centers_x[i] - (self.prev_bboxes[closest_idx][0] + self.prev_bboxes[closest_idx][2]) / 2
+                    movement_y = centers_y[i] - (self.prev_bboxes[closest_idx][1] + self.prev_bboxes[closest_idx][3]) / 2
+                    movement_vectors.append((movement_x, movement_y))
+                    
+                    # Check if movement exceeds threshold
+                    movement_magnitude = np.sqrt(movement_x ** 2 + movement_y ** 2)
+                    if movement_magnitude > self.movement_threshold:
+                        movement_detected = True
+                        
+                    # Scale movement level (0-1)
+                    movement_level = min(1.0, movement_magnitude / 100.0)
+        
+        # Analyze state based on bounding box shape and movement
+        for i, ratio in enumerate(ratios):
+            if movement_detected:
+                person_states.append('moving')
+            else:
+                # Determine state based on aspect ratio
+                if ratio < 0.5:  # Very tall bounding box
+                    person_states.append('standing')
+                elif ratio > 1.8:  # Very wide bounding box
+                    person_states.append('lying')
+                elif 0.5 <= ratio <= 1.2:  # More square-ish
+                    person_states.append('seated')
+                else:
+                    person_states.append('standing')  # Default
+        
+        # Calculate the most common state
+        if person_states:
+            from collections import Counter
+            state_count = Counter(person_states)
+            most_common_state, count = state_count.most_common(1)[0]
+            state_confidence = count / len(person_states)
+        else:
+            most_common_state = 'unknown'
+            state_confidence = 0.0
+            
+        # Store current boxes as previous for next frame
+        self.prev_bboxes = current_boxes
+        
+        # Store state in history
+        self.state_history.append(most_common_state)
+        if len(self.state_history) > self.state_buffer_size:
+            self.state_history.pop(0)
+        
+        # Smooth state by considering history
+        if len(self.state_history) > 0:
+            history_count = Counter(self.state_history)
+            smoothed_state, count = history_count.most_common(1)[0]
+            smoothed_confidence = count / len(self.state_history)
+            
+            # Only override if we have enough confidence in history
+            if smoothed_confidence > 0.6:
+                most_common_state = smoothed_state
+                state_confidence = smoothed_confidence
+        
+        # Return the result
+        return {
+            'state': most_common_state,
+            'confidence': state_confidence,
+            'states': person_states,
+            'movement_level': movement_level
+        }
+
+    def draw_state_info(self, frame, result):
+        """Draw person state information on the frame.
+        
+        Args:
+            frame: Frame to draw on
+            result: Result dictionary from process_frame
+            
+        Returns:
+            Frame with state information drawn on it
+        """
+        if frame is None or not result.get('person_detected', False):
+            return frame
+            
+        # Create a copy of the frame to avoid modifying the original
+        draw_frame = frame.copy()
+        
+        # Get state information
+        state = result.get('person_state', 'unknown')
+        confidence = result.get('state_confidence', 0.0)
+        movement_level = result.get('movement_level', 0.0)
+        
+        # Define colors for different states
+        state_colors = {
+            'seated': (0, 255, 0),    # Green
+            'lying': (255, 165, 0),   # Orange
+            'moving': (0, 0, 255),    # Red
+            'standing': (255, 0, 0),  # Blue
+            'unknown': (128, 128, 128)  # Gray
+        }
+        
+        # Get color for current state
+        color = state_colors.get(state, (128, 128, 128))
+        
+        # Draw state text in top-left corner
+        cv2.putText(
+            draw_frame,
+            f"State: {state.upper()} ({confidence:.2f})",
+            (20, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            color,
+            2,
+            cv2.LINE_AA
+        )
+        
+        # Draw movement level bar
+        bar_length = 150
+        bar_height = 20
+        filled_length = int(bar_length * movement_level)
+        
+        # Draw empty bar
+        cv2.rectangle(
+            draw_frame,
+            (20, 80),
+            (20 + bar_length, 80 + bar_height),
+            (128, 128, 128),
+            1
+        )
+        
+        # Draw filled portion of bar
+        cv2.rectangle(
+            draw_frame,
+            (20, 80),
+            (20 + filled_length, 80 + bar_height),
+            (0, 0, 255) if movement_level > 0.5 else (0, 255, 0),
+            -1
+        )
+        
+        # Draw text label for movement bar
+        cv2.putText(
+            draw_frame,
+            f"Movement: {movement_level:.2f}",
+            (20, 115),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA
+        )
+        
+        # Draw state information on each bounding box
+        for detection in result.get('detections', []):
+            if 'bbox' in detection:
+                bbox = detection['bbox']
+                x1, y1, x2, y2 = bbox
+                
+                # Draw a colored label based on state
+                label = f"{state}"
+                
+                # Draw the label at the top of the bounding box
+                cv2.putText(
+                    draw_frame,
+                    label,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    2,
+                    cv2.LINE_AA
+                )
+                
+                # If moving, draw arrow indicating movement
+                if state == 'moving' and movement_level > 0.2:
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
+                    arrow_length = int(movement_level * 50)
+                    
+                    # Draw arrow (simplified movement vector)
+                    cv2.arrowedLine(
+                        draw_frame,
+                        (center_x, center_y),
+                        (center_x, center_y - arrow_length),
+                        (0, 0, 255),
+                        2,
+                        tipLength=0.3
+                    )
+        
+        return draw_frame

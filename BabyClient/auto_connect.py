@@ -3,7 +3,8 @@
 Baby Monitor Client Auto-Connect Tool
 
 This script helps to automatically detect and connect to a baby monitor server
-on the local network. It scans common IP addresses and ports to find the server.
+on the local network. It scans common IP addresses and ports to find the server
+and MQTT broker.
 
 Usage:
     python auto_connect.py
@@ -18,6 +19,7 @@ import subprocess
 import ipaddress
 import platform
 from queue import Queue
+import paho.mqtt.client as mqtt
 
 def get_local_ip():
     """Get the local IP address of this machine"""
@@ -42,19 +44,35 @@ def is_port_open(ip, port, timeout=0.5):
     except:
         return False
 
-def verify_baby_monitor(ip, port, timeout=1):
+def verify_mqtt_broker(ip, port=1883, timeout=1):
+    """Verify if the IP/port combination is an MQTT broker"""
+    try:
+        client = mqtt.Client()
+        client.connect_async(ip, port)
+        client.loop_start()
+        time.sleep(timeout)
+        if client.is_connected():
+            client.loop_stop()
+            client.disconnect()
+            return True
+        client.loop_stop()
+        return False
+    except:
+        return False
+
+def verify_baby_monitor(ip, port=5000, timeout=1):
     """Verify if the IP/port combination is a baby monitor server"""
     try:
-        # Try to connect to the /api/system_info endpoint
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((ip, port))
-        sock.close()
-        
-        if result == 0:
-            # Further verify by checking if we can connect to a known endpoint
-            # This is a very basic check that just verifies the port is open
-            return True
+        # Check MQTT first as it's the primary protocol
+        if verify_mqtt_broker(ip):
+            # If MQTT is available, check HTTP as backup
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((ip, port))
+            sock.close()
+            
+            # Return True if both MQTT and HTTP are available
+            return result == 0
         return False
     except:
         return False
@@ -69,10 +87,11 @@ def scan_network(base_ip, port=5000, result_queue=None):
     common_ips = [f"{network_prefix}.1", f"{network_prefix}.100", f"{network_prefix}.101", base_ip]
     
     for ip in common_ips:
-        if verify_baby_monitor(ip, port):
-            if result_queue:
-                result_queue.put((ip, port))
-            return ip, port
+        if verify_mqtt_broker(ip):  # Check MQTT first
+            if verify_baby_monitor(ip, port):  # Then verify HTTP backup
+                if result_queue:
+                    result_queue.put((ip, port, 1883))
+                return ip, port, 1883
     
     # Scan the entire subnet (1-254)
     for i in range(1, 255):
@@ -80,28 +99,31 @@ def scan_network(base_ip, port=5000, result_queue=None):
         if ip in common_ips:
             continue  # Already checked
             
-        if verify_baby_monitor(ip, port):
-            if result_queue:
-                result_queue.put((ip, port))
-            return ip, port
+        if verify_mqtt_broker(ip):  # Check MQTT first
+            if verify_baby_monitor(ip, port):  # Then verify HTTP backup
+                if result_queue:
+                    result_queue.put((ip, port, 1883))
+                return ip, port, 1883
     
-    return None, None
+    return None, None, None
 
-def start_client(ip, port):
-    """Start the baby monitor client with the given IP and port"""
-    print(f"Starting Baby Monitor Client with server at {ip}:{port}")
+def start_client(ip, port, mqtt_port):
+    """Start the baby monitor client with the given IP and ports"""
+    print(f"Starting Baby Monitor Client with server at {ip}:{port} (MQTT: {mqtt_port})")
     
     if platform.system() == "Windows":
         # Use pythonw.exe to avoid keeping the console window open
-        subprocess.Popen(f"python baby_client.py --host {ip} --port {port}")
+        subprocess.Popen(f"python baby_client.py --host {ip} --port {port} --mqtt-host {ip} --mqtt-port {mqtt_port}")
     else:
         # For non-Windows platforms
-        subprocess.Popen(["python", "baby_client.py", "--host", ip, "--port", port])
+        subprocess.Popen(["python", "baby_client.py", "--host", ip, "--port", str(port), 
+                         "--mqtt-host", ip, "--mqtt-port", str(mqtt_port)])
 
 def main():
     print("Baby Monitor Auto-Connect Tool")
     print("==============================")
     print("Scanning the network for baby monitor servers...")
+    print("Note: MQTT is the primary protocol, HTTP/Socket.IO will be used as fallback")
     
     # Get the local IP
     local_ip = get_local_ip()
@@ -123,8 +145,10 @@ def main():
             print(f"Scanning... ({int(time.time() - start_time)}s)", end='\r')
             
             if not result_queue.empty():
-                ip, port = result_queue.get()
-                print(f"\nFound baby monitor server at {ip}:{port}")
+                ip, port, mqtt_port = result_queue.get()
+                print(f"\nFound baby monitor server at {ip}")
+                print(f"MQTT broker port: {mqtt_port}")
+                print(f"HTTP fallback port: {port}")
                 server_found = True
                 break
                 
@@ -141,17 +165,26 @@ def main():
             
             if choice == "1":
                 ip = input("Enter server IP: ")
-                port_str = input("Enter server port (default 5000): ")
-                port = int(port_str) if port_str else 5000
-                start_client(ip, port)
+                mqtt_port_str = input("Enter MQTT port (default 1883): ")
+                http_port_str = input("Enter HTTP port (default 5000): ")
+                mqtt_port = int(mqtt_port_str) if mqtt_port_str else 1883
+                http_port = int(http_port_str) if http_port_str else 5000
+                
+                # Verify MQTT connection
+                if verify_mqtt_broker(ip, mqtt_port):
+                    print("MQTT connection verified")
+                else:
+                    print("Warning: MQTT connection failed, will try HTTP/Socket.IO")
+                
+                start_client(ip, http_port, mqtt_port)
             elif choice == "2":
-                start_client("192.168.1.100", 5000)
+                start_client("192.168.1.100", 5000, 1883)
             else:
                 print("Exiting...")
                 return
         else:
             # Start the client with the discovered server
-            start_client(ip, port)
+            start_client(ip, port, mqtt_port)
             
     except KeyboardInterrupt:
         print("\nScan cancelled. Exiting...")

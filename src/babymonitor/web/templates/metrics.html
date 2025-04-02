@@ -429,6 +429,53 @@
     font-size: 1rem;
     color: #aaa;
   }
+
+  /* Person State styling */
+  .person-states-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+  }
+
+  .state-item {
+    display: flex;
+    align-items: center;
+    background-color: #2d2d2d;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  .state-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+
+  .state-icon i {
+    font-size: 1.3rem;
+    color: white;
+  }
+
+  .state-info {
+    flex-grow: 1;
+  }
+
+  .state-label {
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+
+  .state-value {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: white;
+  }
 </style>
 {% endblock %}
 
@@ -753,6 +800,89 @@
           </div>
         </div>
       </div>
+
+      <!-- Person States Section -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bi bi-activity"></i> Person State Analysis</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <!-- Person State Distribution -->
+            <div class="col-md-6">
+              <div class="metric-chart-container">
+                <h6><i class="bi bi-pie-chart"></i> Person State Distribution</h6>
+                <canvas id="personStateChart"></canvas>
+              </div>
+            </div>
+            <!-- Current State Breakdown -->
+            <div class="col-md-6">
+              <h6 class="text-muted mb-3">Current State Breakdown</h6>
+              <div class="person-states-container mt-3">
+                <div class="state-item">
+                  <div class="state-icon bg-success">
+                    <i class="bi bi-person-standing"></i>
+                  </div>
+                  <div class="state-info">
+                    <div class="state-label">Seated</div>
+                    <div class="state-value" id="seatedCount">0</div>
+                  </div>
+                </div>
+                <div class="state-item">
+                  <div class="state-icon bg-warning">
+                    <i class="bi bi-person"></i>
+                  </div>
+                  <div class="state-info">
+                    <div class="state-label">Lying</div>
+                    <div class="state-value" id="lyingCount">0</div>
+                  </div>
+                </div>
+                <div class="state-item">
+                  <div class="state-icon bg-danger">
+                    <i class="bi bi-person-arms-up"></i>
+                  </div>
+                  <div class="state-info">
+                    <div class="state-label">Moving</div>
+                    <div class="state-value" id="movingCount">0</div>
+                  </div>
+                </div>
+                <div class="state-item">
+                  <div class="state-icon bg-primary">
+                    <i class="bi bi-person-fill"></i>
+                  </div>
+                  <div class="state-info">
+                    <div class="state-label">Standing</div>
+                    <div class="state-value" id="standingCount">0</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- State History Table -->
+          <div class="mt-4">
+            <h6 class="text-muted mb-3">Person State History</h6>
+            <div class="table-responsive">
+              <table class="table table-dark table-hover">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Person ID</th>
+                    <th>State</th>
+                    <th>Duration</th>
+                  </tr>
+                </thead>
+                <tbody id="stateHistoryTable">
+                  <!-- State history will be populated by JavaScript -->
+                  <tr>
+                    <td colspan="4" class="text-center">No state history data available yet</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- System Info and Stats -->
@@ -947,5 +1077,193 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 {% endif %}
+
+// Initialize person state chart
+let personStateChart;
+let stateHistoryData = [];
+const stateColors = {
+  'seated': '#28a745',    // Green
+  'lying': '#ffc107',     // Yellow
+  'moving': '#dc3545',    // Red
+  'standing': '#0d6efd',  // Blue
+  'unknown': '#6c757d'    // Gray
+};
+
+// Function to create or update the person state chart
+function updatePersonStateChart(data) {
+  const ctx = document.getElementById('personStateChart').getContext('2d');
+  
+  if (personStateChart) {
+    // Update existing chart
+    personStateChart.data.labels = Object.keys(data);
+    personStateChart.data.datasets[0].data = Object.values(data);
+    personStateChart.data.datasets[0].backgroundColor = Object.keys(data).map(state => stateColors[state] || '#6c757d');
+    personStateChart.update();
+  } else {
+    // Create new chart
+    personStateChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(data),
+        datasets: [{
+          data: Object.values(data),
+          backgroundColor: Object.keys(data).map(state => stateColors[state] || '#6c757d'),
+          borderWidth: 1,
+          borderColor: '#444'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              color: '#aaa',
+              font: {
+                size: 12
+              }
+            }
+          },
+          tooltip: {
+            callbacks: {
+              title: function(tooltipItems) {
+                return tooltipItems[0].label;
+              },
+              label: function(context) {
+                const label = context.label || '';
+                const value = context.raw || 0;
+                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                const percentage = Math.round((value / total) * 100);
+                return `${label}: ${value} (${percentage}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+}
+
+// Function to update state counts
+function updateStateCounts(stateCounts) {
+  document.getElementById('seatedCount').textContent = stateCounts.seated || 0;
+  document.getElementById('lyingCount').textContent = stateCounts.lying || 0;
+  document.getElementById('movingCount').textContent = stateCounts.moving || 0;
+  document.getElementById('standingCount').textContent = stateCounts.standing || 0;
+}
+
+// Function to add a state to history
+function addStateToHistory(personId, state, timestamp) {
+  // Find if this person already has an entry
+  const existingIndex = stateHistoryData.findIndex(entry => 
+    entry.personId === personId && entry.state === state && !entry.endTime);
+  
+  const now = timestamp || new Date();
+  
+  if (existingIndex !== -1) {
+    // Update duration of existing entry
+    const entry = stateHistoryData[existingIndex];
+    entry.duration = (now - new Date(entry.startTime)) / 1000; // seconds
+    return;
+  }
+  
+  // Close any open entries for this person
+  const openEntries = stateHistoryData.filter(entry => 
+    entry.personId === personId && !entry.endTime);
+  
+  openEntries.forEach(entry => {
+    entry.endTime = now;
+    entry.duration = (new Date(entry.endTime) - new Date(entry.startTime)) / 1000; // seconds
+  });
+  
+  // Add new entry
+  stateHistoryData.push({
+    personId,
+    state,
+    startTime: now,
+    endTime: null,
+    duration: 0
+  });
+  
+  // Sort by start time (newest first)
+  stateHistoryData.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+  
+  // Limit history to 30 entries
+  if (stateHistoryData.length > 30) {
+    stateHistoryData = stateHistoryData.slice(0, 30);
+  }
+  
+  // Update table
+  updateStateHistoryTable();
+}
+
+// Function to update state history table
+function updateStateHistoryTable() {
+  const tableBody = document.getElementById('stateHistoryTable');
+  if (!tableBody) return;
+  
+  // Clear table
+  tableBody.innerHTML = '';
+  
+  // Add entries
+  if (stateHistoryData.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="4" class="text-center">No state history data available yet</td></tr>';
+    return;
+  }
+  
+  stateHistoryData.forEach(entry => {
+    const row = document.createElement('tr');
+    
+    // Format time
+    const timeStr = new Date(entry.startTime).toLocaleTimeString();
+    
+    // Format duration
+    let durationStr;
+    if (entry.duration < 60) {
+      durationStr = `${Math.round(entry.duration)}s`;
+    } else {
+      const minutes = Math.floor(entry.duration / 60);
+      const seconds = Math.round(entry.duration % 60);
+      durationStr = `${minutes}m ${seconds}s`;
+    }
+    
+    // Set row style based on state
+    row.className = entry.endTime ? '' : 'table-active';
+    
+    row.innerHTML = `
+      <td>${timeStr}</td>
+      <td>Person ${entry.personId}</td>
+      <td><span class="badge" style="background-color: ${stateColors[entry.state] || '#6c757d'}">${entry.state.charAt(0).toUpperCase() + entry.state.slice(1)}</span></td>
+      <td>${durationStr}</td>
+    `;
+    
+    tableBody.appendChild(row);
+  });
+}
+
+// Connect to socket.io for real-time updates
+document.addEventListener('DOMContentLoaded', function() {
+  // Hook into the existing metrics update
+  const originalUpdateSystemMetrics = updateSystemMetrics;
+  
+  window.updateSystemMetrics = function(metrics) {
+    // Call the original function first
+    originalUpdateSystemMetrics(metrics);
+    
+    // Process person state data
+    if (metrics.state_counts) {
+      updatePersonStateChart(metrics.state_counts);
+      updateStateCounts(metrics.state_counts);
+    }
+    
+    // Add to state history if this is a new state
+    if (metrics.person_states && metrics.person_states.length > 0) {
+      metrics.person_states.forEach((state, index) => {
+        addStateToHistory(index + 1, state);
+      });
+    }
+  };
+});
 </script>
 {% endblock %}

@@ -249,88 +249,64 @@ class SimpleBabyMonitorWeb:
         
         @self.app.route('/api/metrics')
         def api_metrics():
-            """API endpoint for metrics"""
-            # Get time range from query parameter
-            time_range = request.args.get('time_range', '1h')
+            """API endpoint for getting current metrics."""
+            # Get current metrics
+            metrics = self.metrics.copy()
             
-            # Get emotion history from detector if available
-            emotion_history = {}
-            emotion_percentages = {}
-            emotion_timeline = []
-            supported_emotions = []
+            # Calculate uptime
+            uptime_seconds = time.time() - self.start_time
+            metrics['uptime_seconds'] = uptime_seconds
+            metrics['uptime_formatted'] = self._format_uptime(uptime_seconds)
             
-            if self.emotion_detector and hasattr(self.emotion_detector, 'get_emotion_history'):
-                try:
-                    history_data = self.emotion_detector.get_emotion_history(time_range)
-                    emotion_percentages = history_data.get('percentages', {})
-                    emotion_timeline = history_data.get('emotions', [])
-                    supported_emotions = self.emotion_detector.emotions
-                except Exception as e:
-                    logger.error(f"Error getting emotion history: {str(e)}")
-            else:
-                # Use current simple metrics as fallback
-                if hasattr(self, 'metrics') and 'history' in self.metrics:
-                    emotion_counts = self.metrics['history'].get('emotions', {})
-                    total = sum(emotion_counts.values()) or 1  # Avoid division by zero
-                    emotion_percentages = {k: (v / total * 100) for k, v in emotion_counts.items()}
+            # Add system resources
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            metrics['cpu_usage'] = cpu_percent
+            metrics['memory_usage'] = memory.percent
+            metrics['memory_available'] = memory.available / (1024 * 1024)  # MB
+            metrics['memory_total'] = memory.total / (1024 * 1024)  # MB
             
-            # Enhanced metrics structure to match what the metrics.js expects
-            metrics_data = {
-                'current': {
-                    'fps': self.metrics['current']['fps'],
-                    'detections': self.metrics['current'].get('detections', 0),
-                    'emotion': self.metrics['current'].get('emotion', 'unknown'),
-                    'emotion_confidence': self.metrics['current'].get('emotion_confidence', 0.0),
-                },
-                'history': {
-                    'emotions': emotion_percentages
-                },
-                'emotion_timeline': emotion_timeline,
-                'supported_emotions': supported_emotions,
-                'detection_types': self.metrics['detection_types'],
-                'total_detections': self.metrics.get('total_detections', 0),
-                # Add YOLOv8 specific metrics
-                'detection_confidence_avg': 0.85,  # Example value, adjust based on actual data
-                'peak_detections': max(1, self.metrics['current'].get('detections', 0)),  # Default to at least 1
-                'frame_skip': 2,  # Frame skip rate from person detector
-                'process_resolution': '640x480',  # Processing resolution
-                'confidence_threshold': 0.5,  # Detection confidence threshold
-                'detection_history_size': 5,  # History size for detection smoothing
-                'detector_model': 'YOLOv8n'  # Detector model name
-            }
-            
-            # If person detector is available, get real values
-            if self.person_detector:
-                metrics_data['frame_skip'] = getattr(self.person_detector, 'frame_skip', 2)
-                metrics_data['confidence_threshold'] = getattr(self.person_detector, 'threshold', 0.5)
-                metrics_data['detection_history_size'] = getattr(self.person_detector, 'max_history_size', 5)
+            # Add emotion history summary if available
+            if self.emotion_history:
+                # Get the last 10 entries (or fewer if not available)
+                recent_history = self.emotion_history[-10:]
+                emotion_counts = {}
                 
-                # Get process resolution if available
-                process_res = getattr(self.person_detector, 'process_resolution', None)
-                if process_res and isinstance(process_res, tuple) and len(process_res) == 2:
-                    metrics_data['process_resolution'] = f"{process_res[0]}x{process_res[1]}"
-                    
-                # Calculate confidence average from detection history if available
-                detection_history = getattr(self.person_detector, 'detection_history', [])
-                if detection_history and hasattr(self.person_detector, 'last_result') and self.person_detector.last_result:
-                    detections = self.person_detector.last_result.get('detections', [])
-                    if detections:
-                        confidence_sum = sum(d.get('confidence', 0) for d in detections)
-                        if len(detections) > 0:
-                            metrics_data['detection_confidence_avg'] = confidence_sum / len(detections)
-                            
-            # Add model info if emotion detector is available
-            if self.emotion_detector:
-                metrics_data['emotion_model'] = {
-                    'id': getattr(self.emotion_detector, 'model_id', 'unknown'),
-                    'name': getattr(self.emotion_detector, 'model_info', {}).get('name', 'Unknown Model'),
-                    'emotions': getattr(self.emotion_detector, 'emotions', ['unknown']),
-                }
+                for entry in recent_history:
+                    emotion = entry.get('emotion', 'unknown')
+                    if emotion in emotion_counts:
+                        emotion_counts[emotion] += 1
+                    else:
+                        emotion_counts[emotion] = 1
                 
-            # Add recent emotion log entries
-            metrics_data['emotion_log'] = self.emotion_log[-10:]  # Last 10 entries
+                metrics['recent_emotions'] = emotion_counts
+                
+                # Calculate average confidence of recent emotions
+                confidences = [entry.get('confidence', 0) for entry in recent_history if 'confidence' in entry]
+                if confidences:
+                    metrics['avg_emotion_confidence'] = sum(confidences) / len(confidences)
+                else:
+                    metrics['avg_emotion_confidence'] = 0
             
-            return jsonify(metrics_data)
+            # Add person detection summaries
+            if 'person_states' in metrics and metrics['person_states']:
+                # Add count of each state
+                state_counts = {}
+                for state in metrics['person_states']:
+                    if state in state_counts:
+                        state_counts[state] += 1
+                    else:
+                        state_counts[state] = 1
+                
+                metrics['state_counts'] = state_counts
+                
+                # Determine most common state
+                if state_counts:
+                    most_common_state = max(state_counts.items(), key=lambda x: x[1])[0]
+                    metrics['most_common_state'] = most_common_state
+            
+            # Return metrics as JSON
+            return jsonify(self._make_json_serializable(metrics))
         
         @self.app.route('/api/emotion_history')
         def api_emotion_history():
@@ -656,47 +632,43 @@ class SimpleBabyMonitorWeb:
             self.emotion_log = self.emotion_log[-self.max_log_entries:]
     
     def _process_frames(self):
-        """Process frames from the camera and update the frame buffer."""
-        self.logger.info("Starting frame processing")
-        frame_counter = 0
-        last_fps_time = time.time()
-        fps = 0
-        
+        """Background thread for processing frames from camera."""
         try:
-            while self.running and (not self.stop_event or not self.stop_event.is_set()):
-                # Check if camera is available
-                if not self.camera or not self.camera.is_opened():
-                    self.logger.warning("Camera not available, sleeping...")
-                    eventlet.sleep(1)
-                    continue
-                
+            # Camera frame processing loop
+            self.logger.info("Starting frame processing")
+            
+            frame_counter = 0
+            last_fps_time = time.time()
+            
+            # Initialize person variables
+            person_detected = False
+            person_confidence = 0.0
+            bounding_boxes = []
+            
+            while not self.stop_event.is_set():
                 try:
-                    # Read a frame from the camera
-                    ret, frame = self.camera.read()
-                    if not ret or frame is None:
-                        self.logger.warning("Failed to read frame from camera")
-                        eventlet.sleep(0.1)
-                        continue
+                    # Acquire frame from camera
+                    if self.camera:
+                        frame = self.camera.get_frame()
+                        if frame is None or frame.size == 0:
+                            self.logger.warning("Received empty frame, waiting for next frame")
+                            eventlet.sleep(0.1)
+                            continue
+                    else:
+                        # Generate a placeholder frame if no camera available
+                        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(frame, "No Camera Available", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                     
-                    # Resize frame if needed
-                    if self.resize_frame and self.max_width and frame.shape[1] > self.max_width:
-                        scale = self.max_width / frame.shape[1]
-                        width = int(frame.shape[1] * scale)
-                        height = int(frame.shape[0] * scale)
-                        frame = cv2.resize(frame, (width, height))
-                    
-                    # Process frame with person detector
-                    person_detected = False
-                    person_confidence = 0.0
-                    bounding_boxes = []
-                    processing_result = {}
-                    
-                    # Make a copy of the frame for display
+                    # Create a copy of the frame for display
                     display_frame = frame.copy()
                     
+                    # Process frame with detectors
                     if self.person_detector:
-                        # Process with person detector
                         try:
+                            # Reset the bounding boxes array for new frame
+                            bounding_boxes = []
+                            
+                            # Process frame with person detector
                             processing_result = self.person_detector.process_frame(frame)
                             
                             # Get detection results
@@ -704,24 +676,54 @@ class SimpleBabyMonitorWeb:
                             person_confidence = processing_result.get('confidence', 0.0)
                             detections = processing_result.get('detections', [])
                             
-                            # Extract bounding boxes
-                            for detection in detections:
-                                if 'bbox' in detection:
-                                    # Format is [x1, y1, x2, y2]
-                                    bbox = detection['bbox']
-                                    conf = detection.get('confidence', 0.0)
-                                    bounding_boxes.append((bbox, conf))
-                            
+                            # Extract bounding boxes and get state information
+                            if detections:
+                                # Get person state information
+                                state_results = self.person_detector.detect_person_state(frame, detections)
+                                person_states = state_results.get('states', [])
+                                
+                                # Process each detection
+                                for idx, detection in enumerate(detections):
+                                    if 'bbox' in detection:
+                                        # Format is [x1, y1, x2, y2]
+                                        bbox = detection['bbox']
+                                        conf = detection.get('confidence', 0.0)
+                                        
+                                        # Get state for this person (if available)
+                                        person_state = 'unknown'
+                                        if idx < len(person_states):
+                                            person_state = person_states[idx]
+                                        
+                                        # Store person number with the bounding box
+                                        bounding_boxes.append((bbox, conf, idx + 1, person_state))
+                        
+                            # Define colors for different states
+                            state_colors = {
+                                'seated': (0, 255, 0),    # Green
+                                'lying': (255, 165, 0),   # Orange
+                                'moving': (0, 0, 255),    # Red
+                                'standing': (255, 0, 0),  # Blue
+                                'unknown': (128, 128, 128)  # Gray
+                            }
+                                
                             # Draw bounding boxes on display frame
                             if bounding_boxes:
-                                for (bbox, conf) in bounding_boxes:
+                                for (bbox, conf, person_num, state) in bounding_boxes:
                                     x1, y1, x2, y2 = bbox
+                                    # Get color based on state
+                                    color = state_colors.get(state, (0, 255, 0))
+                                    
                                     # Draw rectangle
-                                    cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                                    # Draw confidence text
-                                    conf_text = f"{conf:.2f}"
-                                    cv2.putText(display_frame, conf_text, (x1, y1-10), 
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                                    cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
+                                    
+                                    # Draw person number and state
+                                    label = f"Person {person_num}: {state.capitalize()}"
+                                    cv2.putText(display_frame, label, (x1, y1-10), 
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                                            
+                                    # Draw confidence below
+                                    cv2.putText(display_frame, f"Conf: {conf:.2f}", (x1, y2+15), 
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                             elif person_detected:
                                 # If no bounding boxes but person detected, draw general indicator
                                 cv2.putText(display_frame, "Person Detected", (10, 30), 
@@ -729,10 +731,28 @@ class SimpleBabyMonitorWeb:
                         except Exception as e:
                             self.logger.error(f"Error processing frame with person detector: {str(e)}")
                     
-                    # Update metrics
+                    # Update metrics with person detection data
                     self.metrics['person_detected'] = person_detected
                     self.metrics['person_confidence'] = person_confidence
                     self.metrics['bounding_boxes'] = len(bounding_boxes)
+                    
+                    # Update metrics with state information if available
+                    if bounding_boxes:
+                        # Extract states from all detections
+                        states = [state for _, _, _, state in bounding_boxes]
+                        
+                        # Count instances of each state
+                        from collections import Counter
+                        state_count = Counter(states)
+                        
+                        # Store state counts in metrics
+                        self.metrics['person_states'] = states
+                        self.metrics['state_counts'] = {state: count for state, count in state_count.items()}
+                        
+                        # Get the most common state
+                        if state_count:
+                            most_common_state, _ = state_count.most_common(1)[0]
+                            self.metrics['primary_state'] = most_common_state
                     
                     # Add timestamp
                     current_time = time.strftime("%H:%M:%S")
@@ -787,6 +807,7 @@ class SimpleBabyMonitorWeb:
         person_detected = False
         person_confidence = 0.0
         bounding_boxes = []
+        person_states = []
         
         try:
             # Use the person detector
@@ -796,7 +817,7 @@ class SimpleBabyMonitorWeb:
                 # Process frame with person detector
                 detection_results = self.person_detector.process_frame(frame)
                 
-                    # Update metrics
+                # Update metrics
                 detection_time = time.time() - detection_start
                 metrics_update['detection_time'] = detection_time
                 
@@ -807,23 +828,41 @@ class SimpleBabyMonitorWeb:
                     
                     # Get bounding boxes if available
                     if 'detections' in detection_results and detection_results['detections']:
-                        for detection in detection_results['detections']:
+                        # Get person state information
+                        state_results = self.person_detector.detect_person_state(frame, detection_results['detections'])
+                        metrics_update['person_state'] = state_results.get('state', 'unknown')
+                        metrics_update['state_confidence'] = state_results.get('confidence', 0.0)
+                        metrics_update['movement_level'] = state_results.get('movement_level', 0.0)
+                        metrics_update['person_states'] = state_results.get('states', [])
+                        
+                        # Store states for each detection
+                        person_states = state_results.get('states', [])
+                        
+                        # Process each detection
+                        for idx, detection in enumerate(detection_results['detections']):
                             if 'bbox' in detection:
                                 # Store bounding box and confidence
                                 box = detection['bbox']  # [x1, y1, x2, y2]
                                 conf = detection.get('confidence', 0.0)
-                                bounding_boxes.append((box, conf))
-                
-                # Update metrics
-                metrics_update['person_detected'] = person_detected
-                metrics_update['person_confidence'] = person_confidence
-                self.logger.debug(f"Person detected: {person_detected}, confidence: {person_confidence:.2f}")
-                
-                # Log bounding boxes for debugging
-                if bounding_boxes:
-                    self.logger.debug(f"Found {len(bounding_boxes)} bounding boxes")
-                elif person_detected:
-                    self.logger.debug("Person detected but no bounding boxes returned")
+                                
+                                # Get state for this person (if available)
+                                person_state = 'unknown'
+                                if idx < len(person_states):
+                                    person_state = person_states[idx]
+                                    
+                                # Store person number with the bounding box
+                                bounding_boxes.append((box, conf, idx + 1, person_state))
+            
+            # Update metrics
+            metrics_update['person_detected'] = person_detected
+            metrics_update['person_confidence'] = person_confidence
+            self.logger.debug(f"Person detected: {person_detected}, confidence: {person_confidence:.2f}")
+            
+            # Log bounding boxes for debugging
+            if bounding_boxes:
+                self.logger.debug(f"Found {len(bounding_boxes)} bounding boxes")
+            elif person_detected:
+                self.logger.debug("Person detected but no bounding boxes returned")
         except Exception as e:
             self.logger.error(f"Error in person detection: {str(e)}")
             
@@ -844,7 +883,16 @@ class SimpleBabyMonitorWeb:
         if person_detected:
             # Draw specific bounding boxes if available
             if bounding_boxes:
-                for (box, conf) in bounding_boxes:
+                # Define colors for different states
+                state_colors = {
+                    'seated': (0, 255, 0),    # Green
+                    'lying': (255, 165, 0),   # Orange
+                    'moving': (0, 0, 255),    # Red
+                    'standing': (255, 0, 0),  # Blue
+                    'unknown': (128, 128, 128)  # Gray
+                }
+                
+                for idx, (box, conf, person_num, state) in enumerate(bounding_boxes):
                     # Scale box coordinates if frame was resized
                     if hasattr(self, 'resize_frame') and self.resize_frame and frame.shape[1] > self.max_width:
                         scale = self.max_width / frame.shape[1]
@@ -866,24 +914,39 @@ class SimpleBabyMonitorWeb:
                     else:
                         scaled_box = box
                         
-                    # Draw rectangle
+                    # Get color based on state
+                    color = state_colors.get(state, (0, 255, 0))
+                    
+                    # Draw rectangle with color based on state
                     cv2.rectangle(
                         display_frame,
                         (int(scaled_box[0]), int(scaled_box[1])),
                         (int(scaled_box[2]), int(scaled_box[3])),
-                        (0, 255, 0),
+                        color,
                         2
                     )
                     
-                    # Draw confidence text
+                    # Draw person number and state
+                    label = f"Person {person_num}: {state.capitalize()}"
                     cv2.putText(
                         display_frame,
-                        f"Person: {conf:.2f}",
+                        label,
                         (int(scaled_box[0]), int(scaled_box[1]) - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        (0, 255, 0),
+                        color,
                         2
+                    )
+                    
+                    # Draw confidence below
+                    cv2.putText(
+                        display_frame,
+                        f"Conf: {conf:.2f}",
+                        (int(scaled_box[0]), int(scaled_box[3]) + 15),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        color,
+                        1
                     )
             else:
                 # If no specific boxes but person detected, draw a general detection indicator

@@ -476,6 +476,47 @@
                 </div>
             </div>
         </div>
+
+        <!-- Settings Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card dashboard-card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-gear"></i> Alert Settings
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notificationsToggle" checked>
+                        <label class="form-check-label" for="notificationsToggle">
+                            Browser Notifications 
+                        </label>
+                        <small class="form-text text-muted d-block">Receive popup notifications when important events occur</small>
+                    </div>
+                    
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="audioAlertsToggle" checked>
+                        <label class="form-check-label" for="audioAlertsToggle">
+                            Sound Alerts
+                        </label>
+                        <small class="form-text text-muted d-block">Play sound when alerts are triggered</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="alertVolumeSlider" class="form-label">Alert Volume: <span id="alertVolumeValue">70%</span></label>
+                        <input type="range" class="form-range" id="alertVolumeSlider" min="10" max="100" value="70">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="alertThresholdSlider" class="form-label">Alert Threshold: <span id="alertThresholdValue">65%</span></label>
+                        <input type="range" class="form-range" id="alertThresholdSlider" min="50" max="90" value="65">
+                        <small class="form-text text-muted d-block">Adjust how sensitive alerts are (lower = more frequent alerts)</small>
+                    </div>
+                    
+                    <button class="btn btn-sm btn-outline-secondary" id="testAlertBtn">
+                        <i class="bi bi-volume-up"></i> Test Alert Sound
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -610,9 +651,10 @@
             
             // Find the dominant emotion
             const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b, [emotion, confidence])[0];
+            const dominantConfidence = averages[dominantEmotion] || confidence;
             
             // Update emotion overlay
-            updateEmotionOverlay(dominantEmotion, averages[dominantEmotion] || confidence);
+            updateEmotionOverlay(dominantEmotion, dominantConfidence);
             
             // Update progress bars with averages
             updateProgressBars(averages);
@@ -622,10 +664,46 @@
             const now = new Date();
             lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
             
-            // Add alert for crying if average confidence is high
-            if ((dominantEmotion === 'crying' || dominantEmotion === 'sad') && averages[dominantEmotion] > 0.7) {
-                addAlert('warning', 'Baby is crying with high confidence!');
-                addAlertToHistory('warning', 'Baby is crying with high confidence!');
+            // ALERT SYSTEM: Check for specific emotions that need alerts
+            // Get threshold from settings or use default
+            const alertThreshold = parseFloat(localStorage.getItem('alertThreshold') || 65) / 100;
+            let alertLevel = null;
+            let alertMessage = '';
+            
+            // Check for crying, sad, or angry emotions
+            if (dominantEmotion === 'crying' && dominantConfidence > alertThreshold) {
+                alertLevel = 'danger';
+                alertMessage = `Baby is crying with ${(dominantConfidence * 100).toFixed(1)}% confidence!`;
+                playAlertSound('high');
+            } else if (dominantEmotion === 'sad' && dominantConfidence > alertThreshold) {
+                alertLevel = 'warning';
+                alertMessage = `Baby appears sad with ${(dominantConfidence * 100).toFixed(1)}% confidence`;
+                playAlertSound('medium');
+            } else if (dominantEmotion === 'angry' && dominantConfidence > alertThreshold) {
+                alertLevel = 'warning';
+                alertMessage = `Baby appears angry with ${(dominantConfidence * 100).toFixed(1)}% confidence`;
+                playAlertSound('medium');
+            }
+            
+            // Display alert if needed
+            if (alertLevel) {
+                // Add to visual alerts
+                addAlert(alertLevel, alertMessage);
+                addAlertToHistory(alertLevel, alertMessage);
+                
+                // Send browser notification
+                sendBrowserNotification("Baby Monitor Alert", alertMessage);
+                
+                // Emit alert event to server for logging
+                if (socketConnected) {
+                    socket.emit('emotion_alert', {
+                        timestamp: new Date().toISOString(),
+                        emotion: dominantEmotion,
+                        confidence: dominantConfidence,
+                        message: alertMessage,
+                        level: alertLevel
+                    });
+                }
             }
             
             // Reset buffer
@@ -1134,6 +1212,179 @@
         
         // Replace the main video container with the grid
         mainContainer.parentNode.replaceChild(multiCameraLayout, mainContainer);
+    }
+
+    // Function to play alert sound
+    function playAlertSound(intensity) {
+        // Check if user has enabled audio alerts
+        const audioAlertsEnabled = localStorage.getItem('audioAlertsEnabled') !== 'false';
+        if (!audioAlertsEnabled) return;
+        
+        // Get volume from settings (default to 70%)
+        const volume = parseFloat(localStorage.getItem('alertVolume') || 70) / 100;
+        
+        let audioPath;
+        switch(intensity) {
+            case 'high':
+                audioPath = '/static/sounds/alert-high.mp3';
+                break;
+            case 'medium':
+                audioPath = '/static/sounds/alert-medium.mp3';
+                break;
+            case 'low':
+                audioPath = '/static/sounds/alert-low.mp3';
+                break;
+            default:
+                audioPath = '/static/sounds/chime-alert-demo-309545.mp3';
+        }
+        
+        const audio = new Audio(audioPath);
+        audio.volume = volume;
+        
+        // Play the audio with error handling
+        audio.play().catch(e => {
+            console.log(`Failed to play alert sound from ${audioPath}: ${e}`);
+            // Try fallback to original sound file if specific intensity file fails
+            if (!audioPath.includes('chime-alert-demo')) {
+                console.log('Trying fallback sound...');
+                const fallbackAudio = new Audio('/static/sounds/chime-alert-demo-309545.mp3');
+                fallbackAudio.volume = volume;
+                fallbackAudio.play().catch(e => console.log('Fallback sound also failed:', e));
+            }
+        });
+    }
+    
+    // Function to send browser notification
+    function sendBrowserNotification(title, message) {
+        // Check if user has enabled browser notifications
+        const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
+        if (!notificationsEnabled) return;
+        
+        // Check if browser supports notifications
+        if (!("Notification" in window)) {
+            console.log("This browser does not support desktop notification");
+            return;
+        }
+        
+        // Check notification permission
+        if (Notification.permission === "granted") {
+            const notification = new Notification(title, {
+                body: message,
+                icon: '/static/images/baby-icon.png'
+            });
+            
+            // Close notification after 5 seconds
+            setTimeout(() => notification.close(), 5000);
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    sendBrowserNotification(title, message);
+                }
+            });
+        }
+    }
+
+    // Initialize alert settings from localStorage
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize notification toggle
+        const notificationsToggle = document.getElementById('notificationsToggle');
+        if (notificationsToggle) {
+            // Get from localStorage, default to true
+            notificationsToggle.checked = localStorage.getItem('notificationsEnabled') !== 'false';
+            
+            // Request notification permission if enabled
+            if (notificationsToggle.checked) {
+                requestNotificationPermission();
+            }
+            
+            // Add event listener
+            notificationsToggle.addEventListener('change', function() {
+                localStorage.setItem('notificationsEnabled', this.checked);
+                if (this.checked) {
+                    requestNotificationPermission();
+                }
+            });
+        }
+        
+        // Initialize audio alerts toggle
+        const audioAlertsToggle = document.getElementById('audioAlertsToggle');
+        if (audioAlertsToggle) {
+            // Get from localStorage, default to true
+            audioAlertsToggle.checked = localStorage.getItem('audioAlertsEnabled') !== 'false';
+            
+            // Add event listener
+            audioAlertsToggle.addEventListener('change', function() {
+                localStorage.setItem('audioAlertsEnabled', this.checked);
+            });
+        }
+        
+        // Initialize alert volume slider
+        const alertVolumeSlider = document.getElementById('alertVolumeSlider');
+        const alertVolumeValue = document.getElementById('alertVolumeValue');
+        if (alertVolumeSlider && alertVolumeValue) {
+            // Get from localStorage, default to 70
+            const savedVolume = localStorage.getItem('alertVolume') || 70;
+            alertVolumeSlider.value = savedVolume;
+            alertVolumeValue.textContent = savedVolume + '%';
+            
+            // Add event listener
+            alertVolumeSlider.addEventListener('input', function() {
+                alertVolumeValue.textContent = this.value + '%';
+            });
+            
+            alertVolumeSlider.addEventListener('change', function() {
+                localStorage.setItem('alertVolume', this.value);
+            });
+        }
+        
+        // Initialize alert threshold slider
+        const alertThresholdSlider = document.getElementById('alertThresholdSlider');
+        const alertThresholdValue = document.getElementById('alertThresholdValue');
+        if (alertThresholdSlider && alertThresholdValue) {
+            // Get from localStorage, default to 65
+            const savedThreshold = localStorage.getItem('alertThreshold') || 65;
+            alertThresholdSlider.value = savedThreshold;
+            alertThresholdValue.textContent = savedThreshold + '%';
+            
+            // Add event listener
+            alertThresholdSlider.addEventListener('input', function() {
+                alertThresholdValue.textContent = this.value + '%';
+            });
+            
+            alertThresholdSlider.addEventListener('change', function() {
+                localStorage.setItem('alertThreshold', this.value);
+            });
+        }
+        
+        // Test alert button
+        const testAlertBtn = document.getElementById('testAlertBtn');
+        if (testAlertBtn) {
+            testAlertBtn.addEventListener('click', function() {
+                // Add test alert to UI
+                addAlert('warning', 'This is a test alert');
+                
+                // Try all alert sounds with a delay between them
+                playAlertSound('low');
+                
+                setTimeout(() => {
+                    playAlertSound('medium');
+                }, 1500);
+                
+                setTimeout(() => {
+                    playAlertSound('high');
+                }, 3000);
+                
+                // Send test notification
+                sendBrowserNotification('Test Notification', 'This is a test notification from Baby Monitor');
+            });
+        }
+    });
+    
+    // Function to request notification permission
+    function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
     }
     </script>
 {% endblock %} 
