@@ -882,7 +882,7 @@ def command_line_mode():
     parser.add_argument("--mode", choices=["normal", "dev"], default="normal", help="Installation mode")
     parser.add_argument("--no-state-detection", action="store_true", help="Disable person state detection")
     args = parser.parse_args()
-    
+
     print(f"Baby Monitor System - Installation Wizard v{VERSION} (Command Line Mode)")
     print("=" * 60)
     print(f"Version: {VERSION} - {VERSION_NAME}")

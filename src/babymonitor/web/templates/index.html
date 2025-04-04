@@ -45,7 +45,39 @@
             padding: 5px 10px;
             border-radius: 4px;
             font-size: 0.9rem;
-        z-index: 2;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .status-dot.connected {
+            background-color: #28a745;
+            box-shadow: 0 0 5px #28a745;
+        }
+        
+        .status-dot.disconnected {
+            background-color: #dc3545;
+            box-shadow: 0 0 5px #dc3545;
+        }
+        
+        .status-dot.connecting {
+            background-color: #ffc107;
+            box-shadow: 0 0 5px #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
         }
         
         .emotion-overlay {
@@ -351,17 +383,18 @@
                 <div class="video-container">
                     <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
                     <div class="status-overlay">
-                    <i class="bi bi-circle-fill text-success"></i> Live
+                        <span class="status-dot connecting" id="cameraStatusDot"></span>
+                        <span id="cameraStatusText">Connecting...</span>
+                    </div>
+                    <div class="emotion-overlay" id="emotionOverlay">
+                        <i class="bi bi-emoji-neutral"></i> Monitoring...
+                    </div>
+                    <div class="camera-selector-overlay">
+                        <select id="cameraSelector" class="form-select form-select-sm">
+                            <option value="">Loading cameras...</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="emotion-overlay" id="emotionOverlay">
-                    <i class="bi bi-emoji-neutral"></i> Monitoring...
-                </div>
-                <div class="camera-selector-overlay">
-                    <select id="cameraSelector" class="form-select form-select-sm">
-                        <option value="">Loading cameras...</option>
-                    </select>
-                </div>
-            </div>
 
             <!-- Emotion Progress Bars -->
             <div class="card dashboard-card">
@@ -1385,6 +1418,85 @@
         if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
             Notification.requestPermission();
         }
+    }
+
+    // Update camera connection status
+    function updateCameraStatus(status) {
+        const statusDot = document.getElementById('cameraStatusDot');
+        const statusText = document.getElementById('cameraStatusText');
+        const videoFeed = document.querySelector('.video-feed');
+        
+        if (!statusDot || !statusText) return;
+        
+        statusDot.className = 'status-dot';
+        
+        // Check if video feed is actually working
+        const isVideoWorking = videoFeed && !videoFeed.complete && videoFeed.naturalHeight !== 0;
+        
+        if (isVideoWorking) {
+            statusDot.classList.add('connected');
+            statusText.textContent = 'Connected';
+        } else if (status === 'disconnected') {
+            statusDot.classList.add('disconnected');
+            statusText.textContent = 'Disconnected';
+        } else {
+            statusDot.classList.add('connecting');
+            statusText.textContent = 'Connecting...';
+        }
+    }
+    
+    // Listen for camera status updates
+    socket.on('camera_status', updateCameraStatus);
+    
+    // Update status when video feed loads or errors
+    const videoFeed = document.querySelector('.video-feed');
+    if (videoFeed) {
+        videoFeed.addEventListener('load', () => updateCameraStatus('connected'));
+        videoFeed.addEventListener('error', () => updateCameraStatus('disconnected'));
+        
+        // Check initial status
+        if (videoFeed.complete) {
+            updateCameraStatus(videoFeed.naturalHeight !== 0 ? 'connected' : 'disconnected');
+        }
+    }
+
+    // Camera selection functionality
+    const cameraSelector = document.getElementById('cameraSelector');
+    if (cameraSelector) {
+        // Request available cameras when page loads
+        socket.emit('get_cameras');
+        
+        // Handle camera list updates
+        socket.on('camera_list', function(cameras) {
+            cameraSelector.innerHTML = '';
+            cameras.forEach(camera => {
+                const option = document.createElement('option');
+                option.value = camera.id;
+                option.textContent = camera.name;
+                cameraSelector.appendChild(option);
+            });
+            
+            // Select current camera if available
+            const currentCamera = localStorage.getItem('selectedCamera');
+            if (currentCamera) {
+                cameraSelector.value = currentCamera;
+            }
+        });
+        
+        // Handle camera selection change
+        cameraSelector.addEventListener('change', function() {
+            const selectedCamera = this.value;
+            localStorage.setItem('selectedCamera', selectedCamera);
+            socket.emit('switch_camera', { camera_id: selectedCamera });
+            
+            // Update video feed source
+            const videoFeed = document.querySelector('.video-feed');
+            if (videoFeed) {
+                const currentSrc = videoFeed.src;
+                const baseUrl = currentSrc.split('?')[0];
+                videoFeed.src = `${baseUrl}?camera=${selectedCamera}&t=${Date.now()}`;
+            }
+        });
     }
     </script>
 {% endblock %} 

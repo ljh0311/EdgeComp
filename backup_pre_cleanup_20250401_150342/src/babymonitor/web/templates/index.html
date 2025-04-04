@@ -1,0 +1,1390 @@
+{% extends "base.html" %}
+
+{% block title %}Baby Monitor Dashboard{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .main-container {
+        min-height: calc(100vh - 120px);
+        padding: 1rem;
+        background-color: #1a1a1a;
+    }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        margin-bottom: 15px;
+        background-color: #000;
+    }
+    
+    .video-container::before {
+        content: "";
+        display: block;
+        padding-top: 75%; /* 4:3 aspect ratio */
+        }
+        
+        .video-feed {
+        position: absolute;
+        top: 0;
+        left: 0;
+            width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background-color: #000;
+        }
+        
+        .status-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        z-index: 2;
+        }
+        
+        .emotion-overlay {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        z-index: 2;
+        }
+        
+        .emotion-crying {
+            background-color: rgba(220, 53, 69, 0.8);
+        }
+        
+        .emotion-laughing {
+            background-color: rgba(25, 135, 84, 0.8);
+        }
+        
+        .emotion-babbling {
+            background-color: rgba(13, 202, 240, 0.8);
+        }
+        
+        .dashboard-card {
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        margin-bottom: 15px;
+    }
+
+    .card-header {
+        background-color: #333;
+        border-bottom: 1px solid #404040;
+        color: #fff;
+        padding: 0.5rem 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+        }
+        
+        .quick-action {
+        margin-bottom: 8px;
+    }
+
+    .quick-action:last-child {
+        margin-bottom: 0;
+    }
+
+    .alert-container {
+        position: fixed;
+        bottom: 70px;
+        right: 20px;
+        width: 350px;
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 1000;
+    }
+
+    .alert {
+        margin-bottom: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        opacity: 0.95;
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        color: #fff;
+    }
+
+    .alert-warning {
+        background-color: rgba(255, 193, 7, 0.2);
+        border-color: #ffc107;
+        color: #ffc107;
+    }
+
+    .alert-danger {
+        background-color: rgba(220, 53, 69, 0.2);
+        border-color: #dc3545;
+        color: #dc3545;
+    }
+
+    .alert-info {
+        background-color: rgba(13, 202, 240, 0.2);
+        border-color: #0dcaf0;
+        color: #0dcaf0;
+    }
+
+    .alert-history-card {
+        max-height: 300px;
+        overflow-y: auto;
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        margin-top: 15px;
+        border-radius: 5px;
+    }
+
+    .alert-item {
+        border-bottom: 1px solid #404040;
+        padding: 10px;
+    }
+
+    .alert-item:last-child {
+        border-bottom: none;
+    }
+
+    .alert-time {
+        font-size: 0.75rem;
+        color: #aaa;
+    }
+
+    .alert-message {
+        font-size: 0.85rem;
+        margin-top: 2px;
+    }
+
+    .alert-warning .alert-message {
+        color: #ffc107;
+    }
+
+    .alert-danger .alert-message {
+        color: #dc3545;
+    }
+
+    .alert-info .alert-message {
+        color: #0dcaf0;
+    }
+
+    .emotion-progress {
+        height: 20px;
+        margin-bottom: 8px;
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .emotion-label {
+        position: absolute;
+        width: 100%;
+        text-align: center;
+        color: white;
+        font-weight: bold;
+        line-height: 20px;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        font-size: 0.9rem;
+    }
+
+    .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+            margin-bottom: 10px;
+        color: #fff;
+    }
+
+    .status-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .status-label {
+        font-weight: bold;
+        margin-right: 10px;
+        color: #aaa;
+    }
+
+    .status-value {
+        text-align: right;
+    }
+
+    .progress {
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .progress-bar {
+        transition: width 0.3s ease-in-out;
+    }
+
+    .system-status {
+        font-size: 0.9rem;
+    }
+
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+
+    .text-muted {
+        color: #aaa !important;
+    }
+
+    @media (max-width: 768px) {
+        .main-container {
+            padding: 0.5rem;
+        }
+
+        .alert-container {
+            width: calc(100% - 40px);
+            left: 20px;
+            bottom: 60px;
+        }
+
+        .video-container::before {
+            padding-top: 56.25%; /* 16:9 aspect ratio for mobile */
+        }
+
+        .card-body {
+            padding: 0.75rem;
+        }
+
+        .emotion-progress {
+            height: 16px;
+        }
+
+        .emotion-label {
+            line-height: 16px;
+            font-size: 0.8rem;
+        }
+    }
+
+    @media (min-width: 1200px) {
+        .video-container {
+            max-height: 70vh;
+        }
+        }
+
+    .camera-selector-overlay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 180px;
+        z-index: 2;
+        opacity: 0.6;
+        transition: opacity 0.3s;
+    }
+    
+    .camera-selector-overlay:hover {
+        opacity: 1;
+    }
+    
+    #cameraSelector {
+        background-color: rgba(0, 0, 0, 0.7);
+        border: 1px solid #444;
+        color: white;
+        font-size: 0.8rem;
+    }
+    
+    .multi-camera-layout {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    
+    .camera-item {
+        position: relative;
+        border-radius: 5px;
+        overflow: hidden;
+        background-color: #000;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .camera-item::before {
+        content: "";
+        display: block;
+        padding-top: 75%;
+    }
+    
+    .camera-feed {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    
+    .camera-name {
+        position: absolute;
+        top: 5px;
+        left: 5px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 2px 5px;
+        border-radius: 3px;
+        font-size: 0.8rem;
+    }
+    
+    @media (max-width: 576px) {
+        .multi-camera-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="main-container">
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <!-- Video Feed -->
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" alt="Video Feed" class="video-feed">
+                    <div class="status-overlay">
+                    <i class="bi bi-circle-fill text-success"></i> Live
+                </div>
+                <div class="emotion-overlay" id="emotionOverlay">
+                    <i class="bi bi-emoji-neutral"></i> Monitoring...
+                </div>
+                <div class="camera-selector-overlay">
+                    <select id="cameraSelector" class="form-select form-select-sm">
+                        <option value="">Loading cameras...</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Emotion Progress Bars -->
+            <div class="card dashboard-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div><i class="bi bi-emoji-smile"></i> Current Emotion State</div>
+                    <small class="text-muted" id="lastUpdate"></small>
+                </div>
+                <div class="card-body">
+                    <!-- Current model display -->
+                    <div class="d-flex justify-content-between mb-3">
+                        <span><strong>Model:</strong> <span id="currentModelName">Loading...</span></span>
+                        <span id="modelSwitchBtn" class="badge bg-primary rounded-pill" style="cursor: pointer;">Switch Model</span>
+                        </div>
+                    
+                    <!-- Dynamic emotion progress bars container -->
+                    <div id="emotionProgressContainer">
+                        <!-- Progress bars will be generated dynamically -->
+                        <div class="text-center p-3">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                    </div>
+                            <p class="mt-2">Loading emotion data...</p>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+                
+                <!-- Alert History -->
+                <div class="card dashboard-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div><i class="bi bi-exclamation-triangle"></i> Alert History</div>
+                        <button id="clearAlerts" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Clear
+                        </button>
+                    </div>
+                    <div id="alertHistoryContainer" class="alert-history-card">
+                        <!-- Alert items will be added here by JavaScript -->
+                        <div class="alert-item alert-info">
+                            <div class="alert-time">System started</div>
+                            <div class="alert-message">Baby monitor system is now running</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                    <!-- System Status -->
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <i class="bi bi-info-circle"></i> System Status
+                            </div>
+                <div class="card-body system-status">
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-clock"></i> Uptime:</span>
+                        <span class="status-value" id="uptime">00:00:00</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-camera"></i> Camera:</span>
+                        <span class="status-value" id="cameraStatus">Connecting...</span>
+                                </div>
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-person"></i> Person Detection:</span>
+                        <span class="status-value" id="personDetectorStatus">Initializing...</span>
+                                </div>
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-emoji-smile"></i> Emotion Detection:</span>
+                        <span class="status-value" id="emotionDetectorStatus">Initializing...</span>
+                                </div>
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-cpu"></i> CPU Usage:</span>
+                        <div class="progress" style="width: 120px; height: 6px;">
+                            <div id="cpuUsage" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label"><i class="bi bi-memory"></i> Memory Usage:</span>
+                        <div class="progress" style="width: 120px; height: 6px;">
+                            <div id="memoryUsage" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <i class="bi bi-lightning"></i> Quick Actions
+                            </div>
+                            <div class="card-body">
+                    <div class="quick-action">
+                        <button class="btn btn-primary btn-sm w-100" onclick="location.href='/metrics'">
+                                    <i class="bi bi-graph-up"></i> View Detailed Metrics
+                        </button>
+                    </div>
+                    <div class="quick-action">
+                        <button class="btn btn-info btn-sm w-100" onclick="location.href='/repair'">
+                                    <i class="bi bi-tools"></i> Repair Tools
+                        </button>
+                    </div>
+                    <div class="quick-action">
+                        <button id="exportAlerts" class="btn btn-warning btn-sm w-100">
+                            <i class="bi bi-download"></i> Export Alerts
+                        </button>
+                    </div>
+                    {% if mode == "dev" %}
+                    <div class="quick-action">
+                        <button class="btn btn-warning btn-sm w-100" onclick="location.href='/dev/tools'">
+                            <i class="bi bi-gear"></i> Developer Tools
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card dashboard-card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-gear"></i> Alert Settings
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notificationsToggle" checked>
+                        <label class="form-check-label" for="notificationsToggle">
+                            Browser Notifications 
+                        </label>
+                        <small class="form-text text-muted d-block">Receive popup notifications when important events occur</small>
+                    </div>
+                    
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="audioAlertsToggle" checked>
+                        <label class="form-check-label" for="audioAlertsToggle">
+                            Sound Alerts
+                        </label>
+                        <small class="form-text text-muted d-block">Play sound when alerts are triggered</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="alertVolumeSlider" class="form-label">Alert Volume: <span id="alertVolumeValue">70%</span></label>
+                        <input type="range" class="form-range" id="alertVolumeSlider" min="10" max="100" value="70">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="alertThresholdSlider" class="form-label">Alert Threshold: <span id="alertThresholdValue">65%</span></label>
+                        <input type="range" class="form-range" id="alertThresholdSlider" min="50" max="90" value="65">
+                        <small class="form-text text-muted d-block">Adjust how sensitive alerts are (lower = more frequent alerts)</small>
+                    </div>
+                    
+                    <button class="btn btn-sm btn-outline-secondary" id="testAlertBtn">
+                        <i class="bi bi-volume-up"></i> Test Alert Sound
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Floating Alert Container -->
+<div class="alert-container" id="alertsContainer">
+    <!-- Alerts will be added dynamically by JavaScript -->
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    <script>
+    // Socket.IO connection with explicit URL to avoid connection issues
+    const socket = io(window.location.origin, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+    });
+    
+    // Debug socket connection
+    socket.on('connect_error', function(err) {
+        console.error('Socket.IO connection error:', err);
+        document.getElementById('emotionOverlay').innerHTML = `<i class="bi bi-exclamation-triangle"></i> Connection error`;
+    });
+    
+    // Track connection status
+    let socketConnected = false;
+    
+    // Current model info
+    let currentModel = {
+        id: 'basic_emotion',
+        name: 'Basic Emotion',
+        emotions: ['crying', 'laughing', 'babbling', 'silence']
+    };
+    
+    // Emotion colors mapping
+    const emotionColorMap = {
+        'crying': 'bg-danger',
+        'laughing': 'bg-success',
+        'babbling': 'bg-info',
+        'silence': 'bg-secondary',
+        'happy': 'bg-success',
+        'sad': 'bg-danger',
+        'angry': 'bg-warning',
+        'neutral': 'bg-secondary',
+        'not_crying': 'bg-success'
+    };
+    
+    // Emotion detection buffer
+    const EMOTION_BUFFER_SIZE = 2; // Reduced from 5 to make updates more responsive
+    let emotionBuffer = {};
+    let emotionBufferCount = 0;
+    
+    socket.on('connect', function() {
+        console.log('Connected to server');
+        socketConnected = true;
+        addAlert('info', 'Connected to baby monitor server');
+        
+        // Request camera list
+        fetchCameraList();
+        
+        // Request system info to get model details
+        fetchSystemInfo();
+        
+        // For debugging - add a connection indicator to the page
+        document.getElementById('emotionOverlay').innerHTML = `<i class="bi bi-wifi"></i> Connected, waiting for emotions...`;
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('Disconnected from server');
+        socketConnected = false;
+        addAlert('danger', 'Disconnected from baby monitor server');
+    });
+    
+    // Handler for emotion model changes
+    socket.on('emotion_model_changed', function(modelInfo) {
+        console.log('Emotion model changed:', modelInfo);
+        
+        // Update current model info
+        currentModel = modelInfo;
+        
+        // Update model display
+        updateModelDisplay();
+        
+        // Regenerate emotion progress bars for new model
+        generateEmotionProgressBars();
+        
+        // Reset emotion buffer for new model emotions
+        resetEmotionBuffer();
+        
+        // Add to alert history
+        addAlertToHistory('info', `Emotion model changed to ${modelInfo.name}`);
+    });
+
+    // Update emotion overlay and progress bars
+    socket.on('emotion_update', function(data) {
+        console.log('Received emotion update:', data);
+        
+        const emotion = data.emotion;
+        const confidence = data.confidence;
+        const confidences = data.confidences || {};
+        
+        // Debug log to see what's coming in
+        console.log(`Emotion: ${emotion}, Confidence: ${confidence}, Confidences:`, confidences);
+        
+        // Update emotion overlay immediately for better responsiveness
+        updateEmotionOverlay(emotion, confidence);
+        
+        // Add new emotion data to buffer
+        for (const [emotionKey, value] of Object.entries(confidences)) {
+            if (!emotionBuffer[emotionKey]) {
+                emotionBuffer[emotionKey] = [];
+            }
+            emotionBuffer[emotionKey].push(value);
+        }
+        emotionBufferCount++;
+        
+        // Only update UI and send alerts after collecting enough instances
+        if (emotionBufferCount >= EMOTION_BUFFER_SIZE) {
+            // Calculate averages
+            const averages = {};
+            for (const emotionKey of currentModel.emotions) {
+                if (emotionBuffer[emotionKey] && emotionBuffer[emotionKey].length > 0) {
+                    averages[emotionKey] = emotionBuffer[emotionKey].reduce((a, b) => a + b, 0) / emotionBuffer[emotionKey].length;
+                } else {
+                    averages[emotionKey] = 0;
+                }
+            }
+            
+            // Debug log for calculated averages
+            console.log('Calculated averages:', averages);
+            
+            // Find the dominant emotion
+            const dominantEmotion = Object.entries(averages).reduce((a, b) => a[1] > b[1] ? a : b, [emotion, confidence])[0];
+            const dominantConfidence = averages[dominantEmotion] || confidence;
+            
+            // Update emotion overlay
+            updateEmotionOverlay(dominantEmotion, dominantConfidence);
+            
+            // Update progress bars with averages
+            updateProgressBars(averages);
+            
+            // Update last update time
+            const lastUpdate = document.getElementById('lastUpdate');
+            const now = new Date();
+            lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
+            
+            // ALERT SYSTEM: Check for specific emotions that need alerts
+            // Get threshold from settings or use default
+            const alertThreshold = parseFloat(localStorage.getItem('alertThreshold') || 65) / 100;
+            let alertLevel = null;
+            let alertMessage = '';
+            
+            // Check for crying, sad, or angry emotions
+            if (dominantEmotion === 'crying' && dominantConfidence > alertThreshold) {
+                alertLevel = 'danger';
+                alertMessage = `Baby is crying with ${(dominantConfidence * 100).toFixed(1)}% confidence!`;
+                playAlertSound('high');
+            } else if (dominantEmotion === 'sad' && dominantConfidence > alertThreshold) {
+                alertLevel = 'warning';
+                alertMessage = `Baby appears sad with ${(dominantConfidence * 100).toFixed(1)}% confidence`;
+                playAlertSound('medium');
+            } else if (dominantEmotion === 'angry' && dominantConfidence > alertThreshold) {
+                alertLevel = 'warning';
+                alertMessage = `Baby appears angry with ${(dominantConfidence * 100).toFixed(1)}% confidence`;
+                playAlertSound('medium');
+            }
+            
+            // Display alert if needed
+            if (alertLevel) {
+                // Add to visual alerts
+                addAlert(alertLevel, alertMessage);
+                addAlertToHistory(alertLevel, alertMessage);
+                
+                // Send browser notification
+                sendBrowserNotification("Baby Monitor Alert", alertMessage);
+                
+                // Emit alert event to server for logging
+                if (socketConnected) {
+                    socket.emit('emotion_alert', {
+                        timestamp: new Date().toISOString(),
+                        emotion: dominantEmotion,
+                        confidence: dominantConfidence,
+                        message: alertMessage,
+                        level: alertLevel
+                    });
+                }
+            }
+            
+            // Reset buffer
+            resetEmotionBuffer();
+        }
+    });
+    
+    // Function to update emotion overlay
+    function updateEmotionOverlay(emotion, confidence) {
+        const overlay = document.getElementById('emotionOverlay');
+        if (!overlay) return;
+        
+        overlay.className = 'emotion-overlay';
+        
+        let icon = 'emoji-neutral';
+        if (emotion === 'crying' || emotion === 'sad') {
+            overlay.classList.add('emotion-crying');
+            icon = 'emoji-frown';
+        } else if (emotion === 'laughing' || emotion === 'happy') {
+            overlay.classList.add('emotion-laughing');
+            icon = 'emoji-smile';
+        } else if (emotion === 'babbling') {
+            overlay.classList.add('emotion-babbling');
+            icon = 'emoji-laughing';
+        } else if (emotion === 'angry') {
+            overlay.classList.add('emotion-crying');
+            icon = 'emoji-angry';
+        }
+        
+        overlay.innerHTML = `<i class="bi bi-${icon}"></i> ${capitalizeFirstLetter(emotion)} (${(confidence * 100).toFixed(1)}%)`;
+    }
+    
+    // Function to update progress bars
+    function updateProgressBars(emotionValues) {
+        for (const [emotion, value] of Object.entries(emotionValues)) {
+            const progress = document.getElementById(`${emotion}Progress`);
+            const valueSpan = document.getElementById(`${emotion}Value`);
+            if (progress && valueSpan) {
+                const percentage = (value * 100).toFixed(1);
+                progress.style.width = `${percentage}%`;
+                valueSpan.textContent = `${percentage}%`;
+            }
+        }
+    }
+    
+    // Function to reset emotion buffer
+    function resetEmotionBuffer() {
+        emotionBuffer = {};
+        currentModel.emotions.forEach(emotion => {
+            emotionBuffer[emotion] = [];
+        });
+            emotionBufferCount = 0;
+        }
+    
+    // Function to fetch system info and update model display
+    function fetchSystemInfo() {
+        fetch('/api/system_info')
+            .then(response => response.json())
+            .then(data => {
+                console.log('System info:', data);
+                
+                // Update model info if available
+                if (data.emotion_model) {
+                    currentModel = data.emotion_model;
+                    updateModelDisplay();
+                    generateEmotionProgressBars();
+                    resetEmotionBuffer();
+                }
+                
+                // Also update system status from this call
+                updateSystemStatus(data);
+            })
+            .catch(error => {
+                console.error('Error fetching system info:', error);
+                addAlert('danger', 'Error fetching system info');
+            });
+    }
+    
+    // Function to update model display
+    function updateModelDisplay() {
+        const modelNameElement = document.getElementById('currentModelName');
+        if (modelNameElement) {
+            modelNameElement.textContent = currentModel.name || 'Unknown Model';
+        }
+    }
+    
+    // Function to generate emotion progress bars
+    function generateEmotionProgressBars() {
+        const container = document.getElementById('emotionProgressContainer');
+        if (!container) return;
+        
+        // Clear container
+        container.innerHTML = '';
+        
+        // Add progress bar for each emotion
+        currentModel.emotions.forEach(emotion => {
+            const emotionDiv = document.createElement('div');
+            emotionDiv.className = 'position-relative';
+            
+            // Get color class for this emotion
+            const colorClass = emotionColorMap[emotion] || 'bg-secondary';
+            
+            emotionDiv.innerHTML = `
+                <div class="progress emotion-progress">
+                    <div id="${emotion}Progress" class="progress-bar ${colorClass}" role="progressbar" style="width: 0%"></div>
+                    <div class="emotion-label">${capitalizeFirstLetter(emotion)}: <span id="${emotion}Value">0%</span></div>
+                </div>
+            `;
+            
+            container.appendChild(emotionDiv);
+        });
+        
+        // Re-attach model switch button click handler
+        attachModelSwitchButtonHandler();
+    }
+    
+    // Function to attach click handler to model switch button
+    function attachModelSwitchButtonHandler() {
+        const modelSwitchBtn = document.getElementById('modelSwitchBtn');
+        if (modelSwitchBtn) {
+            modelSwitchBtn.addEventListener('click', function() {
+                // Redirect to repair tools page
+                window.location.href = '/repair';
+            });
+        }
+    }
+    
+    // Add document ready handler to initialize UI
+    document.addEventListener('DOMContentLoaded', function() {
+        // Attach model switch button click handler
+        attachModelSwitchButtonHandler();
+        
+        // Add click handler for clearing alerts
+        const clearAlertsBtn = document.getElementById('clearAlerts');
+        if (clearAlertsBtn) {
+            clearAlertsBtn.addEventListener('click', function() {
+                const alertHistory = document.getElementById('alertHistoryContainer');
+                if (alertHistory) {
+                    // Keep only the first alert (system started)
+                    while (alertHistory.children.length > 1) {
+                        alertHistory.removeChild(alertHistory.lastChild);
+                    }
+                }
+            });
+        }
+    });
+    
+    // Function to update system status from data
+    function updateSystemStatus(data) {
+        // Update uptime
+        const uptimeElement = document.getElementById('uptime');
+        if (uptimeElement && data.uptime) {
+            uptimeElement.textContent = data.uptime;
+        }
+        
+        // Update camera status
+        const cameraStatus = document.getElementById('cameraStatus');
+        if (cameraStatus) {
+            const status = data.camera_status || 'Unknown';
+            cameraStatus.textContent = capitalizeFirstLetter(status);
+            cameraStatus.className = getStatusClass(status);
+        }
+        
+        // Update person detector status
+        const personDetectorStatus = document.getElementById('personDetectorStatus');
+        if (personDetectorStatus) {
+            const status = data.person_detector_status || 'Unknown';
+            personDetectorStatus.textContent = capitalizeFirstLetter(status);
+            personDetectorStatus.className = getStatusClass(status);
+        }
+        
+        // Update emotion detector status
+        const emotionDetectorStatus = document.getElementById('emotionDetectorStatus');
+        if (emotionDetectorStatus) {
+            const status = data.emotion_detector_status || 'Unknown';
+            emotionDetectorStatus.textContent = capitalizeFirstLetter(status);
+            emotionDetectorStatus.className = getStatusClass(status);
+        }
+        
+        // Update CPU usage
+        const cpuBar = document.getElementById('cpuUsage');
+        if (cpuBar && data.cpu_usage !== undefined) {
+            const cpuUsage = data.cpu_usage;
+            cpuBar.style.width = `${cpuUsage}%`;
+            cpuBar.title = `${cpuUsage.toFixed(1)}%`;
+            
+            // Update color based on usage
+            if (cpuUsage < 50) {
+                cpuBar.className = 'progress-bar bg-info';
+            } else if (cpuUsage < 80) {
+                cpuBar.className = 'progress-bar bg-warning';
+            } else {
+                cpuBar.className = 'progress-bar bg-danger';
+            }
+        }
+        
+        // Update memory usage
+        const memBar = document.getElementById('memoryUsage');
+        if (memBar && data.memory_usage !== undefined) {
+            const memUsage = data.memory_usage;
+            memBar.style.width = `${memUsage}%`;
+            memBar.title = `${memUsage.toFixed(1)}%`;
+            
+            // Update color based on usage
+            if (memUsage < 50) {
+                memBar.className = 'progress-bar bg-warning';
+            } else if (memUsage < 80) {
+                memBar.className = 'progress-bar bg-warning';
+            } else {
+                memBar.className = 'progress-bar bg-danger';
+            }
+        }
+    }
+
+    // Update system status
+    socket.on('system_info', function(data) {
+        updateSystemStatus(data);
+    });
+    
+    // Listen for alert events from server
+    socket.on('alert', function(data) {
+        console.log('Alert received:', data);
+        addAlert(data.level || 'info', data.message);
+        addAlertToHistory(data.level || 'info', data.message);
+    });
+    
+    // Listen for crying detected events
+    socket.on('crying_detected', function(data) {
+        console.log('Crying detected:', data);
+        const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : new Date().toLocaleString();
+        const message = `Crying detected (confidence: ${(data.confidence * 100).toFixed(1)}%)`;
+        addAlert('warning', message);
+        addAlertToHistory('warning', message, timestamp);
+    });
+    
+    // Add alert to the alert box (floating notifications)
+    function addAlert(type, message) {
+        const alertBox = document.getElementById('alertsContainer');
+        if (!alertBox) return;
+        
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        alertBox.insertAdjacentHTML('afterbegin', alertHtml);
+        
+        // Remove old alerts if there are more than 3
+        const alerts = alertBox.getElementsByClassName('alert');
+        while (alerts.length > 3) {
+            alerts[alerts.length - 1].remove();
+        }
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            const firstAlert = alertBox.querySelector('.alert');
+            if (firstAlert) {
+                firstAlert.classList.remove('show');
+                setTimeout(() => firstAlert.remove(), 500);
+            }
+        }, 5000);
+    }
+    
+    // Add alert to history
+    function addAlertToHistory(type, message, timeString = null) {
+        const alertHistory = document.getElementById('alertHistoryContainer');
+        if (!alertHistory) return;
+        
+        const now = timeString || new Date().toLocaleTimeString();
+        
+        const alertItem = document.createElement('div');
+        alertItem.className = `alert-item alert-${type}`;
+        alertItem.innerHTML = `
+            <div class="alert-time">${now}</div>
+            <div class="alert-message">${message}</div>
+        `;
+        
+        alertHistory.insertBefore(alertItem, alertHistory.firstChild);
+        
+        // Limit to 15 alerts
+        while (alertHistory.children.length > 15) {
+            alertHistory.removeChild(alertHistory.lastChild);
+        }
+    }
+    
+    // Helper function to capitalize first letter
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+    
+    // Helper function to get status class
+    function getStatusClass(status) {
+        if (status === 'connected' || status === 'running') {
+            return 'badge bg-success';
+        } else if (status === 'initializing') {
+            return 'badge bg-info';
+        } else if (status === 'disconnected') {
+            return 'badge bg-danger';
+        } else if (status === 'error') {
+            return 'badge bg-warning';
+        } else {
+            return 'badge bg-secondary';
+        }
+    }
+    
+    // Export alerts button
+    document.getElementById('exportAlerts').addEventListener('click', function() {
+        const alertHistory = document.getElementById('alertHistoryContainer');
+        if (!alertHistory) return;
+        
+        const content = alertHistory.innerHTML;
+        const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Baby Monitor Alerts - ${new Date().toLocaleString()}</title>
+            <style>
+                body { font-family: Arial, sans-serif; background-color: #f5f5f5; }
+                .alert-container { max-width: 800px; margin: 20px auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                h1 { color: #333; font-size: 24px; margin-top: 0; }
+                .alert-item { padding: 10px; border-bottom: 1px solid #eee; }
+                .alert-time { font-size: 12px; color: #777; }
+                .alert-message { font-size: 14px; margin-top: 5px; }
+                .alert-info .alert-message { color: #0dcaf0; }
+                .alert-warning .alert-message { color: #ffc107; }
+                .alert-danger .alert-message { color: #dc3545; }
+            </style>
+        </head>
+        <body>
+            <div class="alert-container">
+                <h1>Baby Monitor Alerts - ${new Date().toLocaleString()}</h1>
+                ${content}
+            </div>
+        </body>
+        </html>`;
+        
+        const blob = new Blob([htmlContent], {type: 'text/html'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `baby_monitor_alerts_${formatDateForFilename(new Date())}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    });
+    
+    // Helper function to format date for filename
+    function formatDateForFilename(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}_${hours}-${minutes}`;
+    }
+
+    // Camera selection
+    function fetchCameraList() {
+        fetch('/api/cameras')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch cameras: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                updateCameraSelector(data.cameras || []);
+            })
+            .catch(error => {
+                console.error('Error fetching cameras:', error);
+            });
+    }
+    
+    function updateCameraSelector(cameras) {
+        const selectorContainer = document.querySelector('.camera-selector-overlay');
+        const selector = document.getElementById('cameraSelector');
+        if (!selectorContainer || !selector) return;
+        
+        // If there's only one camera, replace the dropdown with a simple label
+        if (cameras && cameras.length === 1) {
+            // Create a static camera label instead of dropdown
+            const cameraLabel = document.createElement('div');
+            cameraLabel.className = 'camera-label';
+            cameraLabel.innerHTML = `<i class="bi bi-camera-video"></i> Camera 1`;
+            cameraLabel.style.color = 'white';
+            cameraLabel.style.background = 'rgba(0, 0, 0, 0.7)';
+            cameraLabel.style.padding = '5px 10px';
+            cameraLabel.style.borderRadius = '4px';
+            cameraLabel.style.fontSize = '0.8rem';
+            
+            // Replace the selector with the label
+            selectorContainer.innerHTML = '';
+            selectorContainer.appendChild(cameraLabel);
+            
+            // Automatically activate the single camera if needed
+            if (!cameras[0].active) {
+                switchCamera(cameras[0].id);
+            }
+            
+            return;
+        }
+        
+        // Normal case with multiple cameras - use dropdown
+        // Clear existing options
+        selector.innerHTML = '';
+        
+        // Add options for each camera
+        if (cameras && cameras.length > 0) {
+            // Add option to view all cameras
+            if (cameras.length > 1) {
+                const allOption = document.createElement('option');
+                allOption.value = "all";
+                allOption.textContent = "View All Cameras";
+                selector.appendChild(allOption);
+            }
+            
+            cameras.forEach((camera, index) => {
+                const option = document.createElement('option');
+                option.value = camera.id;
+                // Use "Camera 1", "Camera 2", etc. if no name is provided
+                option.textContent = camera.name || `Camera ${index + 1}`;
+                if (camera.active) {
+                    option.selected = true;
+                }
+                selector.appendChild(option);
+            });
+            
+            // Add event listener for camera switching
+            selector.addEventListener('change', function() {
+                const selectedValue = this.value;
+                
+                if (selectedValue === "all") {
+                    showAllCameras(cameras);
+                } else {
+                    switchCamera(selectedValue);
+                }
+            });
+        } else {
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No cameras available";
+            selector.appendChild(option);
+        }
+    }
+    
+    function switchCamera(cameraId) {
+        if (!cameraId) return;
+        
+        fetch('/api/cameras/activate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ camera_id: cameraId })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Failed to switch camera: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Camera switched:', data);
+            // Update the video feed
+            const videoFeed = document.querySelector('.video-feed');
+            if (videoFeed) {
+                // Force reload the video feed by updating the src with a timestamp
+                const timestamp = new Date().getTime();
+                videoFeed.src = `${videoFeed.src.split('?')[0]}?t=${timestamp}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error switching camera:', error);
+            addAlert('danger', `Error switching camera: ${error.message}`);
+        });
+    }
+    
+    function showAllCameras(cameras) {
+        // Find the main video container
+        const mainContainer = document.querySelector('.video-container');
+        if (!mainContainer) return;
+        
+        // Create grid layout for multiple cameras
+        const multiCameraLayout = document.createElement('div');
+        multiCameraLayout.className = 'multi-camera-layout';
+        
+        // Add all cameras to the grid
+        cameras.forEach(camera => {
+            const cameraItem = document.createElement('div');
+            cameraItem.className = 'camera-item';
+            cameraItem.innerHTML = `
+                <img src="/api/cameras/${camera.id}/feed" class="camera-feed" alt="${camera.name}">
+                <div class="camera-name">${camera.name}</div>
+            `;
+            multiCameraLayout.appendChild(cameraItem);
+            
+            // Add click handler to switch to this camera
+            cameraItem.addEventListener('click', function() {
+                document.getElementById('cameraSelector').value = camera.id;
+                switchCamera(camera.id);
+            });
+        });
+        
+        // Replace the main video container with the grid
+        mainContainer.parentNode.replaceChild(multiCameraLayout, mainContainer);
+    }
+
+    // Function to play alert sound
+    function playAlertSound(intensity) {
+        // Check if user has enabled audio alerts
+        const audioAlertsEnabled = localStorage.getItem('audioAlertsEnabled') !== 'false';
+        if (!audioAlertsEnabled) return;
+        
+        // Get volume from settings (default to 70%)
+        const volume = parseFloat(localStorage.getItem('alertVolume') || 70) / 100;
+        
+        let audioPath;
+        switch(intensity) {
+            case 'high':
+                audioPath = '/static/sounds/alert-high.mp3';
+                break;
+            case 'medium':
+                audioPath = '/static/sounds/alert-medium.mp3';
+                break;
+            case 'low':
+                audioPath = '/static/sounds/alert-low.mp3';
+                break;
+            default:
+                audioPath = '/static/sounds/chime-alert-demo-309545.mp3';
+        }
+        
+        const audio = new Audio(audioPath);
+        audio.volume = volume;
+        
+        // Play the audio with error handling
+        audio.play().catch(e => {
+            console.log(`Failed to play alert sound from ${audioPath}: ${e}`);
+            // Try fallback to original sound file if specific intensity file fails
+            if (!audioPath.includes('chime-alert-demo')) {
+                console.log('Trying fallback sound...');
+                const fallbackAudio = new Audio('/static/sounds/chime-alert-demo-309545.mp3');
+                fallbackAudio.volume = volume;
+                fallbackAudio.play().catch(e => console.log('Fallback sound also failed:', e));
+            }
+        });
+    }
+    
+    // Function to send browser notification
+    function sendBrowserNotification(title, message) {
+        // Check if user has enabled browser notifications
+        const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
+        if (!notificationsEnabled) return;
+        
+        // Check if browser supports notifications
+        if (!("Notification" in window)) {
+            console.log("This browser does not support desktop notification");
+            return;
+        }
+        
+        // Check notification permission
+        if (Notification.permission === "granted") {
+            const notification = new Notification(title, {
+                body: message,
+                icon: '/static/images/baby-icon.png'
+            });
+            
+            // Close notification after 5 seconds
+            setTimeout(() => notification.close(), 5000);
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    sendBrowserNotification(title, message);
+                }
+            });
+        }
+    }
+
+    // Initialize alert settings from localStorage
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize notification toggle
+        const notificationsToggle = document.getElementById('notificationsToggle');
+        if (notificationsToggle) {
+            // Get from localStorage, default to true
+            notificationsToggle.checked = localStorage.getItem('notificationsEnabled') !== 'false';
+            
+            // Request notification permission if enabled
+            if (notificationsToggle.checked) {
+                requestNotificationPermission();
+            }
+            
+            // Add event listener
+            notificationsToggle.addEventListener('change', function() {
+                localStorage.setItem('notificationsEnabled', this.checked);
+                if (this.checked) {
+                    requestNotificationPermission();
+                }
+            });
+        }
+        
+        // Initialize audio alerts toggle
+        const audioAlertsToggle = document.getElementById('audioAlertsToggle');
+        if (audioAlertsToggle) {
+            // Get from localStorage, default to true
+            audioAlertsToggle.checked = localStorage.getItem('audioAlertsEnabled') !== 'false';
+            
+            // Add event listener
+            audioAlertsToggle.addEventListener('change', function() {
+                localStorage.setItem('audioAlertsEnabled', this.checked);
+            });
+        }
+        
+        // Initialize alert volume slider
+        const alertVolumeSlider = document.getElementById('alertVolumeSlider');
+        const alertVolumeValue = document.getElementById('alertVolumeValue');
+        if (alertVolumeSlider && alertVolumeValue) {
+            // Get from localStorage, default to 70
+            const savedVolume = localStorage.getItem('alertVolume') || 70;
+            alertVolumeSlider.value = savedVolume;
+            alertVolumeValue.textContent = savedVolume + '%';
+            
+            // Add event listener
+            alertVolumeSlider.addEventListener('input', function() {
+                alertVolumeValue.textContent = this.value + '%';
+            });
+            
+            alertVolumeSlider.addEventListener('change', function() {
+                localStorage.setItem('alertVolume', this.value);
+            });
+        }
+        
+        // Initialize alert threshold slider
+        const alertThresholdSlider = document.getElementById('alertThresholdSlider');
+        const alertThresholdValue = document.getElementById('alertThresholdValue');
+        if (alertThresholdSlider && alertThresholdValue) {
+            // Get from localStorage, default to 65
+            const savedThreshold = localStorage.getItem('alertThreshold') || 65;
+            alertThresholdSlider.value = savedThreshold;
+            alertThresholdValue.textContent = savedThreshold + '%';
+            
+            // Add event listener
+            alertThresholdSlider.addEventListener('input', function() {
+                alertThresholdValue.textContent = this.value + '%';
+            });
+            
+            alertThresholdSlider.addEventListener('change', function() {
+                localStorage.setItem('alertThreshold', this.value);
+            });
+        }
+        
+        // Test alert button
+        const testAlertBtn = document.getElementById('testAlertBtn');
+        if (testAlertBtn) {
+            testAlertBtn.addEventListener('click', function() {
+                // Add test alert to UI
+                addAlert('warning', 'This is a test alert');
+                
+                // Try all alert sounds with a delay between them
+                playAlertSound('low');
+                
+                setTimeout(() => {
+                    playAlertSound('medium');
+                }, 1500);
+                
+                setTimeout(() => {
+                    playAlertSound('high');
+                }, 3000);
+                
+                // Send test notification
+                sendBrowserNotification('Test Notification', 'This is a test notification from Baby Monitor');
+            });
+        }
+    });
+    
+    // Function to request notification permission
+    function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
+    }
+    </script>
+{% endblock %} 

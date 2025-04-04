@@ -1,0 +1,10 @@
+Backup created: 2025-04-01 15:03:53
+Backup name: backup_pre_cleanup_20250401_150342
+
+Backup contents:
+- src
+- tools
+- requirements.txt
+- README.md
+- run_babymonitor.bat
+- run_babymonitor.sh

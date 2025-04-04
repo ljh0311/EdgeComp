@@ -38,6 +38,7 @@ from babymonitor.audio.audio_processor import AudioProcessor
 from babymonitor.emotion.emotion import EmotionRecognizer
 from babymonitor.core.web_app import BabyMonitorWeb
 from babymonitor.core.config import config
+from babymonitor.mqtt_server import MQTTServer
 
 # Configure logging
 logging.basicConfig(
@@ -179,7 +180,7 @@ class EmotionUI:
 
 
 class BabyMonitorSystem:
-    def __init__(self, dev_mode=False, only_local=False, only_web=False):
+    def __init__(self, dev_mode=False, only_local=False, only_web=False, mqtt_host=None, mqtt_port=1883):
         """Initialize the Baby Monitor System."""
         self.logger = logging.getLogger(__name__)
         self.is_running = False
@@ -190,10 +191,13 @@ class BabyMonitorSystem:
         self.dev_mode = dev_mode
         self.only_local = only_local
         self.only_web = only_web
+        self.mqtt_host = mqtt_host
+        self.mqtt_port = mqtt_port
         self.initialized_components = []  # Track initialized components for cleanup
         self.web_app = None  # Initialize web_app reference as None
         self.dev_window = None  # Initialize dev window reference as None
         self.emotion_ui = None  # Initialize emotion UI reference as None
+        self.mqtt_server = None  # Initialize MQTT server reference as None
 
         # Performance metrics
         self.metrics_lock = threading.Lock()
@@ -218,6 +222,12 @@ class BabyMonitorSystem:
             else:
                 self.initialized_components.append("camera")
                 self.logger.info("Camera initialized successfully")
+
+            # Initialize MQTT server if host is provided
+            if mqtt_host:
+                self.mqtt_server = MQTTServer(host=mqtt_host, port=mqtt_port)
+                self.logger.info(f"Initializing MQTT server at {mqtt_host}:{mqtt_port}")
+                self.initialized_components.append("mqtt_server")
 
             # Initialize UI if not web-only
             if not only_web:
@@ -249,17 +259,15 @@ class BabyMonitorSystem:
                                 current_resolution = (
                                     self.camera.get_current_resolution()
                                 )
-                                if current_resolution != "Not available":
-                                    self.resolution_select.set(current_resolution)
-
-                    # Create developer window if in dev mode
-                    if dev_mode:
-                        self.dev_window = DevWindow(self.root)
-                        self.initialized_components.append("dev_window")
+                                if current_resolution:
+                                    res_str = f"{current_resolution[0]}x{current_resolution[1]}"
+                                    self.resolution_select.set(res_str)
                 except Exception as e:
-                    self.logger.error(f"Failed to initialize UI: {str(e)}")
-                    self.cleanup()
-                    raise
+                    self.logger.error(f"Error initializing UI: {str(e)}")
+                    if not only_local:
+                        # Fall back to web-only mode
+                        self.only_web = True
+                        self.logger.info("Falling back to web-only mode")
 
             # Initialize person detector
             try:
@@ -273,10 +281,25 @@ class BabyMonitorSystem:
                     self.detection_status.configure(text="👀  Detection: Error")
                 self.person_detector = None
 
+            # Initialize audio processor if enabled
+            self.audio_processor = None
+            if self.audio_enabled:
+                try:
+                    self.audio_processor = AudioProcessor()
+                    self.initialized_components.append("audio_processor")
+                except Exception as e:
+                    self.logger.error(f"Error initializing audio processor: {str(e)}")
+                    self.audio_enabled = False
+                    self.logger.info("Audio processing disabled")
+
+            # Initialize emotion recognizer
+            self.emotion_recognizer = EmotionRecognizer()
+            self.initialized_components.append("emotion_recognizer")
+
             # Initialize web interface if not local-only
             if not only_local:
                 try:
-                    self.web_app = BabyMonitorWeb(dev_mode=self.dev_mode)
+                    self.web_app = BabyMonitorWeb(self)
                     self.web_app.set_monitor_system(self)
                     self.web_app.start()
                     self.initialized_components.append("web_app")
@@ -286,57 +309,11 @@ class BabyMonitorSystem:
                         self.cleanup()
                         raise
 
-            # Initialize audio components if enabled
-            if self.audio_enabled:
-                try:
-                    audio_config = config.get('audio', {})
-                    self.audio_processor = AudioProcessor(
-                        audio_config,
-                        self.handle_alert
-                    )
-                    if not only_web:
-                        self.audio_processor.set_visualization_callback(
-                            self.update_audio_visualization
-                        )
-                    self.initialized_components.append("audio_processor")
-
-                    # Initialize emotion recognizer
-                    try:
-                        self.emotion_recognizer = EmotionRecognizer()
-                        if self.web_app:
-                            self.emotion_recognizer.web_app = self.web_app
-                        # Set monitor system reference
-                        self.emotion_recognizer.set_monitor_system(self)
-                        self.initialized_components.append("emotion_recognizer")
-                        self.logger.info("Emotion recognizer initialized successfully")
-                    except Exception as e:
-                        self.logger.error(
-                            f"Failed to initialize emotion recognizer: {str(e)}"
-                        )
-                        self.emotion_recognizer = None
-
-                    if not only_web:
-                        self.audio_status.configure(text="🎤  Audio: Ready")
-                        if hasattr(self, "emotion_recognizer"):
-                            self.emotion_status.configure(text="😊  Emotion: Ready")
-                        else:
-                            self.emotion_status.configure(
-                                text="😊  Emotion: Not Available"
-                            )
-                except Exception as e:
-                    self.logger.error(
-                        f"Failed to initialize audio components: {str(e)}"
-                    )
-                    self.audio_enabled = False
-                    if not only_web:
-                        self.audio_status.configure(text="🎤  Audio: Error")
-
             self.logger.info("Baby Monitor System initialized successfully")
 
         except Exception as e:
             self.logger.error(f"Error during initialization: {str(e)}")
             self.cleanup()
-            raise
 
     def setup_ui(self):
         """Setup the main UI window."""
@@ -570,43 +547,53 @@ class BabyMonitorSystem:
                 self.audio_status.configure(text="🎤  Audio: Error")
 
     def handle_alert(self, message, level="info"):
-        """Handle alerts from components."""
-        if hasattr(self, "web_app"):
-            self.web_app.emit_alert(level, message)
+        """Handle alert and send to all connected clients."""
+        if self.web_app:
+            self.web_app.send_alert(message, level)
+            
+        # Send alert via MQTT if available
+        if self.mqtt_server and self.mqtt_server.is_connected():
+            self.mqtt_server.publish_alert(message, level)
 
     def send_status_update(self, status_data):
-        """Send status update to web interface."""
-        if hasattr(self, "web_app"):
-            self.web_app.emit_status(status_data)
+        """Send status update to connected clients."""
+        if self.web_app:
+            self.web_app.send_status_update(status_data)
+        
+        # Send status update via MQTT if available
+        if self.mqtt_server and self.mqtt_server.is_connected():
+            self.mqtt_server.publish_system_status(status_data)
 
     def start(self):
-        """Start the monitoring system."""
+        """Start the Baby Monitor System."""
+        self.logger.info("Starting Baby Monitor System")
         self.is_running = True
 
-        # Start audio processing if enabled
-        if self.audio_enabled:
-            if hasattr(self, "audio_processor"):
-                self.audio_processor.start()
-            if hasattr(self, "emotion_recognizer"):
-                self.emotion_recognizer.start()
+        # Start MQTT server if available
+        if self.mqtt_server:
+            self.mqtt_server.start()
+            self.logger.info("MQTT server started")
 
-        # Start frame processing thread
-        self.process_thread = threading.Thread(target=self.process_frames)
-        self.process_thread.daemon = True
-        self.process_thread.start()
-
-        self.logger.info("Baby monitor system started")
-
-        # Only enter tkinter mainloop if local GUI is enabled
-        if not self.only_web:
-            self.root.mainloop()
-        else:
-            # For web-only mode, keep the main thread alive
+        # Start web interface if available
+        if self.web_app:
             try:
-                while self.is_running:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                self.stop()
+                self.web_app.start()
+                self.logger.info(f"Web interface started at http://localhost:{self.web_app.port}")
+            except Exception as e:
+                self.logger.error(f"Error starting web interface: {str(e)}")
+
+        # Start camera processing thread
+        self.processing_thread = threading.Thread(target=self.process_frames)
+        self.processing_thread.daemon = True
+        self.processing_thread.start()
+
+        # Start audio processing thread if enabled
+        if self.audio_enabled and self.audio_processor:
+            self.audio_processor.start()
+
+        # Start UI main loop if using the local UI
+        if not self.only_web and hasattr(self, "root"):
+            self.root.mainloop()
 
     def stop(self):
         """Stop the monitoring system."""
@@ -620,226 +607,171 @@ class BabyMonitorSystem:
             raise
 
     def process_frames(self):
-        """Process video frames in a separate thread."""
-        last_frame_time = 0
-        frame_interval = 1.0 / 60.0  # Target 60 FPS
+        """Process video frames from the camera."""
+        last_frame_time = time.time()
         frame_count = 0
-        fps_update_time = time.time()
+        crying_detected_time = None
+        crying_cooldown = 10  # Seconds
 
-        # Pre-allocate reusable frame buffer
-        processed_frame = None
-        resized_frame = None
-
-        while self.is_running:
-            try:
-                frame_start_time = time.time()
-
+        try:
+            while self.is_running:
                 if not self.camera_enabled:
-                    time.sleep(0.001)
-                    continue
-
-                current_time = time.time()
-
-                # Skip frame if we're processing too fast
-                time_since_last_frame = current_time - last_frame_time
-                if time_since_last_frame < frame_interval:
-                    sleep_time = frame_interval - time_since_last_frame
-                    if sleep_time > 0.001:  # Only sleep for meaningful intervals
-                        time.sleep(sleep_time)
+                    time.sleep(0.1)
                     continue
 
                 # Get frame from camera
-                ret, frame = self.camera.get_frame()
-                if not ret or frame is None:
-                    if not self.only_web and hasattr(self, "camera_status"):
-                        self.camera_status.configure(text="📷  Camera: No Signal")
-                    time.sleep(0.001)
+                frame = self.camera.read()
+                if frame is None:
+                    time.sleep(0.01)
                     continue
 
-                # Process frame with person detector if available
-                if (
-                    hasattr(self, "person_detector")
-                    and self.person_detector is not None
-                ):
+                frame_start_time = time.time()
+                frame_h, frame_w = frame.shape[:2]
+
+                # Create a copy for processing
+                processed_frame = frame.copy()
+
+                # Process frame with person detection
+                detections = []
+                if self.person_detector:
                     try:
-                        result = self.person_detector.process_frame(frame)
-                        processed_frame = result['frame']
-                        detections = result.get('detections', [])
-                        if not self.only_web and hasattr(self, "detection_status"):
-                            self.detection_status.configure(
-                                text=f"👀  Detection: {len(detections)} people"
-                            )
+                        detections = self.person_detector.detect(processed_frame)
                     except Exception as e:
-                        self.logger.error(f"Person detection error: {str(e)}")
-                        if not self.only_web and hasattr(self, "detection_status"):
-                            self.detection_status.configure(text="👀  Detection: Error")
-                        processed_frame = frame
-                        detections = []
-                else:
-                    processed_frame = frame
-                    detections = []
+                        self.logger.error(f"Error in person detection: {str(e)}")
 
-                # Process frame with motion detector if available
-                if (
-                    hasattr(self, "motion_detector")
-                    and self.motion_detector is not None
-                ):
+                # Process emotions from audio if available
+                emotions = {}
+                if self.audio_enabled and self.audio_processor:
                     try:
-                        motion_result = self.motion_detector.detect(processed_frame, detections)
-                        rapid_motion = motion_result.get('rapid_motion', False)
-                        fall_detected = motion_result.get('fall_detected', False)
-
-                        # Update web interface with detection results
-                        if self.web_app is not None:
-                            self.web_app.emit_detection({
-                                "people_count": len(detections),
-                                "rapid_motion": rapid_motion,
-                                "fall_detected": fall_detected,
-                                "detections": detections
-                            })
+                        # Get audio data and check for crying
+                        audio_data = self.audio_processor.get_latest_audio_block()
+                        if audio_data is not None:
+                            # Send to emotion recognizer
+                            recognition_result = self.emotion_recognizer.process_audio(audio_data)
+                            
+                            # Update emotions with audio result
+                            if recognition_result:
+                                emotions = recognition_result
+                                
+                                # Check if crying detected
+                                if 'crying' in emotions and emotions['crying'] > 0.7:
+                                    # Only trigger alert if cooldown has passed
+                                    current_time = time.time()
+                                    if crying_detected_time is None or (current_time - crying_detected_time) > crying_cooldown:
+                                        crying_detected_time = current_time
+                                        self.handle_alert(f"Crying detected (confidence: {emotions['crying']:.2f})", "warning")
+                                        # Send crying alert via MQTT if available
+                                        if self.mqtt_server and self.mqtt_server.is_connected():
+                                            self.mqtt_server.publish_crying_detection(emotions['crying'])
+                                
+                                # Update emotion UI
+                                self.update_emotion_ui(emotions)
                     except Exception as e:
-                        self.logger.error(f"Motion detection error: {str(e)}")
-                        processed_frame = frame
-                else:
-                    processed_frame = frame
+                        self.logger.error(f"Error processing audio: {str(e)}")
 
-                # Update performance metrics
-                frame_count += 1
-                frame_end_time = time.time()
-                frame_processing_time = frame_end_time - frame_start_time
-
-                with self.metrics_lock:
-                    self.frame_times.append(
-                        frame_processing_time * 1000
-                    )  # Convert to ms
-
-                    # Update FPS every second
-                    if current_time - fps_update_time >= 1.0:
-                        fps = frame_count / (current_time - fps_update_time)
-                        self.fps_history.append(fps)
-                        frame_count = 0
-                        fps_update_time = current_time
-
-                    # Update system metrics every second
-                    if (
-                        current_time - self.last_metrics_update
-                        >= self.metrics_update_interval
-                    ):
-                        self.cpu_history.append(psutil.cpu_percent())
-                        self.memory_history.append(psutil.Process().memory_percent())
-                        self.last_metrics_update = current_time
-
-                        # Emit metrics to web interface
-                        if self.web_app is not None:
-                            self.web_app.emit_metrics(
-                                {
-                                    "fps": (
-                                        self.fps_history[-1] if self.fps_history else 0
-                                    ),
-                                    "frame_time": (
-                                        sum(self.frame_times) / len(self.frame_times)
-                                        if self.frame_times
-                                        else 0
-                                    ),
-                                    "cpu_usage": (
-                                        self.cpu_history[-1] if self.cpu_history else 0
-                                    ),
-                                    "memory_usage": (
-                                        self.memory_history[-1]
-                                        if self.memory_history
-                                        else 0
-                                    ),
-                                }
-                            )
-
-                # Update web interface
-                if self.web_app is not None and self.camera_enabled:
+                # Update dev window if available
+                if self.dev_window:
                     try:
-                        self.web_app.emit_frame(processed_frame)
-                    except Exception as e:
-                        self.logger.error(
-                            f"Error sending frame to web interface: {str(e)}"
+                        self.dev_window.update_detection_visualization(
+                            processed_frame, detections
                         )
-
-                # Update local GUI if not in web-only mode
-                if not self.only_web:
-                    try:
-                        # Get current canvas dimensions
-                        canvas_width = self.video_canvas.winfo_width()
-                        canvas_height = self.video_canvas.winfo_height()
-
-                        if canvas_width > 1 and canvas_height > 1:
-                            # Calculate target dimensions
-                            frame_aspect = (
-                                processed_frame.shape[1] / processed_frame.shape[0]
-                            )
-                            canvas_aspect = canvas_width / canvas_height
-
-                            if frame_aspect > canvas_aspect:
-                                new_width = canvas_width
-                                new_height = int(canvas_width / frame_aspect)
-                            else:
-                                new_height = canvas_height
-                                new_width = int(canvas_height * frame_aspect)
-
-                            # Only resize if dimensions have changed
-                            if (
-                                resized_frame is None
-                                or resized_frame.shape[1] != new_width
-                                or resized_frame.shape[0] != new_height
-                            ):
-                                resized_frame = cv2.resize(
-                                    processed_frame,
-                                    (new_width, new_height),
-                                    interpolation=cv2.INTER_NEAREST,
-                                )
-                            else:
-                                # Reuse existing buffer
-                                cv2.resize(
-                                    processed_frame,
-                                    (new_width, new_height),
-                                    dst=resized_frame,
-                                    interpolation=cv2.INTER_NEAREST,
-                                )
-
-                            # Convert to RGB and create PhotoImage
-                            # Use numpy operations instead of cv2.cvtColor for better performance
-                            frame_rgb = np.empty(resized_frame.shape, dtype=np.uint8)
-                            frame_rgb[..., 0] = resized_frame[..., 2]
-                            frame_rgb[..., 1] = resized_frame[..., 1]
-                            frame_rgb[..., 2] = resized_frame[..., 0]
-
-                            frame_pil = Image.fromarray(frame_rgb)
-                            photo = ImageTk.PhotoImage(image=frame_pil)
-
-                            # Update canvas in main thread
-                            def update_canvas(photo):
-                                if not self.is_running:
-                                    return
-                                try:
-                                    self.video_canvas.delete("all")
-                                    self.video_canvas.create_image(
-                                        canvas_width // 2,
-                                        canvas_height // 2,
-                                        image=photo,
-                                        anchor=tk.CENTER,
-                                    )
-                                    self.video_canvas.image = photo
-                                except Exception as e:
-                                    self.logger.error(
-                                        f"Error updating canvas: {str(e)}"
-                                    )
-
-                            self.root.after(1, update_canvas, photo)
-
+                        if emotions:
+                            self.dev_window.update_emotion_visualization(emotions)
                     except Exception as e:
-                        self.logger.error(f"Error updating video display: {str(e)}")
+                        self.logger.error(f"Error updating dev window: {str(e)}")
 
+                # Calculate and store FPS
+                current_time = time.time()
+                elapsed = current_time - last_frame_time
+                fps = 1.0 / elapsed if elapsed > 0 else 0
                 last_frame_time = current_time
 
-            except Exception as e:
-                self.logger.error(f"Error in frame processing loop: {str(e)}")
-                time.sleep(0.001)
+                with self.metrics_lock:
+                    self.fps_history.append(fps)
+                    self.frame_times.append(1000 * (current_time - frame_start_time))  # Convert to ms
+
+                    # Update system metrics less frequently
+                    if current_time - self.last_metrics_update > self.metrics_update_interval:
+                        self.cpu_history.append(psutil.cpu_percent())
+                        self.memory_history.append(psutil.virtual_memory().percent)
+                        self.last_metrics_update = current_time
+
+                # Compute average FPS and other metrics
+                avg_fps = sum(self.fps_history) / len(self.fps_history) if self.fps_history else 0
+                avg_frame_time = sum(self.frame_times) / len(self.frame_times) if self.frame_times else 0
+                avg_cpu = sum(self.cpu_history) / len(self.cpu_history) if self.cpu_history else 0
+                avg_memory = sum(self.memory_history) / len(self.memory_history) if self.memory_history else 0
+
+                # Send status update to clients
+                status_data = {
+                    "fps": f"{avg_fps:.1f}",
+                    "frame_time": f"{avg_frame_time:.1f} ms",
+                    "cpu_usage": avg_cpu,
+                    "memory_usage": avg_memory,
+                    "camera_status": "connected" if self.camera_enabled else "disconnected",
+                    "person_detector_status": "running" if self.person_detector else "disabled",
+                    "emotion_detector_status": "running" if self.emotion_recognizer else "disabled",
+                    "uptime": self.get_uptime_string(),
+                }
+                self.send_status_update(status_data)
+
+                # Update UI if using local interface
+                if not self.only_web and hasattr(self, "root") and hasattr(self, "camera_canvas"):
+                    try:
+                        # Add detection boxes
+                        ui_frame = processed_frame.copy()
+                        for det in detections:
+                            bbox = det["bbox"]
+                            x1, y1, x2, y2 = map(int, bbox)
+                            confidence = det["confidence"]
+                            label = det["label"]
+                            cv2.rectangle(ui_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            cv2.putText(
+                                ui_frame,
+                                f"{label} {confidence:.2f}",
+                                (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5,
+                                (0, 255, 0),
+                                2,
+                            )
+
+                        # Convert to format for tkinter
+                        img_rgb = cv2.cvtColor(ui_frame, cv2.COLOR_BGR2RGB)
+                        img_pil = Image.fromarray(img_rgb)
+                        imgtk = ImageTk.PhotoImage(image=img_pil)
+
+                        # Update canvas with image
+                        with self.frame_lock:
+                            if hasattr(self, "camera_canvas"):
+                                self.camera_canvas.imgtk = imgtk
+                                self.camera_canvas.configure(image=imgtk)
+                    except Exception as e:
+                        self.logger.error(f"Error updating UI: {str(e)}")
+
+                # Convert frame to JPEG for web clients
+                if self.web_app:
+                    try:
+                        # Convert the frame to JPEG format with quality 70 (good balance between size and quality)
+                        _, jpeg_frame = cv2.imencode(".jpg", processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        jpeg_bytes = jpeg_frame.tobytes()
+                        
+                        # Send frame via web app
+                        self.web_app.send_frame(jpeg_bytes)
+                        
+                        # Send frame via MQTT if available
+                        if self.mqtt_server and self.mqtt_server.is_connected():
+                            self.mqtt_server.publish_video_frame(jpeg_bytes)
+                    except Exception as e:
+                        self.logger.error(f"Error sending frame: {str(e)}")
+
+                # Increment frame counter
+                frame_count += 1
+
+        except Exception as e:
+            self.logger.error(f"Error in frame processing loop: {str(e)}")
+        finally:
+            self.logger.info("Frame processing stopped")
 
     def _set_waveform_height(self, event):
         """Adjust waveform figure size on window resize."""
@@ -1014,48 +946,58 @@ class BabyMonitorSystem:
             self.emotion_btn.configure(text="Emotion Recognition")
 
     def update_emotion_ui(self, emotions):
-        """Update emotion recognition UI with new emotions."""
-        if self.emotion_ui is not None and self.emotion_ui.window.winfo_exists():
+        """Update emotion UI with detection results."""
+        if self.emotion_ui:
             self.emotion_ui.update_emotion(emotions)
+            
+        # Send emotion data via MQTT if available
+        if self.mqtt_server and self.mqtt_server.is_connected():
+            emotion_data = {"confidences": emotions, "model": {"name": "Baby Monitor Emotion", "emotions": list(emotions.keys())}}
+            self.mqtt_server.publish_emotion_state(emotion_data)
 
     def cleanup(self):
-        """Clean up initialized components in reverse order."""
+        """Clean up resources before exiting."""
+        self.logger.info("Cleaning up resources")
         self.is_running = False
 
-        for component in reversed(self.initialized_components):
+        if "camera" in self.initialized_components:
             try:
-                if component == "web_app":
-                    if hasattr(self, "web_app") and self.web_app is not None:
-                        self.web_app.stop()
-                elif component == "camera":
-                    if hasattr(self, "camera") and self.camera is not None:
-                        self.camera.cleanup()
-                elif component == "audio_processor":
-                    if (
-                        hasattr(self, "audio_processor")
-                        and self.audio_processor is not None
-                    ):
-                        self.audio_processor.stop()
-                elif component == "emotion_recognizer":
-                    if (
-                        hasattr(self, "emotion_recognizer")
-                        and self.emotion_recognizer is not None
-                    ):
-                        self.emotion_recognizer.stop()
-                elif component == "emotion_ui":
-                    if hasattr(self, "emotion_ui") and self.emotion_ui is not None:
-                        self.emotion_ui.close()
-                elif component == "dev_window":
-                    if hasattr(self, "dev_window") and self.dev_window is not None:
-                        self.dev_window.window.destroy()
-                elif component == "ui":
-                    if hasattr(self, "root") and self.root is not None:
-                        self.root.quit()
+                self.camera.release()
+                self.logger.info("Camera released")
             except Exception as e:
-                self.logger.error(f"Error cleaning up {component}: {str(e)}")
+                self.logger.error(f"Error releasing camera: {str(e)}")
 
-        self.initialized_components.clear()
-        self.logger.info("Cleanup completed")
+        if "audio_processor" in self.initialized_components and self.audio_processor:
+            try:
+                self.audio_processor.stop()
+                self.logger.info("Audio processor stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping audio processor: {str(e)}")
+
+        if "web_app" in self.initialized_components and self.web_app:
+            try:
+                self.web_app.stop()
+                self.logger.info("Web app stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping web app: {str(e)}")
+                
+        if "mqtt_server" in self.initialized_components and self.mqtt_server:
+            try:
+                self.mqtt_server.stop()
+                self.logger.info("MQTT server stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping MQTT server: {str(e)}")
+
+        # Wait for processing thread to stop
+        if hasattr(self, "processing_thread") and self.processing_thread:
+            try:
+                if self.processing_thread.is_alive():
+                    self.processing_thread.join(timeout=1.0)
+                    self.logger.info("Processing thread stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping processing thread: {str(e)}")
+
+        self.logger.info("Cleanup complete")
 
 
 class DevWindow:
@@ -1262,60 +1204,31 @@ class DevWindow:
 
 
 def main():
-    """Main entry point for the Baby Monitor System."""
+    """Main entry point for the application."""
+    # Parse command line arguments
     parser = argparse.ArgumentParser(description="Baby Monitor System")
-    parser.add_argument(
-        "--dev",
-        action="store_true",
-        help="Run in developer mode with local GUI and debug window",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=5000,
-        help="Port for the web interface (default: 5000)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="Host for the web interface (default: 0.0.0.0)",
-    )
+    parser.add_argument("--dev", action="store_true", help="Enable development mode")
+    parser.add_argument("--only-web", action="store_true", help="Run only the web interface")
+    parser.add_argument("--only-local", action="store_true", help="Run only the local interface")
+    parser.add_argument("--mqtt-host", type=str, help="MQTT broker host")
+    parser.add_argument("--mqtt-port", type=int, default=1883, help="MQTT broker port")
     args = parser.parse_args()
 
+    # Initialize and start the system
+    system = BabyMonitorSystem(
+        dev_mode=args.dev, 
+        only_local=args.only_local, 
+        only_web=args.only_web,
+        mqtt_host=args.mqtt_host,
+        mqtt_port=args.mqtt_port
+    )
+    
     try:
-        # Initialize the system with web-only mode by default
-        monitor = BabyMonitorSystem(
-            dev_mode=args.dev,
-            only_local=False,  # Always false as we want web interface
-            only_web=not args.dev,  # Web-only if not in dev mode
-        )
-
-        # Start the monitor system
-        monitor.start()
-
-        if args.dev:
-            # In dev mode, run with local GUI
-            monitor.root.mainloop()
-        else:
-            # In production, run web-only mode
-            print(f"\nBaby Monitor System started!")
-            print(f"Web interface available at: http://{args.host}:{args.port}")
-            print("\nPress Ctrl+C to stop the system...")
-
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\nShutting down...")
-                monitor.stop()
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        sys.exit(1)
+        system.start()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
     finally:
-        if "monitor" in locals():
-            monitor.cleanup()
+        system.cleanup()
 
 
 if __name__ == "__main__":

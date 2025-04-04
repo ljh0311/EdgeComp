@@ -78,17 +78,17 @@ if [ "$IS_ROOT" = true ]; then
     apt-get update
     apt-get install -y \
         python3-dev \
-        python3-pip \
-        python3-venv \
-        libportaudio2 \
-        portaudio19-dev \
-        libsndfile1 \
+    python3-pip \
+    python3-venv \
+    libportaudio2 \
+    portaudio19-dev \
+    libsndfile1 \
         libjpeg-dev \
         zlib1g-dev \
         libopenjp2-7 \
-        libavcodec-dev \
-        libavformat-dev \
-        libswscale-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
         libatlas-base-dev \
         ffmpeg \
         libwebp-dev  # Added for better image processing support
@@ -150,14 +150,14 @@ done
 # Set up virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv venv
+python3 -m venv venv
     
     echo "Activating virtual environment..."
-    source venv/bin/activate
-    
+source venv/bin/activate
+
     echo "Upgrading pip..."
-    pip install --upgrade pip
-    
+pip install --upgrade pip
+
     echo "Installing required packages..."
     
     # Install packages with Pi-specific versions

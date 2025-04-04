@@ -995,10 +995,22 @@ document.addEventListener('DOMContentLoaded', function() {
 // Socket connection handlers
 socket.on('connect', () => {
     addLogEntry('success', 'Connected to server');
+    // Request initial system status on connect
+    checkSystem();
 });
 
 socket.on('disconnect', () => {
     addLogEntry('error', 'Disconnected from server');
+    updateSystemStatus({
+        camera: { status: 'error', message: 'Server disconnected' },
+        audio: { status: 'error', message: 'Server disconnected' },
+        detection: { status: 'error', message: 'Server disconnected' },
+        emotion: { status: 'error', message: 'Server disconnected' }
+    });
+});
+
+socket.on('camera_status', (data) => {
+    updateCameraStatus(data);
 });
 
 socket.on('system_status', (data) => {
@@ -1006,8 +1018,20 @@ socket.on('system_status', (data) => {
 });
 
 socket.on('emotion_model_changed', (data) => {
-    addLogEntry('info', `Switched to model: ${data.name}`);
-    updateModelInfo(data);
+    if (data && data.name) {
+        addLogEntry('info', `Switched to model: ${data.name}`);
+        updateModelInfo(data);
+        // Update model select if it exists
+        const modelSelect = document.getElementById('modelSelect');
+        if (modelSelect) {
+            Array.from(modelSelect.options).forEach(option => {
+                if (option.textContent.includes(data.name)) {
+                    option.selected = true;
+                    currentModelId = option.value;
+                }
+            });
+        }
+    }
 });
 
 socket.on('microphone_changed', (data) => {
@@ -1263,33 +1287,29 @@ function fetchAvailableModels() {
 
 // Populate model select dropdown
 function populateModelSelect(data) {
-        const modelSelect = document.getElementById('modelSelect');
-        if (!modelSelect) return;
-        
-        // Clear existing options
-        modelSelect.innerHTML = '<option value="">Select a model...</option>';
-        
-        // Add options for each available model
-        if (data.models && Array.isArray(data.models)) {
-            data.models.forEach(model => {
-                const option = document.createElement('option');
-                option.value = model.id;
-                option.textContent = `${model.name} (${model.type})`;
-                if (!model.is_available) {
-                    option.disabled = true;
-                    option.textContent += ' - Not Available';
-                }
+    const modelSelect = document.getElementById('modelSelect');
+    if (!modelSelect) return;
+    
+    // Clear existing options
+    modelSelect.innerHTML = '<option value="">Select a model...</option>';
+    
+    // Add options for each available model
+    if (data.models && Array.isArray(data.models)) {
+        data.models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = `${model.name} (${model.type})`;
+            if (!model.is_available) {
+                option.disabled = true;
+                option.textContent += ' - Not Available';
+            }
             if (data.current_model && data.current_model.id === model.id) {
                 option.selected = true;
                 currentModelId = model.id;
-            }
-                modelSelect.appendChild(option);
-            });
-            
-        // Show info for current model
-            if (data.current_model) {
                 updateModelInfo(data.current_model);
             }
+            modelSelect.appendChild(option);
+        });
     }
 }
 
@@ -1554,13 +1574,16 @@ function applyEmotionModel() {
         return;
     }
     
-    // Also check for microphone
-    const microphoneSelect = document.getElementById('microphoneSelect');
-    const selectedMicrophone = microphoneSelect?.value;
+    // Disable the select and button during the change
+    modelSelect.disabled = true;
+    const applyButton = document.querySelector('button[onclick="applyEmotionModel()"]');
+    if (applyButton) {
+        applyButton.disabled = true;
+        applyButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Applying...';
+    }
     
     addLogEntry('info', `Applying model: ${selectedModel}...`);
     
-    // First apply the model
     fetch(API.emotion.switchModel, {
         method: 'POST',
         headers: {
@@ -1583,41 +1606,18 @@ function applyEmotionModel() {
             updateModelInfo(data.model_info);
             currentModelId = selectedModel;
         }
-        
-        // Now apply the microphone if selected
-        if (selectedMicrophone) {
-            return fetch(API.audio.setMicrophone, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ microphone_id: selectedMicrophone })
-            });
-        }
-    })
-    .then(response => {
-        if (!response || !selectedMicrophone) return null;
-        
-        if (!response.ok) {
-            return response.json().then(data => {
-                throw new Error(data.message || `Server error: ${response.status}`);
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (!data || !selectedMicrophone) return;
-        
-        addLogEntry('success', data.message || 'Microphone applied successfully');
-        
-        if (data.microphone_info) {
-            updateMicrophoneInfo(data.microphone_info);
-            currentMicrophoneId = selectedMicrophone;
-        }
     })
     .catch(error => {
-        console.error('Error applying settings:', error);
-        addLogEntry('error', `Error applying settings: ${error.message}`);
+        console.error('Error applying model:', error);
+        addLogEntry('error', `Error applying model: ${error.message}`);
+    })
+    .finally(() => {
+        // Re-enable controls
+        modelSelect.disabled = false;
+        if (applyButton) {
+            applyButton.disabled = false;
+            applyButton.innerHTML = '<i class="bi bi-check2-circle"></i> Apply Model';
+        }
     });
 }
 
@@ -2138,6 +2138,26 @@ function checkInstallation() {
             </ul>
         </div>
     `;
+}
+
+// Update camera status function
+function updateCameraStatus(data) {
+    const cameraSystemStatus = document.getElementById('cameraSystemStatus');
+    if (!cameraSystemStatus) return;
+
+    if (data.connected) {
+        cameraSystemStatus.className = 'badge bg-success';
+        cameraSystemStatus.textContent = 'CONNECTED';
+        cameraSystemStatus.title = 'Camera is working properly';
+    } else if (data.connecting) {
+        cameraSystemStatus.className = 'badge bg-warning text-dark';
+        cameraSystemStatus.textContent = 'CONNECTING';
+        cameraSystemStatus.title = 'Attempting to connect to camera';
+    } else {
+        cameraSystemStatus.className = 'badge bg-danger';
+        cameraSystemStatus.textContent = 'DISCONNECTED';
+        cameraSystemStatus.title = data.error || 'Camera is not connected';
+    }
 }
 </script>
 {% endblock %} 

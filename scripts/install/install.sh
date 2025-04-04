@@ -91,7 +91,7 @@ if [ ! -d "venv" ]; then
         echo "Error installing requirements."
         echo "Please check your internet connection and try again."
         read -p "Press Enter to exit..." 
-        exit 1
+    exit 1
     fi
 else
     echo "Activating existing virtual environment..."

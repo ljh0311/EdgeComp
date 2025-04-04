@@ -111,7 +111,7 @@ def train_models(models_to_train):
                                 results.append((model, "MOVED", "src/babymonitor/models/wav2vec2_emotion.pt"))
                 
                 except subprocess.CalledProcessError as e:
-                    results.append((model, "FAILED", f"Error code: {e.returncode}, {e.stderr}"))
+                            results.append((model, "FAILED", f"Error code: {e.returncode}, {e.stderr}"))
             else:
                 results.append((model, "SKIPPED", f"Training script not found: {script_path}"))
         else:

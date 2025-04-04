@@ -636,7 +636,7 @@ class SimpleBabyMonitorWeb:
         try:
             # Camera frame processing loop
             self.logger.info("Starting frame processing")
-            
+                
             frame_counter = 0
             last_fps_time = time.time()
             
@@ -652,8 +652,8 @@ class SimpleBabyMonitorWeb:
                         frame = self.camera.get_frame()
                         if frame is None or frame.size == 0:
                             self.logger.warning("Received empty frame, waiting for next frame")
-                            eventlet.sleep(0.1)
-                            continue
+                        eventlet.sleep(0.1)
+                        continue
                     else:
                         # Generate a placeholder frame if no camera available
                         frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -688,7 +688,7 @@ class SimpleBabyMonitorWeb:
                                         # Format is [x1, y1, x2, y2]
                                         bbox = detection['bbox']
                                         conf = detection.get('confidence', 0.0)
-                                        
+                                            
                                         # Get state for this person (if available)
                                         person_state = 'unknown'
                                         if idx < len(person_states):
@@ -705,7 +705,7 @@ class SimpleBabyMonitorWeb:
                                 'standing': (255, 0, 0),  # Blue
                                 'unknown': (128, 128, 128)  # Gray
                             }
-                                
+                            
                             # Draw bounding boxes on display frame
                             if bounding_boxes:
                                 for (bbox, conf, person_num, state) in bounding_boxes:
@@ -817,7 +817,7 @@ class SimpleBabyMonitorWeb:
                 # Process frame with person detector
                 detection_results = self.person_detector.process_frame(frame)
                 
-                # Update metrics
+                    # Update metrics
                 detection_time = time.time() - detection_start
                 metrics_update['detection_time'] = detection_time
                 
@@ -852,17 +852,17 @@ class SimpleBabyMonitorWeb:
                                     
                                 # Store person number with the bounding box
                                 bounding_boxes.append((box, conf, idx + 1, person_state))
-            
-            # Update metrics
-            metrics_update['person_detected'] = person_detected
-            metrics_update['person_confidence'] = person_confidence
-            self.logger.debug(f"Person detected: {person_detected}, confidence: {person_confidence:.2f}")
-            
-            # Log bounding boxes for debugging
-            if bounding_boxes:
-                self.logger.debug(f"Found {len(bounding_boxes)} bounding boxes")
-            elif person_detected:
-                self.logger.debug("Person detected but no bounding boxes returned")
+                
+                # Update metrics
+                metrics_update['person_detected'] = person_detected
+                metrics_update['person_confidence'] = person_confidence
+                self.logger.debug(f"Person detected: {person_detected}, confidence: {person_confidence:.2f}")
+                
+                # Log bounding boxes for debugging
+                if bounding_boxes:
+                    self.logger.debug(f"Found {len(bounding_boxes)} bounding boxes")
+                elif person_detected:
+                    self.logger.debug("Person detected but no bounding boxes returned")
         except Exception as e:
             self.logger.error(f"Error in person detection: {str(e)}")
             

@@ -148,3 +148,17 @@ class Camera:
         if self.is_opened():
             return self.cap.get(cv2.CAP_PROP_FPS)
         return self.fps 
+        
+    def get_frame(self):
+        """
+        Get a frame from the camera.
+        This is an alias for read() that returns just the frame.
+        Used by the web server and other components.
+        
+        Returns:
+            numpy.ndarray: The frame if successful, None otherwise
+        """
+        ret, frame = self.read()
+        if ret:
+            return frame
+        return None 
